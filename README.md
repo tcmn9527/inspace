@@ -42,3 +42,11 @@ src-tauri/           Rust 后端
   src/notes.rs       便签/待办/笔记
 scripts/             构建辅助脚本
 ```
+
+## 安装包
+
+Releases 里提供两个 Windows x64 安装包：普通版需要系统里能装 WebView2（Win10/11 一般自带），完整版内置 ffmpeg 组件，拖入视频后无需额外配置。首次打开如果提示缺少 WebView2，装一下微软的运行时即可。
+
+## 许可证
+
+[MIT](LICENSE)

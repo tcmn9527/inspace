@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>工作台</title>
+    <!-- Markdown 渲染器（marked，MIT，内嵌不联网） -->
+    <script src="/vendor/marked.umd.js"></script>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+
+  <body>
+    <header class="titlebar" data-tauri-drag-region>
+      <span class="titlebar-text" data-tauri-drag-region>工作台</span>
+
+      <div class="titlebar-right">
+        <button
+          id="theme-btn"
+          class="caption caption-theme"
+          type="button"
+          title="主题"
+          aria-label="主题"
+          aria-haspopup="true"
+          aria-expanded="false"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <path
+              d="M8 1.7a6.3 6.3 0 1 0 0 12.6h.9a1.35 1.35 0 0 0 0-2.7h-.6a.85.85 0 0 1 0-1.7h3a2.6 2.6 0 0 0 2.6-2.6c0-3-2.8-5.6-6.9-5.6Z"
+              stroke="currentColor"
+              stroke-width="1.1"
+              fill="none"
+              stroke-linejoin="round"
+            />
+            <circle cx="5.5" cy="6.1" r="1" fill="currentColor" />
+            <circle cx="8.1" cy="4.5" r="1" fill="currentColor" />
+            <circle cx="10.6" cy="6.3" r="1" fill="currentColor" />
+          </svg>
+        </button>
+
+        <button
+          id="win-min"
+          class="caption"
+          type="button"
+          title="最小化"
+          aria-label="最小化"
+        >
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M2 6h8" stroke="currentColor" stroke-width="1" fill="none" />
+          </svg>
+        </button>
+
+        <button
+          id="win-max"
+          class="caption"
+          type="button"
+          title="最大化/还原"
+          aria-label="最大化"
+        >
+          <svg
+            class="icon-maximize"
+            viewBox="0 0 12 12"
+            width="12"
+            height="12"
+            aria-hidden="true"
+          >
+            <rect
+              x="2.5"
+              y="2.5"
+              width="7"
+              height="7"
+              rx="1"
+              stroke="currentColor"
+              stroke-width="1"
+              fill="none"
+            />
+          </svg>
+          <svg
+            class="icon-restore"
+            viewBox="0 0 12 12"
+            width="12"
+            height="12"
+            aria-hidden="true"
+          >
+            <path
+              d="M3.5 4.5h6v5h-6zM4.5 4.5v-1h5v5"
+              stroke="currentColor"
+              stroke-width="1"
+              fill="none"
+            />
+          </svg>
+        </button>
+
+        <button
+          id="win-close"
+          class="caption caption-close"
+          type="button"
+          title="关闭"
+          aria-label="关闭"
+        >
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path
+              d="M2.5 2.5l7 7M9.5 2.5l-7 7"
+              stroke="currentColor"
+              stroke-width="1"
+              fill="none"
+            />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="shell">
+      <nav class="rail">
+        <button
+          class="rail-item is-active"
+          type="button"
+          data-route="home"
+          title="首页"
+          aria-label="首页"
+          aria-current="page"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path
+              d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+            <path
+              d="M9 22v-6a3 3 0 0 1 6 0v6"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+
+        <button
+          class="rail-item"
+          type="button"
+          data-route="notes"
+          title="笔记"
+          aria-label="笔记"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path
+              d="M6.5 3h7.5l4 4v13.5a1 1 0 0 1-1 1H6.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"
+              stroke="currentColor"
+              stroke-width="1.6"
+              fill="none"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M14 3v4.5h4"
+              stroke="currentColor"
+              stroke-width="1.6"
+              fill="none"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M8.2 12.2h7M8.2 15.6h4.6"
+              stroke="currentColor"
+              stroke-width="1.6"
+              fill="none"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+
+        <button
+          class="rail-item"
+          type="button"
+          data-route="canvas"
+          title="画布"
+          aria-label="画布"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <rect
+              x="3"
+              y="4"
+              width="18"
+              height="16"
+              rx="2.2"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+            />
+            <path
+              d="M3 15.4 8.2 10l4 4 3.2-3.2L21 16.4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+            <circle cx="8.6" cy="8.4" r="1.5" fill="currentColor" />
+          </svg>
+        </button>
+
+        <div class="rail-spacer"></div>
+
+        <button
+          class="rail-item"
+          type="button"
+          data-route="settings"
+          title="设置"
+          aria-label="设置"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <circle
+              cx="12"
+              cy="12"
+              r="3"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+            />
+            <path
+              d="M10.18 5.86L10.48 2.93L13.52 2.93L13.82 5.86L15.05 6.38L17.34 4.51L19.49 6.66L17.62 8.95L18.14 10.18L21.07 10.48L21.07 13.52L18.14 13.82L17.62 15.05L19.49 17.34L17.34 19.49L15.05 17.62L13.82 18.14L13.52 21.07L10.48 21.07L10.18 18.14L8.95 17.62L6.66 19.49L4.51 17.34L6.38 15.05L5.86 13.82L2.93 13.52L2.93 10.48L5.86 10.18L6.38 8.95L4.51 6.66L6.66 4.51L8.95 6.38z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+      </nav>
+
+      <section class="sticky-main" id="home-view">
+        <header class="todo-head">
+          <span class="section-label">便签</span>
+          <span class="todo-search-wrap">
+            <svg class="todo-search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M16.5 16.5 21 21" />
+            </svg>
+            <input
+              id="sticky-search"
+              class="todo-search"
+              type="search"
+              placeholder="搜索便签"
+              aria-label="搜索便签"
+            />
+            <button
+              id="sticky-search-clear"
+              class="todo-search-clear"
+              type="button"
+              title="清空搜索"
+              aria-label="清空搜索"
+              hidden
+            >
+              ✕
+            </button>
+          </span>
+          <button
+            id="sticky-add"
+            class="todo-add"
+            type="button"
+            title="新建便签"
+            aria-label="新建便签"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path
+                d="M12 5v14M5 12h14"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                fill="none"
+              />
+            </svg>
+          </button>
+        </header>
+
+        <p class="data-warning" id="sticky-broken" hidden></p>
+
+        <div class="sticky-wall" id="sticky-wall"></div>
+        <p class="empty" id="sticky-empty" hidden></p>
+        <p class="empty" id="sticky-error" style="inset: auto var(--pad-x) 14px" hidden></p>
+      </section>
+
+      <aside class="todo-col" id="todo-view">
+        <div
+          class="splitter splitter-v"
+          id="todo-split-v"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖动调整待办栏宽度"
+          title="拖动调整待办栏宽度"
+        ></div>
+        <header class="todo-head">
+          <span class="section-label">待办</span>
+          <span class="todo-search-wrap">
+            <svg class="todo-search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M16.5 16.5 21 21" />
+            </svg>
+            <input
+              id="todo-search"
+              class="todo-search"
+              type="search"
+              placeholder="搜索"
+              aria-label="搜索待办"
+            />
+            <button
+              id="todo-search-clear"
+              class="todo-search-clear"
+              type="button"
+              title="清空搜索"
+              aria-label="清空搜索"
+              hidden
+            >
+              ✕
+            </button>
+          </span>
+          <button
+            id="todo-add"
+            class="todo-add"
+            type="button"
+            title="新建待办"
+            aria-label="新建待办"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path
+                d="M12 5v14M5 12h14"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                fill="none"
+              />
+            </svg>
+          </button>
+        </header>
+
+        <p class="data-warning" id="todo-broken" hidden></p>
+
+        <ul class="todo-list" id="todo-list"></ul>
+        <p class="empty" id="todo-empty" hidden>暂无待办</p>
+      </aside>
+
+      <section class="notes-page" id="notes-view" hidden>
+        <aside class="notes-tree-pane" id="notes-tree">
+          <header class="notes-tree-head">
+            <span class="notes-root-name" id="notes-root-name" title="">笔记</span>
+            <button
+              class="notes-icon-btn"
+              id="notes-root-reveal"
+              type="button"
+              title="在资源管理器里打开笔记文件夹"
+              aria-label="在资源管理器里打开笔记文件夹"
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path
+                  d="M2 4.6c0-.6.45-1 1-1h3.05L7.5 5.3h5.5c.55 0 1 .45 1 1v6.1c0 .55-.45 1-1 1H3c-.55 0-1-.45-1-1z"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </header>
+          <div class="notes-tree-scroll" id="notes-tree-scroll"></div>
+          <p class="notes-tree-empty" id="notes-tree-empty" hidden>还没有笔记，右键空白处新建</p>
+          <div
+            class="splitter splitter-v"
+            id="notes-split-v"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="拖动调整文件树宽度"
+            title="拖动调整文件树宽度"
+          ></div>
+        </aside>
+
+        <div class="notes-main">
+          <header class="notes-main-head">
+            <button
+              class="notes-icon-btn notes-tree-toggle"
+              id="notes-tree-toggle"
+              type="button"
+              title="隐藏文件树"
+              aria-label="隐藏文件树"
+              aria-pressed="true"
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <rect
+                  x="2"
+                  y="3"
+                  width="12"
+                  height="10"
+                  rx="1.8"
+                  stroke="currentColor"
+                  stroke-width="1.1"
+                  fill="none"
+                />
+                <path d="M6.6 3v10" stroke="currentColor" stroke-width="1.1" />
+              </svg>
+            </button>
+            <span class="notes-crumb" id="notes-crumb"></span>
+            <div class="notes-main-actions">
+              <button
+                class="notes-btn notes-btn-icon"
+                id="notes-edit"
+                type="button"
+                title="编辑"
+                aria-label="编辑"
+              >
+                <svg class="icon-edit" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                  <path
+                    d="M10.8 2.6a1.7 1.7 0 0 1 2.4 2.4l-7.4 7.4-3 .6.6-3 7.4-7.4Z"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                    fill="none"
+                    stroke-linejoin="round"
+                  />
+                  <path d="M9.6 3.8l2.6 2.6" stroke="currentColor" stroke-width="1.2" fill="none" />
+                </svg>
+                <svg class="icon-view" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                  <path
+                    d="M1.6 8S4 3.8 8 3.8 14.4 8 14.4 8 12 12.2 8 12.2 1.6 8 1.6 8Z"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                    fill="none"
+                    stroke-linejoin="round"
+                  />
+                  <circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.2" fill="none" />
+                </svg>
+              </button>
+            </div>
+          </header>
+          <div class="notes-body" id="notes-body" hidden></div>
+          <p class="notes-empty" id="notes-empty">从左边选一篇笔记，或者在左边空白处右键新建</p>
+          <div class="notes-editor" id="notes-editor" hidden>
+            <div class="notes-toolbar" id="notes-toolbar" role="toolbar" aria-label="Markdown 工具栏"></div>
+            <textarea
+              class="notes-textarea"
+              id="notes-textarea"
+              spellcheck="false"
+              aria-label="Markdown 源码"
+            ></textarea>
+            <div class="notes-status"><span id="notes-status-text"></span></div>
+          </div>
+          <p class="notes-error" id="notes-error" hidden></p>
+        </div>
+
+        <div class="notes-guide" id="notes-guide" hidden>
+          <div class="notes-guide-card">
+            <h2>笔记文件夹打不开了</h2>
+            <p>
+              笔记是工作台数据文件夹里的 <code>notes/</code>：每个 <code>.md</code>
+              文件就是一篇笔记，文件夹就是分类。换数据文件夹请到设置页。
+            </p>
+            <p class="notes-guide-path" id="notes-guide-path"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="canvas-page" id="canvas-view" hidden>
+        <div class="canvas-topbar">
+          <button
+            class="canvas-name"
+            id="canvas-name"
+            type="button"
+            title="切换画布"
+            aria-haspopup="true"
+          >
+            <span id="canvas-name-text">画布</span>
+            <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+              <path
+                d="M2.5 4.5 6 8l3.5-3.5"
+                stroke="currentColor"
+                stroke-width="1.2"
+                fill="none"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+
+          <div class="canvas-tools" id="canvas-tools" role="toolbar" aria-label="画布工具">
+            <button class="canvas-tool is-active" type="button" data-tool="select" title="选择 / 移动">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <path
+                  d="M4.6 2.8 15 10.6l-4.7.8-2.3 4.4z"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button class="canvas-tool" type="button" data-tool="rect" title="矩形">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <rect
+                  x="3.5"
+                  y="4.5"
+                  width="13"
+                  height="11"
+                  rx="1"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                />
+              </svg>
+            </button>
+            <button class="canvas-tool" type="button" data-tool="ellipse" title="圆形">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <circle cx="10" cy="10" r="6.4" stroke="currentColor" stroke-width="1.3" fill="none" />
+              </svg>
+            </button>
+            <button class="canvas-tool" type="button" data-tool="line" title="直线">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <path d="M4 16 16 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </svg>
+            </button>
+            <button class="canvas-tool" type="button" data-tool="arrow" title="箭头">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <path
+                  d="M4 16 16 4M9.5 4H16v6.5"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button class="canvas-tool" type="button" data-tool="text" title="文字">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <path
+                  d="M3.5 4.5h13M10 4.5v11M7.2 15.5h5.6"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+            <button class="canvas-tool" id="canvas-insert-image" type="button" title="插入本地图片">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <rect
+                  x="3.5"
+                  y="4.5"
+                  width="13"
+                  height="11"
+                  rx="1.2"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                />
+                <circle cx="7.4" cy="8.4" r="1.2" fill="currentColor" />
+                <path
+                  d="M4.6 14 8.2 10.4l2.4 2.3 1.9-1.7 2.6 2.5"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button class="canvas-tool" id="canvas-insert-audio" type="button" title="插入本地音乐">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <path
+                  d="M7.6 14.2V5.7l7-1.5v8.3"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <circle cx="5.9" cy="14.6" r="2.1" fill="currentColor" />
+                <circle cx="12.9" cy="13.1" r="2.1" fill="currentColor" />
+              </svg>
+            </button>
+            <button class="canvas-tool" id="canvas-insert-video" type="button" title="插入本地视频">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <rect
+                  x="3"
+                  y="5.6"
+                  width="10"
+                  height="8.8"
+                  rx="1.6"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                />
+                <path
+                  d="M13 9.1 16.7 6.7v6.6L13 10.9z"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button class="canvas-tool" id="canvas-insert-file" type="button" title="插入本地文件（任何格式）">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <path
+                  d="M5.2 3.2h6l3.6 3.6v9.4h-9.6z"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M11.2 3.2v3.6h3.6"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button class="canvas-tool" id="canvas-insert-sticky" type="button" title="插入便签">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <path
+                  d="M4.5 4h11v7.2L11.2 16H4.5z"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M11.2 16v-4.8H15.5"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                  stroke-linejoin="round"
+                />
+                <path d="M7 7.4h6M7 10h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" />
+              </svg>
+            </button>
+            <button class="canvas-tool" id="canvas-insert-note" type="button" title="插入笔记">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <rect
+                  x="4.2"
+                  y="3.4"
+                  width="11.6"
+                  height="13.2"
+                  rx="1.4"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  fill="none"
+                />
+                <path
+                  d="M7 7h6M7 9.6h6M7 12.2h3.8"
+                  stroke="currentColor"
+                  stroke-width="1.1"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <div class="canvas-zoom">
+            <button class="canvas-zoom-btn" id="canvas-zoom-out" type="button" title="缩小" aria-label="缩小">
+              −
+            </button>
+            <input
+              class="canvas-zoom-value"
+              id="canvas-zoom-value"
+              type="text"
+              value="100%"
+              inputmode="decimal"
+              spellcheck="false"
+              autocomplete="off"
+              title="输入缩放比例后回车生效（25%–400%）· Ctrl+0 重置为 100%"
+              aria-label="缩放比例"
+            />
+            <button class="canvas-zoom-btn" id="canvas-zoom-in" type="button" title="放大" aria-label="放大">
+              +
+            </button>
+          </div>
+        </div>
+
+        <div class="canvas-stage" id="canvas-stage">
+          <svg class="canvas-edge-layer" id="canvas-edge-layer" aria-hidden="true">
+            <g id="canvas-edge-transform"></g>
+          </svg>
+          <div class="canvas-world" id="canvas-world"></div>
+          <div class="canvas-port-layer" id="canvas-port-layer"></div>
+          <div class="canvas-select-layer" id="canvas-select-layer"></div>
+          <div class="canvas-endpoint-layer" id="canvas-endpoint-layer"></div>
+          <p class="canvas-hint" id="canvas-hint">
+            拖动空白处平移 · 滚轮平移 · Ctrl+滚轮缩放 · 直接粘贴或拖入图片、音乐、视频，粘贴文字 · 工具栏可插入便签、笔记
+          </p>
+
+          <div class="canvas-copy" id="canvas-video-copy" hidden>
+            <p class="canvas-copy-name" id="canvas-copy-name"></p>
+            <div class="canvas-copy-bar"><i class="canvas-copy-fill" id="canvas-copy-fill"></i></div>
+            <div class="canvas-copy-foot">
+              <span class="canvas-copy-text" id="canvas-copy-text"></span>
+              <button class="canvas-copy-cancel" id="canvas-copy-cancel" type="button">停止</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="canvas-empty" id="canvas-empty" hidden>
+          <div class="canvas-empty-card">
+            <h2>无限画布</h2>
+            <p>
+              每块画布都是本地的一个文件夹：图片放在 images 里，内容放在 json 里。
+              重启工作台后还在，也能直接用资源管理器打开。
+            </p>
+            <button class="notes-btn notes-btn-primary" id="canvas-create" type="button">
+              新建画布
+            </button>
+          </div>
+        </div>
+
+        <p class="canvas-error" id="canvas-error" hidden></p>
+      </section>
+
+      <section class="settings-page" id="settings-view" hidden>
+        <header class="settings-head">
+          <span class="section-label">设置</span>
+        </header>
+        <div class="settings-card">
+          <p class="settings-title">工作台数据文件夹</p>
+          <p class="settings-hint">
+            便签、待办、笔记、画布都存在这一个文件夹里：stickies/ 和 todos/ 是一条一个
+            JSON，notes/ 是那棵 Markdown 树，canvases/ 是一块画布一个文件夹。
+            换文件夹时会先问旧的要拷贝一份留着、剪贴走，还是干脆新建一份不带过去。
+          </p>
+          <code class="settings-path" id="settings-data-path"></code>
+          <div class="settings-actions">
+            <button class="notes-btn" id="settings-data-pick" type="button">更换文件夹…</button>
+            <button class="notes-btn" id="settings-data-reveal" type="button">打开所在目录</button>
+            <button class="notes-btn" id="settings-data-reset" type="button">恢复默认位置</button>
+          </div>
+          <p class="settings-status" id="settings-data-status" hidden></p>
+          <p class="settings-error" id="settings-data-error" hidden></p>
+        </div>
+        <div class="settings-card" id="settings-ffmpeg-card" hidden>
+          <p class="settings-title">视频组件</p>
+          <p class="settings-hint">
+            画布里的视频碰到本机放不出声的音轨（AC3、DTS 这类）时，要靠 ffmpeg
+            把那条音轨转成 AAC。没装它画面照样能播，只是那条视频不会响。
+            要修就把 ffmpeg.exe 放进下面这个文件夹，再点重新检测。
+          </p>
+          <code class="settings-path" id="settings-ffmpeg-dir"></code>
+          <div class="settings-actions">
+            <button class="notes-btn" id="settings-ffmpeg-reveal" type="button">打开组件文件夹</button>
+            <button class="notes-btn" id="settings-ffmpeg-recheck" type="button">重新检测</button>
+          </div>
+          <p class="settings-error" id="settings-ffmpeg-error" hidden></p>
+        </div>
+      </section>
+    </div>
+
+    <div id="ctx-menu" class="ctx-menu" hidden></div>
+  </body>
+</html>

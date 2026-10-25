@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+target/
+
+# UI 测试期间截的图，不进版本库
+.shots/
+
+# 完整版安装包的 ffmpeg，构建前现下，不入库
+src-tauri/resources/components/ffmpeg/*
+!src-tauri/resources/components/ffmpeg/README.md
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

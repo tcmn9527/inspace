@@ -1,0 +1,54 @@
+[package]
+name = "rust-window-demo"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "rust_window_demo_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# protocol-asset：把磁盘上的视频变成 <video> 能按 Range 读的地址，
+# 20GB 的片子也只占几十 MB 解码缓冲，不用把整份读进内存。
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+# 双击附件卡片时用 ShellExecute 交系统默认程序打开；本来就在依赖树里（opener 插件带的），
+# 不开 shellexecute-on-windows 的话它会去拉一个 powershell.exe 子进程。
+open = { version = "5", features = ["shellexecute-on-windows"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 图片粘贴：前端传 base64，这里解码落盘
+base64 = "0.22"
+# epub 是 zip：只用到 raw deflate，flate2 本来就在依赖树里
+flate2 = "1"
+# epub/mobi 的 OPF、NCX 是 XML，用流式读，坏一两个标签也不至于整本打不开
+quick-xml = "0.42"
+# bundled：自带 SQLite 源码，不依赖系统 SQLite。
+# 关掉默认特性（cache/hashlink/wasm 等）以减少本机内存紧张时的编译负担。
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+
+
+# 本机当前可提交内存仅 ~2 GB（strata 进程常驻 40+ GB），
+# dev 默认的 debuginfo=2 会让 windows / tauri 这类 crate 的 rustc 直接 OOM，
+# 因此关闭调试信息以换取可编译性；内存恢复后可删除此项。
+[profile.dev]
+debug = 0
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

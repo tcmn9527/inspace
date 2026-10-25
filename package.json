@@ -1,0 +1,16 @@
+{
+  "name": "rust-window-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "ffmpeg:prepare": "node scripts/prepare-ffmpeg.mjs",
+    "build:full": "node scripts/prepare-ffmpeg.mjs && tauri build --config src-tauri/tauri.full.conf.json"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

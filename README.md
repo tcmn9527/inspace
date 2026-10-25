@@ -1,0 +1,44 @@
+# RustWindowDemo
+
+一个基于 Tauri v2 的桌面工作台：便签、待办、Markdown 笔记和一块可无限扩展的画布，数据全部存在本机。
+
+前端是原生 ES 模块 + Vite，没有引入框架；后端在 `src-tauri/`，负责文件存储、媒体导入、电子书解析等。
+
+## 功能
+
+- **便签墙**：随手记，可调颜色、置顶。
+- **待办**：按天分组，支持置顶和归档。
+- **笔记**：Markdown 编辑器，图片可拖入插入。
+- **画布**
+  - 多份画布文件，相机缩放/平移位置会记住。
+  - 图元：图片、音频、视频、任意文件、笔记、便签、电子书（epub/mobi）、文本框、方框、连线。
+  - 拖入文件时选择「拷贝进画布」或「引用原文件」；引用的 `.md` 在画布内编辑会写回原文件。
+  - 内容区可收起成一条标题栏，收起状态会保存。
+  - 删除媒体副本走系统回收站。
+- **本地数据**：便签、待办、笔记、画布共用一个数据根目录，默认在应用数据目录下的 `data/`，可在设置页整体更换（支持搬运并显示进度）。
+
+## 开发
+
+需要 Node.js 18+、Rust stable，以及 Tauri 在 Windows 上的构建依赖（WebView2、MSVC 工具链）。
+
+```bash
+npm install
+npm run tauri dev      # 开发模式，Vite 端口 1430
+npm run build          # 打包（不含 ffmpeg 组件）
+npm run ffmpeg:prepare # 下载 ffmpeg 组件到 src-tauri/resources/components/ffmpeg
+npm run build:full     # 内置 ffmpeg 的完整安装包
+```
+
+## 目录
+
+```
+src/                 前端
+  views/             各页面与画布图元/交互
+  styles.css         全部样式
+src-tauri/           Rust 后端
+  src/canvas.rs      画布读写、媒体与文件命令
+  src/ebook.rs       epub/mobi 解析
+  src/store.rs       数据根目录与迁移
+  src/notes.rs       便签/待办/笔记
+scripts/             构建辅助脚本
+```

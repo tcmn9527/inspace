@@ -638,7 +638,6 @@ export function createMissingCard(item, canvasDir) {
     const shown = document.createElement("div");
     shown.className = "canvas-missing-path";
     shown.textContent = path;
-    shown.title = path;
     card.append(shown);
   }
   return card;
@@ -670,7 +669,6 @@ export function createItemElement(item, mediaSrc, options = {}) {
       img.draggable = false;
       img.alt = "";
       el.append(img);
-      if (item.linked) img.title = item.src;
     } else {
       el.append(createMissingCard(item, options.canvasDir));
     }
@@ -701,8 +699,6 @@ export function createItemElement(item, mediaSrc, options = {}) {
     body.innerHTML = renderMarkdown(item.source);
     card.append(body);
     el.append(card);
-    /* 从笔记库来的显示原文件路径，拖进来的 .md 只有文件名 */
-    el.title = item.path || item.name || "";
   } else if (item.type === "file") {
     el.append(createFileCard(item, options));
   } else if (item.type === "ebook") {
@@ -758,12 +754,9 @@ function createFileCard(item, options) {
   const name = document.createElement("div");
   name.className = "canvas-file-name";
   name.textContent = item.name || "未命名文件";
-  name.title = item.name || "";
   const sub = document.createElement("div");
   sub.className = "canvas-file-sub";
   sub.textContent = `${formatSize(item.size)}${item.ext ? ` · ${item.ext.toUpperCase()}` : ""}`;
-  /* 指向画布外的文件时，悬停直接把那份文件的完整路径给出来 */
-  if (item.linked) name.title = item.src;
   main.append(name, sub);
 
   const head = document.createElement("div");
@@ -835,7 +828,6 @@ function createEbookCard(item, options) {
 
   const head = document.createElement("div");
   head.className = "canvas-ebook-head";
-  head.title = item.linked ? item.src : item.name;
   const meta = document.createElement("div");
   meta.className = "canvas-ebook-meta";
   const title = document.createElement("div");
@@ -1183,8 +1175,6 @@ function createAudioPlayer(item, mediaSrc, options = {}) {
   const name = document.createElement("div");
   name.className = "canvas-audio-name";
   name.textContent = item.name || "未命名音频";
-  /* 指向画布外的文件时，悬停直接把那份文件的完整路径给出来 */
-  name.title = item.linked ? item.src : item.name || "未命名音频";
 
   const row = document.createElement("div");
   row.className = "canvas-audio-row";
@@ -1370,7 +1360,6 @@ const VIDEO_MAX_IN_SVG = `
 function createVideoPlayer(item, mediaSrc, options = {}) {
   const player = document.createElement("div");
   player.className = "canvas-video-player";
-  player.title = item.name || "未命名视频";
 
   const stage = document.createElement("div");
   stage.className = "canvas-video-stage";
@@ -1390,8 +1379,6 @@ function createVideoPlayer(item, mediaSrc, options = {}) {
   curtain.innerHTML = VIDEO_CURTAIN_SVG;
 
   stage.append(video, curtain);
-  /* 指向画布外的片子时，悬停直接把那份文件的完整路径给出来 */
-  if (item.linked) stage.title = item.src;
 
   const row = document.createElement("div");
   row.className = "canvas-video-row";

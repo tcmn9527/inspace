@@ -2146,10 +2146,7 @@ function convertNoteToCopy(item) {
   item.sourceFormat = "utf8";
   item.sourceCrlf = false;
   const el = itemEls.get(item.id);
-  if (el) {
-    el.querySelector(".canvas-note-badge")?.remove();
-    el.title = item.name;
-  }
+  el?.querySelector(".canvas-note-badge")?.remove();
   scheduleItemsSave();
 }
 

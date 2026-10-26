@@ -692,6 +692,33 @@
             拖动空白处平移 · 滚轮平移 · Ctrl+滚轮缩放 · 直接粘贴或拖入图片、音乐、视频，粘贴文字 · 工具栏可插入便签、笔记
           </p>
 
+          <!-- 鸟瞰窗：右下角整张画布的缩小版，拖亮框或点框外就把主画布带到那儿 -->
+          <div class="canvas-minimap" id="canvas-minimap">
+            <canvas class="canvas-minimap-canvas" id="canvas-minimap-canvas"></canvas>
+            <button
+              class="canvas-minimap-min"
+              id="canvas-minimap-min"
+              type="button"
+              title="收起鸟瞰窗"
+              aria-label="收起鸟瞰窗"
+            >
+              −
+            </button>
+          </div>
+          <button
+            class="canvas-minimap-key"
+            id="canvas-minimap-key"
+            type="button"
+            title="显示鸟瞰窗"
+            aria-label="显示鸟瞰窗"
+            hidden
+          >
+            <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+              <rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.3" fill="none" />
+              <rect x="6" y="7" width="8" height="6" rx="1" fill="currentColor" opacity="0.55" />
+            </svg>
+          </button>
+
           <div class="canvas-copy" id="canvas-video-copy" hidden>
             <p class="canvas-copy-name" id="canvas-copy-name"></p>
             <div class="canvas-copy-bar"><i class="canvas-copy-fill" id="canvas-copy-fill"></i></div>

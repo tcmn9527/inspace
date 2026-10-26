@@ -66,6 +66,7 @@ import {
   VIDEO_MIN_HEIGHT,
   VIDEO_MIN_WIDTH,
 } from "./canvas-items.js";
+import { initMinimap, refreshMinimap } from "./minimap.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -299,6 +300,19 @@ export function initCanvas() {
   document.addEventListener("keydown", onKeyDown);
   setupFileDrop();
   setupVideoCopyEvents();
+  initMinimap({
+    getCamera: () => (current ? current.camera : null),
+    getStageSize: () => ({ w: ui.stage.clientWidth, h: ui.stage.clientHeight }),
+    getItems: () => (current ? current.items : []),
+    getSelectedId: () => selectedId,
+    setCamera: (x, y) => {
+      if (!current) return;
+      current.camera.x = x;
+      current.camera.y = y;
+      applyCamera();
+    },
+    commitCamera: scheduleCameraSave,
+  });
 
   setTool("select");
   updateChrome();
@@ -835,6 +849,7 @@ function renderAll() {
   if (!current) return;
   for (const item of current.items) addItemElement(item);
   updateSelection();
+  refreshMinimap();
 }
 
 function select(id) {
@@ -855,6 +870,7 @@ function updateSelection() {
   ui.selectLayer.textContent = "";
   ui.endpointLayer.textContent = "";
   updatePorts();
+  refreshMinimap();
   if (!selectedId) return;
   const item = findItem(selectedId);
   const el = itemEls.get(selectedId);
@@ -935,6 +951,8 @@ function onStagePointerDown(e) {
   /* 全屏时画面还挂在原来那个块上，事件会顺着 DOM 冒泡回画布：
      这时点的是影片，不是画布，别去挪那块的位置 */
   if (document.fullscreenElement) return;
+  /* 右下角鸟瞰窗自己管自己的按下（拖视窗/点跳/收起），别当成画布平移 */
+  if (e.target.closest?.(".canvas-minimap, .canvas-minimap-key")) return;
   const target = e.target.closest?.(".canvas-item, .canvas-connector");
 
   if (editingId) {
@@ -3301,6 +3319,8 @@ function scheduleItemsSave() {
   if (!current) return;
   clearTimeout(itemsTimer);
   itemsTimer = setTimeout(flushItems, 500);
+  /* 块的位置/尺寸/增减都会改鸟瞰窗里的方框，跟着重画一次 */
+  refreshMinimap();
 }
 
 async function flushItems() {

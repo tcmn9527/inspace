@@ -518,7 +518,8 @@ fn reader_wrap(title: &str, body: &str) -> String {
         "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\">\
 <title>{}</title>\
 <style>\
-html{{background:#fbfaf6;}}\
+html{{background:#fbfaf6;scrollbar-width:none;}}\
+html::-webkit-scrollbar{{display:none;}}\
 body{{margin:0 auto;padding:30px 34px 44px;max-width:44em;color:#1f2023;\
 font:17px/1.85 \"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",Georgia,serif;\
 word-wrap:break-word;overflow-wrap:break-word;}}\
@@ -529,9 +530,24 @@ p{{margin:0 0 .85em;text-align:justify;}}\
 blockquote{{margin:.9em 0;padding:.2em .9em;border-left:3px solid #d8d2c4;color:#4a4a4a;}}\
 table{{border-collapse:collapse;max-width:100%;}}td,th{{border:1px solid #ddd;padding:.3em .5em;}}\
 a{{color:#8a5a1f;text-decoration:none;}}\
-</style></head><body>{}</body></html>",
+</style></head><body>{body}</body>{shim}</html>",
         escape_attr(title),
-        body
+        body = body,
+        /* 书页只负责排版，不进鼠标路径：悬停光标、按下拖动、滚轮、右键、滚动条全在外层那份
+           文档里做（跨进程帧一压上去就把整条手势吃掉，2026-10-26/27 两轮实测踩过）。
+           所以这里跟外层只交换两个数字：
+           - 报正文排到多高：外层拿它撑出一段可滚的内容，滚动条、滚轮都归外层；
+           - 收外层给的偏移：scrollTo 把自己滚过去。帧自己的滚动条用 scrollbar-width:none
+             藏掉（实测 overflow:hidden 连程序滚动一起废，scrollTo 当场无效）。
+           代价是书页里划词选中没了，2026-10-26 用户定的口径：这块地方归拖块。
+           正文已过 clean_html 白名单，书自带的 script 和 on* 属性进不来，这里跑着的只有这一段。 */
+        shim = "<script>(function(){\
+var report=function(){parent.postMessage({type:\"workbench:ebook\",kind:\"height\",\
+h:document.documentElement.scrollHeight},\"*\")};\
+addEventListener(\"message\",function(e){var d=e.data;\
+if(d&&d.type===\"workbench:ebook-scroll\")scrollTo(0,Number(d.y)||0)});\
+var ro=new ResizeObserver(report);ro.observe(document.documentElement);ro.observe(document.body);\
+addEventListener(\"load\",report);report()})();</script>",
     )
 }
 

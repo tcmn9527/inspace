@@ -2294,98 +2294,6 @@ body.is-resizing {
   box-sizing: border-box;
 }
 
-/* 块右上角的收起键：平时压着存在感，悬停、选中或已收起时再亮出来 */
-.canvas-block-collapse {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 4;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
-  color: var(--muted);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.25);
-  opacity: 0.6;
-  cursor: pointer;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-
-.canvas-block-collapse svg {
-  display: block;
-  width: 12px;
-  height: 12px;
-}
-
-/* 展开态露「向上收」，收起后露「向下放」 */
-.canvas-block-collapse .down {
-  display: none;
-}
-
-.canvas-item.is-collapsed .canvas-block-collapse .up {
-  display: none;
-}
-
-.canvas-item.is-collapsed .canvas-block-collapse .down {
-  display: block;
-}
-
-.canvas-block-collapse:hover {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-  color: var(--accent);
-  opacity: 1;
-}
-
-.canvas-item:hover .canvas-block-collapse,
-.canvas-item.is-selected .canvas-block-collapse,
-.canvas-item.is-collapsed .canvas-block-collapse {
-  opacity: 1;
-}
-
-/* 视频上面是画面，按钮得自带一层深色底才看得清；收起后底下是标题条，用回普通样式 */
-.canvas-item-video:not(.is-collapsed) .canvas-block-collapse {
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
-}
-
-/* 收起后盖住整块的那条标题；块的宽高原样留在数据里，展开就回去 */
-.canvas-collapsed-bar {
-  display: none;
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  align-items: center;
-  padding: 0 36px 0 13px;
-  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 97%, transparent);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
-  color: var(--fg);
-  font-size: 12.5px;
-  overflow: hidden;
-  user-select: none;
-}
-
-.canvas-item.is-collapsed .canvas-collapsed-bar {
-  display: flex;
-}
-
-.canvas-item.is-collapsed > :not(.canvas-block-collapse):not(.canvas-collapsed-bar) {
-  display: none;
-}
-
-.canvas-collapsed-name {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .canvas-item-rect,
 .canvas-item-ellipse {
   border: 2px solid var(--canvas-border, #9a9a9a);
@@ -2487,27 +2395,6 @@ body.is-resizing {
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
 }
 
-/* 引用态角标：先把「正文是原文件的、编辑前要问一句」说清楚 */
-.canvas-note-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 1;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg) 9%, transparent);
-  color: var(--muted);
-  font-size: 10.5px;
-  letter-spacing: 0.5px;
-  pointer-events: none;
-}
-
-/* 原文件找不到了才换成这句红字，正常态这里只有一个小灰标 */
-.canvas-note-badge.is-missing {
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
-  color: var(--danger);
-}
-
 .canvas-note-body {
   border-radius: 10px;
   background: var(--surface);
@@ -2549,44 +2436,61 @@ body.is-resizing {
   pointer-events: none;
 }
 
-.canvas-image-missing {
+/* 丢了文件的块统一长这一张卡：铺在块原来的位置，宽高都不动 */
+.canvas-missing-card {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px dashed color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  text-align: center;
+  user-select: none;
+}
+
+.canvas-missing-line {
+  display: flex;
+  align-items: center;
   gap: 6px;
-  width: 100%;
-  height: 100%;
-  border: 1px dashed color-mix(in srgb, var(--fg) 30%, transparent);
-  border-radius: 4px;
-  color: var(--muted);
-  font-size: 12px;
 }
 
-.canvas-image-missing-icon svg {
-  width: 24px;
-  height: 24px;
-  opacity: 0.55;
-}
-
-/* 引用态的原图被挪走或改名才亮这一格，块的大小和位置都不动 */
-.canvas-image-missing.is-missing {
-  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+.canvas-missing-icon {
+  display: flex;
   color: var(--danger);
+  opacity: 0.72;
 }
 
-/* 图片块右上角的「引用」小药丸：只有画布里没有副本的块才戴 */
-.canvas-media-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 10.5px;
-  letter-spacing: 0.5px;
-  pointer-events: none;
+.canvas-missing-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.canvas-missing-title {
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+/* 路径多半很长，两头都要留全：整行按 RTL 排，省略号就吃掉开头，文件名留在眼前。
+   不能再加 unicode-bidi: plaintext —— 那样首字母把方向定回 LTR，掐的就变成结尾了。 */
+.canvas-missing-path {
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  user-select: text;
 }
 
 /* 音乐播放器块 */
@@ -2618,17 +2522,6 @@ body.is-resizing {
 
 .canvas-audio-player.is-error {
   border-color: var(--danger);
-}
-
-/* 原文件不在了：块留在原地不动，只把这条播放器点成灰红，一句话写在时间位 */
-.canvas-audio-player.is-missing,
-.canvas-video-player.is-missing {
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-}
-
-.canvas-audio-player.is-missing .canvas-audio-time,
-.canvas-video-player.is-missing .canvas-video-time {
-  color: var(--danger);
 }
 
 .canvas-audio-player.is-loading .canvas-audio-toggle {
@@ -2904,36 +2797,6 @@ body.is-resizing {
   text-overflow: ellipsis;
 }
 
-/* 引用块的原文件被挪走/改名才亮这一行，拷贝块永远不会走到这里 */
-.canvas-file-card.is-missing .canvas-file-sub {
-  color: var(--danger);
-}
-
-.canvas-file-open {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
-  color: var(--fg);
-  cursor: pointer;
-}
-
-.canvas-file-open:hover {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  color: var(--accent);
-}
-
-.canvas-file-open svg {
-  width: 16px;
-  height: 16px;
-}
-
 /* 文本预览：整块常显，超出卡片高度就自己滚 */
 .canvas-file-preview {
   flex: 1 1 auto;
@@ -3008,17 +2871,12 @@ body.is-resizing {
   user-select: none;
 }
 
-.canvas-ebook-card.is-missing {
-  border-color: var(--danger);
-}
-
 .canvas-ebook-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 12px;
-  /* 右侧留出收起键的位置，章节控件别钻到它底下 */
-  padding: 9px 38px 9px 12px;
+  padding: 9px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
   cursor: move;
 }
@@ -3108,21 +2966,45 @@ body.is-resizing {
 
 .canvas-ebook-body {
   position: relative;
+  display: flex;
   flex: 1 1 auto;
   min-height: 0;
   background: #fbfaf6;
 }
 
-.canvas-ebook-page {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: #fbfaf6;
+/* 滚动条、滚轮、悬停光标、按下拖动都在这层（主文档自己的元素）：
+   书页是跨进程 iframe，光标一压上去就把整条手势吃掉，所以它永久对指针免疫。 */
+.canvas-ebook-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  /* 正文换章时浏览器会「锚定」旧位置把滚动条顶回去（实测翻章后回到 16 而不是 0），
+     这个滚动条由我们自己管 */
+  overflow-anchor: none;
+  cursor: move;
 }
 
-.canvas-ebook-page[hidden] {
+.canvas-ebook-scroll[hidden] {
   display: none;
+}
+
+/* 高度照正文排出来的实际长度给（帧里报上来），外层因此有真滚动条 */
+.canvas-ebook-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.canvas-ebook-page {
+  position: sticky;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  border: 0;
+  background: #fbfaf6;
+  pointer-events: none;
 }
 
 /* 翻章只在这块里转圈/报错：书壳和工具栏一直看得见 */
@@ -3143,10 +3025,6 @@ body.is-resizing {
 
 .canvas-ebook-state[hidden] {
   display: none;
-}
-
-.canvas-ebook-state.is-missing {
-  color: var(--danger);
 }
 
 /* 视频播放块：上面是画面，下面是和音乐同一套的播放条 */
@@ -3215,22 +3093,8 @@ body.is-resizing {
   height: 44px;
 }
 
-.canvas-video-player.is-playing .canvas-video-curtain,
-.canvas-video-player.is-missing .canvas-video-curtain {
+.canvas-video-player.is-playing .canvas-video-curtain {
   opacity: 0;
-}
-
-.canvas-video-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 10.5px;
-  letter-spacing: 0.5px;
-  pointer-events: none;
 }
 
 .canvas-video-row {

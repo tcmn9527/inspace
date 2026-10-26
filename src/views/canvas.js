@@ -33,6 +33,7 @@ import {
   NOTE_DEFAULT_WIDTH,
   STICKY_DEFAULT_COLOR,
   STICKY_DEFAULT_TEXT,
+  capturePagePin,
   connectorGeometry,
   createConnectorElement,
   createItemElement,
@@ -51,8 +52,12 @@ import {
   makeText,
   makeVideo,
   normalizeItem,
+  pinEbookPage,
+  releaseEbookPage,
+  renderMissing,
   routeConnector,
   sideAnchor,
+  stretchEbookPage,
   syncConnectorElement,
   syncItemElement,
   TEXT_DEFAULT_WIDTH,
@@ -93,6 +98,7 @@ const CONNECTABLE = new Set([
   "sticky",
   "note",
   "file",
+  "ebook",
 ]);
 const STICKY_BG_PRESETS = ["#bfa648", "#a6bf47", "#47bfb4", "#e5e1d6", "#aab0b5", "#262626"];
 const STICKY_TEXT_PRESETS = ["#000000", "#ffffff", "#4c4c4c", "#9e9e9e"];
@@ -134,8 +140,8 @@ let noteEditor = null; // 当前笔记块的编辑态 { itemId, el, box, textare
 let noteWriteBack = false;
 /* 已经弹过「改哪一份」的块，双击连着触发两次不至于叠出两层弹层 */
 let noteAskId = null;
-/* 引用态音视频块的原文件找不到了：块留在原地，改成占位。每次进画布重新查。 */
-let linkedMissing = new Set();
+/* 音视频块指向的文件找不到了（引用查原片、拷贝查副本）：块留在原地，改成丢文件卡。每次进画布重新查。 */
+let mediaMissing = new Set();
 let modalOpen = false;
 let lastPointer = { x: 0, y: 0, inside: false };
 let hoverId = null;
@@ -373,15 +379,18 @@ async function switchTo(id) {
     noteImageCache = new Map();
     filePreviewCache = new Map();
     ebookTocCache = new Map();
-    linkedMissing = new Set();
+    mediaMissing = new Set();
     await loadImages();
     if (token !== loadToken || !active) return;
     localStorage.setItem(STORAGE_KEY, current.meta.id);
     const staleNotes = await refreshLinkedNotes();
-    linkedMissing = await refreshLinkedMedia();
+    mediaMissing = await refreshMediaFiles();
     if (token !== loadToken || !active) return;
     renderAll();
-    for (const item of staleNotes) markNoteMissing(item);
+    /* 源 .md 读不到的笔记块整块换成丢文件卡，不再拿最后一次缓存的正文糊弄用户 */
+    for (const item of staleNotes) {
+      renderMissing(itemEls.get(item.id), item, current.meta.path || "");
+    }
     applyCamera();
     updateChrome();
   } catch (error) {
@@ -442,9 +451,9 @@ async function loadImages() {
   await Promise.all(tasks);
 }
 
-/* 引用态的音视频：进画布先问一句原文件还在不在。在就照常显示，
-   没了块还留在原地，只是变成占位（音视频是点开才加载的，这里不提前拉数据）。 */
-async function refreshLinkedMedia() {
+/* 音视频：进画布先问一句文件还在不在——引用态查原片，拷贝态查画布里的副本。
+   在就照常显示，没了块还留在原地，只把内容换成丢文件卡（音视频是点开才加载的，这里不提前拉数据）。 */
+async function refreshMediaFiles() {
   if (!current) return new Set();
   const canvasId = current.meta.id;
   const missing = new Set();
@@ -452,12 +461,11 @@ async function refreshLinkedMedia() {
     current.items
       .filter(
         (item) =>
-          item.linked &&
           item.src &&
           (item.type === "audio" || item.type === "video"),
       )
       .map(async (item) => {
-        const found = await store.canvasFileExists(canvasId, item.src, true);
+        const found = await store.canvasFileExists(canvasId, item.src, item.linked);
         if (!found) missing.add(item.id);
       }),
   );
@@ -501,7 +509,7 @@ function showEmpty() {
   noteImageCache.clear();
   filePreviewCache.clear();
   ebookTocCache.clear();
-  linkedMissing = new Set();
+  mediaMissing = new Set();
   updateChrome();
 }
 
@@ -751,8 +759,9 @@ function addItemElement(item) {
           ? videoCache.get(item.src)
           : undefined;
   const canvasId = current.meta.id;
+  const canvasDir = current.meta.path || "";
   const el = createItemElement(item, mediaSrc, {
-    mediaMissing: linkedMissing.has(item.id),
+    mediaMissing: mediaMissing.has(item.id),
     loadAudio: async (src) => {
       const cached = audioCache.get(src);
       if (cached) return cached;
@@ -776,7 +785,6 @@ function addItemElement(item) {
       updateSelection();
       scheduleItemsSave();
     },
-    onFileOpen: (block) => openFileBlock(block),
     loadPreview: async (block) => {
       const key = previewKey(block);
       const cached = filePreviewCache.get(key);
@@ -786,6 +794,8 @@ function addItemElement(item) {
       return preview;
     },
     checkFile: (block) => store.canvasFileExists(canvasId, block.src, block.linked),
+    canvasDir,
+    onMissing: (block) => renderMissing(itemEls.get(block.id), block, canvasDir),
     loadEbookToc: async (block) => {
       const key = ebookKey(canvasId, block);
       const cached = ebookTocCache.get(key);
@@ -797,7 +807,6 @@ function addItemElement(item) {
     loadEbookChapter: (block, index) =>
       store.ebookChapter(canvasId, block.src, block.linked, index),
     onEbookPosition: () => scheduleItemsSave(),
-    onToggleCollapse: (block) => toggleBlockCollapse(block),
   });
   el.style.zIndex = String(item.z);
   itemEls.set(item.id, el);
@@ -905,9 +914,8 @@ function updateSelection() {
 
   const dirs = ["nw", "ne", "sw", "se"];
   /* 播放器和非文本附件条的排版是固定的，拉角只会把它们挤变形，所以不给缩放把手；
-     文本块是在读内容，宽高由用户说了算，把手照给。收起时只剩一条标题，也没得拉 */
-  const fixedLayout =
-    item.type === "audio" || (item.type === "file" && !item.text) || item.collapsed === true;
+     文本块是在读内容，宽高由用户说了算，把手照给 */
+  const fixedLayout = item.type === "audio" || (item.type === "file" && !item.text);
   if (!fixedLayout) {
     for (const dir of dirs) {
       const handle = document.createElement("span");
@@ -1036,6 +1044,7 @@ function startResize(handle, e) {
     start,
     origin: { ...item },
     aspect: item.w / Math.max(1, item.h),
+    page: capturePagePin(item, el),
     moved: false,
   };
   ui.stage.classList.add("is-resizing");
@@ -1152,7 +1161,10 @@ function onWindowPointerMove(e) {
     }
   }
 
+  /* 书页钉在起始尺寸上，容器的真实尺寸才不会把它撑到掉帧；拉满靠 transform */
+  if (drag.page) pinEbookPage(drag.page);
   syncItemElement(el, item);
+  if (drag.page) stretchEbookPage(drag.page);
   if (item.type === "text") {
     item.h = el.offsetHeight;
     /* 内容把块撑得比目标高时，拖上边要贴住底边重算 y */
@@ -1183,6 +1195,12 @@ function onWindowPointerUp(e) {
   }
   updatePorts();
   const item = finished.id ? findItem(finished.id) : null;
+  if (finished.page && item) {
+    /* 拖拽期间书页只是被「画」成目标大小，松手这一下才真给它换尺寸，正文重新排版 */
+    const el = itemEls.get(item.id);
+    releaseEbookPage(finished.page);
+    if (el) syncItemElement(el, item);
+  }
 
   if (finished.kind === "pan") {
     if (finished.moved) scheduleCameraSave();
@@ -1415,13 +1433,11 @@ function onStageDoubleClick(e) {
   if (!target) return;
   const item = findItem(target.dataset.id);
   if (!item) return;
-  if (!["text", "sticky", "note", "file"].includes(item.type)) return;
+  if (!["text", "sticky", "note"].includes(item.type)) return;
   e.preventDefault();
   setTool("select", true);
   select(item.id);
-  /* 文件块没有编辑态：双击就是把画布里那份副本交给系统默认程序 */
-  if (item.type === "file") openFileBlock(item);
-  else if (item.type === "text") startTextEdit(item.id);
+  if (item.type === "text") startTextEdit(item.id);
   else if (item.type === "sticky") startStickyEdit(item.id);
   else startNoteEdit(item.id);
 }
@@ -1499,8 +1515,9 @@ function openItemMenu(item, x, y) {
     });
   } else if (item.type === "note") {
     entries.push({ label: "编辑", onClick: () => startNoteEdit(item.id) });
-  } else if (item.type === "file" || item.type === "ebook") {
-    entries.push({ label: "用系统程序打开", onClick: () => openFileBlock(item) });
+  }
+  /* 画布不替用户开文件，只把他带到那份文件躺着的地方 */
+  if (revealTarget(item)) {
     entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
   }
   /* 连线固定在最底层，不参与层级调整 */
@@ -1770,23 +1787,6 @@ function removeItemFromDom(id) {
   const el = itemEls.get(id);
   if (el) el.remove();
   itemEls.delete(id);
-}
-
-/* 收起/展开：只改显示状态，块的宽高原样留在数据里，重开画布还按上次那样摆着 */
-function toggleBlockCollapse(block) {
-  if (!current) return;
-  if (editingId === block.id) commitEditing();
-  block.collapsed = block.collapsed !== true;
-  const el = itemEls.get(block.id);
-  if (!el) return;
-  /* 收起来就看不见播放器了，别让声音在背后接着放 */
-  if (block.collapsed) {
-    for (const media of el.querySelectorAll("video, audio")) media.pause();
-  }
-  syncItemElement(el, block);
-  if (selectedId === block.id) updateSelection();
-  refreshConnectors();
-  scheduleItemsSave();
 }
 
 /* ---------- 文字编辑 ---------- */
@@ -2178,14 +2178,6 @@ async function refreshLinkedNotes() {
   /* 写回时后端是从 items.json 里查这份编码/换行的，这里不落盘它就照着旧的那份还原 */
   if (changed) scheduleItemsSave();
   return stale;
-}
-
-function markNoteMissing(item) {
-  const badge = itemEls.get(item.id)?.querySelector(".canvas-note-badge");
-  if (!badge) return;
-  badge.textContent = "原文件不在了";
-  badge.classList.add("is-missing");
-  badge.title = `找不到 ${item.path}，这里显示的是最后一次读到的正文`;
 }
 
 function onNoteLinkPointerDown(e) {
@@ -2637,20 +2629,28 @@ async function addFileBlock(info, topLeft, mode) {
   return item;
 }
 
-/* 折叠/展开：折叠态高度是写死的几行，展开才把用户拉的宽高交还给块 */
-/* 画布自己不认任何格式，打开就是把那份文件交给系统默认程序：
-   拷贝态是 files/ 里的副本，引用态是原文件本身。 */
-function openFileBlock(item) {
-  if (!current || !item.src) return;
-  store
-    .openCanvasFile(current.meta.id, item.src, item.linked)
-    .catch((error) => showError(error));
+/* 哪块指向磁盘上的一个文件、以及它在哪儿：笔记的 path 是笔记库里的绝对路径，
+   不在画布目录里，所以一律按引用态去定位；其余块的 src 拷贝态是画布内相对路径。 */
+function revealTarget(item) {
+  if (item.type === "note") return item.path ? { rel: item.path, linked: true } : null;
+  if (
+    item.type === "image" ||
+    item.type === "audio" ||
+    item.type === "video" ||
+    item.type === "file" ||
+    item.type === "ebook"
+  ) {
+    return item.src ? { rel: item.src, linked: Boolean(item.linked) } : null;
+  }
+  return null;
 }
 
 function revealFileBlock(item) {
-  if (!current || !item.src) return;
+  if (!current) return;
+  const target = revealTarget(item);
+  if (!target) return;
   store
-    .revealCanvasFile(current.meta.id, item.src, item.linked)
+    .revealCanvasFile(current.meta.id, target.rel, target.linked)
     .catch((error) => showError(error));
 }
 

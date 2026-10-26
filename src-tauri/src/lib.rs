@@ -122,7 +122,6 @@ pub fn run() {
             canvas::canvas_copy_file,
             canvas::canvas_file_text,
             canvas::canvas_file_preview,
-            canvas::canvas_open_file,
             canvas::canvas_reveal_file,
             canvas::canvas_delete_file,
             canvas::canvas_file_exists,

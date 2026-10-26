@@ -32,29 +32,8 @@ export const EBOOK_DEFAULT_WIDTH = 560;
 export const EBOOK_DEFAULT_HEIGHT = 640;
 export const EBOOK_MIN_WIDTH = 300;
 export const EBOOK_MIN_HEIGHT = 220;
-/* 收起后只留一条标题的高度；块的 w/h 原样留着，展开就回到原来的大小 */
-export const COLLAPSED_HEIGHT = 34;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-
-/* 哪几种块有「内容区」可以收起来：纯文字/便签/图片和单行附件条本身就是全部内容 */
-export function canCollapse(item) {
-  return (
-    item.type === "note" ||
-    item.type === "audio" ||
-    item.type === "video" ||
-    item.type === "ebook" ||
-    (item.type === "file" && item.text)
-  );
-}
-
-const collapseLabel = (item) => {
-  if (item.type === "ebook") return String(item.name || "").replace(/\.[^.\\/]+$/, "") || "电子书";
-  if (item.type === "note") return item.name || "笔记";
-  if (item.type === "audio") return item.name || "音频";
-  if (item.type === "video") return item.name || "视频";
-  return item.name || "文件";
-};
 
 let seq = 0;
 
@@ -165,7 +144,6 @@ export function normalizeItem(raw) {
       src: typeof raw.src === "string" ? raw.src : "",
       name: typeof raw.name === "string" ? raw.name : "",
       linked: raw.linked === true,
-      collapsed: raw.collapsed === true,
       z: layerOf(raw),
     };
   }
@@ -184,7 +162,6 @@ export function normalizeItem(raw) {
       sized: raw.sized === true,
       /* 转出来的 AAC 音轨副本（画布目录里的相对路径），没有就是空串 */
       audioRel: typeof raw.audioRel === "string" ? raw.audioRel : "",
-      collapsed: raw.collapsed === true,
       z: layerOf(raw),
     };
   }
@@ -224,7 +201,6 @@ export function normalizeItem(raw) {
       sourceFormat: typeof raw.sourceFormat === "string" ? raw.sourceFormat : "utf8",
       sourceCrlf: raw.sourceCrlf === true,
       assets,
-      collapsed: raw.collapsed === true,
       z: layerOf(raw),
     };
   }
@@ -242,7 +218,6 @@ export function normalizeItem(raw) {
       text: raw.text === true,
       /* 引用态 src 就是原文件绝对路径，画布 files/ 里没有副本 */
       linked: raw.linked === true,
-      collapsed: raw.collapsed === true,
       z: layerOf(raw),
     };
   }
@@ -258,7 +233,6 @@ export function normalizeItem(raw) {
       linked: raw.linked === true,
       /* 读到第几章是这块自己的状态，重开画布接着上次那页 */
       chapter: Math.max(0, Math.trunc(num(raw.chapter))),
-      collapsed: raw.collapsed === true,
       z: layerOf(raw),
     };
   }
@@ -444,14 +418,7 @@ export function itemBounds(item, el) {
       h: Math.abs(item.y2 - item.y),
     };
   }
-  const h =
-    item.type === "text"
-      ? el
-        ? el.offsetHeight
-        : item.h || 24
-      : item.collapsed && canCollapse(item)
-        ? COLLAPSED_HEIGHT
-        : item.h;
+  const h = item.type === "text" ? (el ? el.offsetHeight : item.h || 24) : item.h;
   return { x: item.x, y: item.y, w: item.w, h };
 }
 
@@ -634,12 +601,56 @@ function missingLabel(item, copyText) {
   return item.linked ? "原文件不在了" : copyText;
 }
 
-const IMAGE_MISS_SVG = `
+const MISSING_FILE_SVG = `
   <svg viewBox="0 0 24 24" aria-hidden="true">
-    <rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/>
-    <circle cx="9" cy="10" r="1.6" fill="currentColor"/>
-    <path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M6 3.5h7.4L18.5 8.6V20.5H6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M13.4 3.5v5.1h5.1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M9.2 12.5l5.6 5.6M14.8 12.5l-5.6 5.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
   </svg>`;
+
+/** 块指向的那份文件在磁盘上的绝对位置：引用态记的就是绝对路径，拷贝态拼上画布目录。 */
+export function absolutePathOf(item, canvasDir) {
+  const rel = item.type === "note" ? item.path : item.src;
+  if (!rel) return "";
+  if (item.type === "note" || item.linked) return rel;
+  if (!canvasDir) return rel;
+  return `${canvasDir.replace(/[\\/]$/, "")}\\${rel.replace(/[\\/]/g, "\\")}`;
+}
+
+/* 丢文件是所有块共用的一种状态，所以只长一张卡：图标和一句话一行，下面一行文件的绝对路径。
+   块留在原地、宽高不变，只把内容换成这张卡；原文件放回原位后重开画布自己恢复。
+   附件和音乐块最矮只有 64px，所以图标只能跟标题挤一行，竖着排三行会被块自己裁掉。 */
+export function createMissingCard(item, canvasDir) {
+  const card = document.createElement("div");
+  card.className = "canvas-missing-card";
+  const line = document.createElement("div");
+  line.className = "canvas-missing-line";
+  const glyph = document.createElement("span");
+  glyph.className = "canvas-missing-icon";
+  glyph.innerHTML = MISSING_FILE_SVG;
+  const title = document.createElement("div");
+  title.className = "canvas-missing-title";
+  title.textContent = item.linked ? "原文件不在了" : "画布里的副本丢了";
+  line.append(glyph, title);
+  card.append(line);
+  const path = absolutePathOf(item, canvasDir);
+  if (path) {
+    const shown = document.createElement("div");
+    shown.className = "canvas-missing-path";
+    shown.textContent = path;
+    shown.title = path;
+    card.append(shown);
+  }
+  return card;
+}
+
+/** 把块的内容换成丢文件卡：建块时就发现丢了、或后来异步查出来丢了，都走这里。 */
+export function renderMissing(el, item, canvasDir) {
+  if (!el || el.querySelector(".canvas-missing-card")) return;
+  for (const media of el.querySelectorAll("video, audio")) media.pause();
+  el.textContent = "";
+  el.append(createMissingCard(item, canvasDir));
+}
 
 export function createItemElement(item, mediaSrc, options = {}) {
   const el = document.createElement("div");
@@ -659,34 +670,19 @@ export function createItemElement(item, mediaSrc, options = {}) {
       img.draggable = false;
       img.alt = "";
       el.append(img);
-      if (item.linked) {
-        /* 画布里没有这份图，角标说清楚它指向原文件 */
-        const badge = document.createElement("span");
-        badge.className = "canvas-media-badge";
-        badge.textContent = "引用";
-        badge.title = `只引用原文件，画布里没有副本：${item.src}`;
-        el.append(badge);
-      }
+      if (item.linked) img.title = item.src;
     } else {
-      const missing = document.createElement("div");
-      missing.className = "canvas-image-missing";
-      const glyph = document.createElement("span");
-      glyph.className = "canvas-image-missing-icon";
-      glyph.innerHTML = IMAGE_MISS_SVG;
-      const label = document.createElement("span");
-      label.textContent = missingLabel(item, "图片丢失");
-      missing.append(glyph, label);
-      if (item.linked) {
-        /* 块留在原地不动，只把这一格换成占位；原图放回原位后重开画布自己恢复 */
-        missing.classList.add("is-missing");
-        missing.title = `找不到 ${item.src}`;
-      }
-      el.append(missing);
+      el.append(createMissingCard(item, options.canvasDir));
     }
-  } else if (item.type === "audio") {
-    el.append(createAudioPlayer(item, mediaSrc, options));
-  } else if (item.type === "video") {
-    el.append(createVideoPlayer(item, mediaSrc, options));
+  } else if (item.type === "audio" || item.type === "video") {
+    /* 音视频的数据是点开才取的，丢没丢只由这句 mediaMissing 说了算 */
+    if (!item.src || options.mediaMissing) {
+      el.append(createMissingCard(item, options.canvasDir));
+    } else if (item.type === "audio") {
+      el.append(createAudioPlayer(item, mediaSrc, options));
+    } else {
+      el.append(createVideoPlayer(item, mediaSrc, options));
+    }
   } else if (item.type === "line" || item.type === "arrow") {
     el.append(createLineSvg(item));
   } else if (item.type === "sticky") {
@@ -704,14 +700,6 @@ export function createItemElement(item, mediaSrc, options = {}) {
     body.className = "notes-body canvas-note-body";
     body.innerHTML = renderMarkdown(item.source);
     card.append(body);
-    if (item.linked) {
-      /* 引用态默认只读，双击才问「改源文件还是转副本」——角标先把这件事说清楚 */
-      const badge = document.createElement("span");
-      badge.className = "canvas-note-badge";
-      badge.textContent = "引用";
-      badge.title = `正文来自原文件，编辑前会先问要不要写回：${item.path}`;
-      card.append(badge);
-    }
     el.append(card);
     /* 从笔记库来的显示原文件路径，拖进来的 .md 只有文件名 */
     el.title = item.path || item.name || "";
@@ -719,27 +707,6 @@ export function createItemElement(item, mediaSrc, options = {}) {
     el.append(createFileCard(item, options));
   } else if (item.type === "ebook") {
     el.append(createEbookCard(item, options));
-  }
-
-  if (canCollapse(item)) {
-    const collapse = document.createElement("button");
-    collapse.type = "button";
-    collapse.className = "canvas-block-collapse";
-    collapse.append(chevronSvg("M4 10.2 8 6.2l4 4", "up"), chevronSvg("M4 5.8l4 4 4-4", "down"));
-    stopOnCard(collapse);
-    collapse.addEventListener("click", (e) => {
-      e.stopPropagation();
-      options.onToggleCollapse?.(item);
-    });
-
-    /* 收起后盖住整块的那条标题，跟按钮一起常驻 DOM，靠 is-collapsed 切换 */
-    const bar = document.createElement("div");
-    bar.className = "canvas-collapsed-bar";
-    const label = document.createElement("span");
-    label.className = "canvas-collapsed-name";
-    label.textContent = collapseLabel(item);
-    bar.append(label);
-    el.append(collapse, bar);
   }
 
   syncItemElement(el, item);
@@ -770,12 +737,6 @@ const FILE_DOC_SVG = `
     <path d="M11.2 3.2v3.6h3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
   </svg>`;
 
-const FILE_OPEN_SVG = `
-  <svg viewBox="0 0 20 20" aria-hidden="true">
-    <path d="M12.6 9.8v3.6a1.4 1.4 0 0 1-1.4 1.4H6a1.4 1.4 0 0 1-1.4-1.4V7.4A1.4 1.4 0 0 1 6 6h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-    <path d="M11.8 5.2h3.2v3.2M15 5.2l-5.4 5.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`;
-
 /* 文本预览一次最多渲染这么多字：后端读的是 512KB 开头，全塞进 DOM 会拖慢画布 */
 const PREVIEW_RENDER_CHARS = 20000;
 const TABLE_EXTS = new Set(["csv", "tsv"]);
@@ -783,7 +744,7 @@ const TABLE_MAX_ROWS = 200;
 const TABLE_MAX_COLS = 24;
 
 /* 附件卡片：文件已经拷进画布的 files/ 了，这里负责把名字/体积说清楚，
-   文本类的再附一段只读预览。打开动作交给系统默认程序（画布自己不认格式）。 */
+   文本类的再附一段只读预览。要打开文件走右键菜单的「在文件夹中显示」。 */
 function createFileCard(item, options) {
   const card = document.createElement("div");
   card.className = item.text ? "canvas-file-card canvas-file-card-text" : "canvas-file-card";
@@ -801,41 +762,20 @@ function createFileCard(item, options) {
   const sub = document.createElement("div");
   sub.className = "canvas-file-sub";
   sub.textContent = `${formatSize(item.size)}${item.ext ? ` · ${item.ext.toUpperCase()}` : ""}`;
-  if (item.linked) {
-    /* 引用态没有副本可看，悬停直接把原文件完整路径给出来 */
-    name.title = item.src;
-    sub.textContent += " · 引用";
-  }
+  /* 指向画布外的文件时，悬停直接把那份文件的完整路径给出来 */
+  if (item.linked) name.title = item.src;
   main.append(name, sub);
-
-  const open = document.createElement("button");
-  open.type = "button";
-  open.className = "canvas-file-open";
-  open.title = "用系统程序打开";
-  open.setAttribute("aria-label", "用系统程序打开");
-  open.innerHTML = FILE_OPEN_SVG;
-  stopOnCard(open);
-  open.addEventListener("click", (e) => {
-    e.stopPropagation();
-    options.onFileOpen?.(item);
-  });
 
   const head = document.createElement("div");
   head.className = "canvas-file-head";
-  head.append(icon, main, open);
+  head.append(icon, main);
   card.append(head);
 
-  /* 引用块进画布时问一句原文件还在不在；拷贝块不用查，副本就在画布里。
-     正常态这里一个字都不多显示，只有找不到了才把副标题换成这句话 */
-  if (item.linked) {
-    options.checkFile?.(item).then((found) => {
-      if (found || !card.isConnected) return;
-      card.classList.add("is-missing");
-      sub.textContent = "原文件不在了";
-      /* 预览读不出来时也会写一行错误，别在同一张卡上说两遍同一句话 */
-      card.querySelector(".canvas-file-preview")?.remove();
-    });
-  }
+  /* 不管拷贝还是引用，进画布都问一句文件还在不在；
+     丢了就整块换成统一那张丢文件卡，绝对路径写在卡上 */
+  options.checkFile?.(item).then((found) => {
+    if (!found) options.onMissing?.(item);
+  });
 
   if (!item.text) return card;
 
@@ -855,16 +795,47 @@ function stopOnCard(button) {
 
 const stripExt = (name) => String(name || "").replace(/\.[^.\\/]+$/, "");
 
+/* 书页不进鼠标路径，帧里那段注入脚本只报一个数字：正文排到多高。
+   外层把它当成滚动区的 content height，滚动条、滚轮、右键、按下拖动就都是主文档自己的事。
+   帧的可滚范围和外层是同一个数（正文高 − 视口高，两边同一个视口），所以每次它报完尺寸
+   都把外层当前的位置压回去，两边就对不齐不了。 */
+const pushEbookScroll = (frame) => {
+  const scroll = frame.closest?.(".canvas-ebook-scroll");
+  if (!scroll) return;
+  frame.contentWindow?.postMessage({ type: "workbench:ebook-scroll", y: scroll.scrollTop }, "*");
+};
+
+window.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || data.type !== "workbench:ebook" || data.kind !== "height") return;
+  const height = Number(data.h);
+  if (!Number.isFinite(height) || height <= 0) return;
+  /* 沙箱帧的 origin 是 "null"，只能按 source 认这是哪张纸 */
+  const frame = [...document.querySelectorAll("iframe.canvas-ebook-page")].find(
+    (f) => f.contentWindow === event.source,
+  );
+  if (!frame) return;
+  const spacer = frame.parentElement;
+  /* 拖拽缩放期间书页是被 transform 拉伸的预览，排版尺寸钉在起始值上，
+     它报上来的高度也就还是起始宽度下的高度，别拿它去改滚动区 */
+  if (frame.dataset.pinned) return;
+  const next = `${Math.round(height)}px`;
+  if (spacer.style.height !== next) spacer.style.height = next;
+  pushEbookScroll(frame);
+});
+
 /* 电子书阅读块：书上架前先读一遍目录，读到第几章记在这块自己身上。
- * 正文塞进 sandbox="" 的 iframe——书里的脚本一行都跑不起来，图片已经在后端
- * 转成 data URL，所以也不需要给 iframe 任何读本地文件的权限。 */
+ * 正文塞进 sandbox="allow-scripts" 的 iframe：只给脚本，不给同源、不给读本地文件，
+ * 所以图片得在后端转成 data URL。书自带的脚本仍然跑不起来 —— 后端 clean_html
+ * 是标签/属性白名单，script 标签和 on* 属性根本进不了正文，这里能跑的只有
+ * reader_wrap 注入的那一段「把右键报给外层」的转发。 */
 function createEbookCard(item, options) {
   const card = document.createElement("div");
   card.className = "canvas-ebook-card";
 
   const head = document.createElement("div");
   head.className = "canvas-ebook-head";
-  head.title = item.linked ? `只引用原文件：${item.src}` : item.name;
+  head.title = item.linked ? item.src : item.name;
   const meta = document.createElement("div");
   meta.className = "canvas-ebook-meta";
   const title = document.createElement("div");
@@ -902,21 +873,45 @@ function createEbookCard(item, options) {
 
   const body = document.createElement("div");
   body.className = "canvas-ebook-body";
+  /* 滚动区是主文档自己的元素：悬停给出 move 光标、按下第一像素就能拖块、滚轮滚正文、
+     右键走应用的块菜单。书页被钉在这块视口上（sticky），只照外层给的偏移滚自己。 */
+  const scroll = document.createElement("div");
+  scroll.className = "canvas-ebook-scroll";
+  const spacer = document.createElement("div");
+  spacer.className = "canvas-ebook-spacer";
   const frame = document.createElement("iframe");
   frame.className = "canvas-ebook-page";
-  frame.setAttribute("sandbox", "");
+  frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.title = "书页";
+  spacer.append(frame);
+  scroll.append(spacer);
   const state = document.createElement("div");
   state.className = "canvas-ebook-state";
   state.textContent = "正在排版…";
-  body.append(frame, state);
+  body.append(scroll, state);
   card.append(head, body);
 
-  /* 双击书眉交给系统默认程序，跟附件卡片一个意思 */
-  head.addEventListener("dblclick", (e) => {
-    e.stopPropagation();
-    options.onFileOpen?.(item);
+  /* 书页的排版高度 = 滚动区的可视高度（它是个视口，正文在它里面滚）。
+     拖拽期间钉住尺寸，别让跨进程帧每一步都重新分配渲染表面。 */
+  const fitPage = () => {
+    if (frame.dataset.pinned) return;
+    frame.style.height = `${Math.max(1, scroll.clientHeight)}px`;
+  };
+  new ResizeObserver(fitPage).observe(scroll);
+  /* 外层滚了多少，就让帧里的正文跟着滚多少；一帧内多次滚动合并成一次 */
+  let syncQueued = false;
+  scroll.addEventListener("scroll", () => {
+    if (syncQueued) return;
+    syncQueued = true;
+    requestAnimationFrame(() => {
+      syncQueued = false;
+      pushEbookScroll(frame);
+    });
+  });
+  scroll.addEventListener("pointerdown", (e) => {
+    /* 按在滚动条上归浏览器拖滚动条，别顺手把整块拖走 */
+    if (e.offsetX > scroll.clientWidth) e.stopPropagation();
   });
 
   /* wanted 是「已经点去、还没翻到」的那一章：连点下一章时按它累加，
@@ -936,13 +931,12 @@ function createEbookCard(item, options) {
   next.addEventListener("click", () => step(1));
   select.addEventListener("change", () => showChapter(Number(select.value) || 0, true));
 
-  function fail(text, missing = false) {
+  /* 书在、但读不出内容（DRM、空书）时才在块里留一行话；丢了走上面那张卡 */
+  function fail(text) {
     seq += 1;
     state.hidden = false;
     state.textContent = text;
-    state.classList.toggle("is-missing", missing);
-    card.classList.toggle("is-missing", missing);
-    frame.hidden = true;
+    scroll.hidden = true;
   }
 
   function paintChrome() {
@@ -960,9 +954,8 @@ function createEbookCard(item, options) {
     const at = Math.min(Math.max(0, Math.trunc(index)), total - 1);
     wanted = at;
     const mine = ++seq;
-    frame.hidden = false;
+    scroll.hidden = false;
     state.hidden = false;
-    state.classList.remove("is-missing");
     state.textContent = total > 1 ? `正在翻到第 ${at + 1} 章…` : "正在排版…";
     let chapter = null;
     try {
@@ -975,6 +968,8 @@ function createEbookCard(item, options) {
     /* 连点下一章时只认最后一次：慢的那次回来别把新章盖回去 */
     if (mine !== seq || !card.isConnected || !chapter) return;
     frame.srcdoc = chapter.html;
+    /* 新一章从顶上看起；外层这条滚动条不会自己归零，等帧报新尺寸时再把 0 压回帧里 */
+    scroll.scrollTop = 0;
     state.hidden = true;
     item.chapter = at;
     paintChrome();
@@ -982,8 +977,8 @@ function createEbookCard(item, options) {
   }
 
   (async () => {
-    /* 引用块先问一句原书还在不在，不在就把纸换成占位，不去读一本不存在的东西 */
-    if (item.linked && options.checkFile) {
+    /* 先问一句书还在不在，不在就把纸换成丢文件卡，不去读一本不存在的东西 */
+    if (options.checkFile) {
       let found = true;
       try {
         found = await options.checkFile(item);
@@ -991,7 +986,7 @@ function createEbookCard(item, options) {
         found = true;
       }
       if (found === false) {
-        if (card.isConnected) fail(missingLabel(item, "这本书打不开了"), true);
+        if (card.isConnected) options.onMissing?.(item);
         return;
       }
     }
@@ -1188,12 +1183,8 @@ function createAudioPlayer(item, mediaSrc, options = {}) {
   const name = document.createElement("div");
   name.className = "canvas-audio-name";
   name.textContent = item.name || "未命名音频";
-  name.title = item.name || "未命名音频";
-  if (item.linked) {
-    /* 引用态没有副本可播，悬停直接把原文件完整路径给出来 */
-    name.textContent += " · 引用";
-    name.title = item.src;
-  }
+  /* 指向画布外的文件时，悬停直接把那份文件的完整路径给出来 */
+  name.title = item.linked ? item.src : item.name || "未命名音频";
 
   const row = document.createElement("div");
   row.className = "canvas-audio-row";
@@ -1236,12 +1227,6 @@ function createAudioPlayer(item, mediaSrc, options = {}) {
   if (item.src && mediaSrc) {
     audio.src = mediaSrc;
     ready = true;
-  }
-  if (!item.src || options.mediaMissing) {
-    player.classList.add("is-missing");
-    toggle.disabled = true;
-    time.textContent = missingLabel(item, "音频丢失");
-    if (options.mediaMissing) name.title = `找不到 ${item.src}`;
   }
 
   const render = () => {
@@ -1405,14 +1390,8 @@ function createVideoPlayer(item, mediaSrc, options = {}) {
   curtain.innerHTML = VIDEO_CURTAIN_SVG;
 
   stage.append(video, curtain);
-
-  if (item.linked) {
-    const badge = document.createElement("span");
-    badge.className = "canvas-video-badge";
-    badge.textContent = "引用";
-    badge.title = `只引用原文件，画布里没有副本：${item.src}`;
-    stage.append(badge);
-  }
+  /* 指向画布外的片子时，悬停直接把那份文件的完整路径给出来 */
+  if (item.linked) stage.title = item.src;
 
   const row = document.createElement("div");
   row.className = "canvas-video-row";
@@ -1468,12 +1447,6 @@ function createVideoPlayer(item, mediaSrc, options = {}) {
   if (item.src && mediaSrc) {
     video.src = mediaSrc;
     ready = true;
-  }
-  if (!item.src || options.mediaMissing) {
-    player.classList.add("is-missing");
-    toggle.disabled = true;
-    time.textContent = missingLabel(item, "视频丢失");
-    if (options.mediaMissing) player.title = `找不到 ${item.src}`;
   }
 
   /* 有 AAC 副本时画面自己不出声，声音全交给副本，不然两边一起响。 */
@@ -1735,20 +1708,45 @@ function createLineSvg(item) {
   return svg;
 }
 
+/* 书页是跨进程 iframe：它的布局尺寸一变就要跨进程重分配渲染表面，一帧做不完
+   （实测拖角每动一次 33ms、60 步掉 59 帧）。所以拖拽期间把书页钉在起始尺寸，
+   滚动区照真实尺寸排版、书页只用 transform 拉满——标题条和按钮不会跟着变胖。
+   钉住期间外层不滚动、也不跟着可视区改书页高度，松手一次付清。 */
+export function capturePagePin(item, el) {
+  if (item.type !== "ebook") return null;
+  const frame = el.querySelector(".canvas-ebook-page");
+  const scroll = el.querySelector(".canvas-ebook-scroll");
+  if (!frame || !scroll || !frame.offsetWidth || !frame.offsetHeight) return null;
+  return { frame, scroll, w: frame.offsetWidth, h: frame.offsetHeight, y: scroll.scrollTop };
+}
+
+export function pinEbookPage(pin) {
+  pin.frame.dataset.pinned = "1";
+  pin.frame.style.width = `${pin.w}px`;
+  pin.frame.style.height = `${pin.h}px`;
+  pin.scroll.style.overflowY = "hidden";
+  pin.scroll.scrollTop = pin.y;
+}
+
+export function stretchEbookPage(pin) {
+  pin.frame.style.transformOrigin = "0 0";
+  pin.frame.style.transform = `scale(${Math.max(0.02, pin.scroll.clientWidth / pin.w)}, ${Math.max(0.02, pin.scroll.clientHeight / pin.h)})`;
+}
+
+export function releaseEbookPage(pin) {
+  delete pin.frame.dataset.pinned;
+  pin.frame.style.removeProperty("width");
+  pin.frame.style.removeProperty("transform");
+  pin.frame.style.removeProperty("transform-origin");
+  pin.scroll.style.removeProperty("overflow-y");
+  pin.frame.style.height = `${Math.max(1, pin.scroll.clientHeight)}px`;
+  pin.scroll.scrollTop = pin.y;
+}
+
 /** 把数据同步到已有 DOM（拖动/缩放/改色时只走这里，不重建节点）。 */
 export function syncItemElement(el, item) {
   el.style.left = `${item.x}px`;
   el.style.top = `${item.y}px`;
-
-  const collapsed = item.collapsed === true && canCollapse(item);
-  el.classList.toggle("is-collapsed", collapsed);
-  const collapse = el.querySelector(".canvas-block-collapse");
-  if (collapse) {
-    collapse.setAttribute("aria-label", collapsed ? "展开" : "收起");
-    collapse.title = collapsed ? "展开内容" : "收起内容";
-  }
-  const collapsedName = el.querySelector(".canvas-collapsed-name");
-  if (collapsedName) collapsedName.textContent = collapseLabel(item);
 
   if (item.type === "line" || item.type === "arrow") {
     const points = linePoints(item);
@@ -1785,12 +1783,11 @@ export function syncItemElement(el, item) {
 
   if (item.type === "audio") {
     el.style.width = `${item.w}px`;
-    el.style.height = `${collapsed ? COLLAPSED_HEIGHT : item.h}px`;
+    el.style.height = `${item.h}px`;
     return;
   }
 
-  /* 视频壳、文件卡片、笔记和书页的排版都在卡片自己手里，这里只管按块的宽高摆位置；
-     收起时只留一条标题的高度，item.h 原样留着，展开就回去 */
+  /* 视频壳、文件卡片、笔记和书页的排版都在卡片自己手里，这里只管按块的宽高摆位置 */
   if (
     item.type === "video" ||
     item.type === "file" ||
@@ -1798,7 +1795,7 @@ export function syncItemElement(el, item) {
     item.type === "note"
   ) {
     el.style.width = `${item.w}px`;
-    el.style.height = `${collapsed ? COLLAPSED_HEIGHT : item.h}px`;
+    el.style.height = `${item.h}px`;
     return;
   }
 

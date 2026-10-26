@@ -527,10 +527,24 @@ fn reveal_path(path: &Path) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        let text = path.to_string_lossy().to_string();
-        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+        /* explorer /select 只认反斜杠，给正斜杠它只会开个目录不选中。 */
+        let fix = |p: &Path| {
+            let text = p.to_string_lossy().replace('/', "\\");
+            text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+        };
+        /* 目录直接打开；文件在就选中它；文件没了就退一步开它本该躺着的那个文件夹。 */
+        let arg = if path.is_dir() {
+            format!("\"{}\"", fix(path))
+        } else if path.is_file() {
+            format!("/select,\"{}\"", fix(path))
+        } else {
+            match path.parent().filter(|dir| dir.is_dir()) {
+                Some(dir) => format!("\"{}\"", fix(dir)),
+                None => format!("/select,\"{}\"", fix(path)),
+            }
+        };
         let _ = std::process::Command::new("explorer.exe")
-            .raw_arg(format!("/select,\"{text}\""))
+            .raw_arg(arg)
             .creation_flags(0x0800_0000)
             .spawn();
     }
@@ -1487,6 +1501,18 @@ fn file_path(dir: &Path, rel: &str) -> Result<PathBuf, String> {
     media_path(dir, rel, FILE_DIR, "文件")
 }
 
+/// 副本的相对路径自己带目录名（images/、audio/、video/、files/），
+/// 问「还在吗」和「在文件夹中显示」要按开头的目录挑对应的校验通道。
+fn copy_source_path(dir: &Path, rel: &str) -> Result<PathBuf, String> {
+    let first = rel.replace('\\', "/").split('/').next().unwrap_or("").to_string();
+    match first.as_str() {
+        IMAGE_DIR => image_path(dir, rel),
+        AUDIO_DIR => audio_path(dir, rel),
+        VIDEO_DIR => video_path(dir, rel),
+        _ => file_path(dir, rel),
+    }
+}
+
 /// 副本的文件名只保留字母数字，别的扩展名一律当 .bin 收：
 /// 块上另有原始文件名，这里只要保证落盘的名字不会搞出路径花样。
 fn safe_file_ext(raw: &str) -> String {
@@ -1961,24 +1987,18 @@ fn file_source_path(
 }
 
 #[tauri::command]
-pub fn canvas_open_file(
-    id: String,
-    rel: String,
-    linked: bool,
-    state: tauri::State<'_, CanvasState>,
-) -> Result<(), String> {
-    let path = file_source_path(&state, &id, &rel, linked)?;
-    open_in_system(&path)
-}
-
-#[tauri::command]
 pub fn canvas_reveal_file(
     id: String,
     rel: String,
     linked: bool,
     state: tauri::State<'_, CanvasState>,
 ) -> Result<(), String> {
-    let path = file_source_path(&state, &id, &rel, linked)?;
+    /* 故意不校验「文件还在不在」：副本没了更要带用户去那个文件夹，好让他把东西放回去。 */
+    let path = if linked {
+        PathBuf::from(rel)
+    } else {
+        copy_source_path(&resolve_dir(&state, &id)?, &rel)?
+    };
     reveal_path(&path);
     Ok(())
 }
@@ -1999,7 +2019,7 @@ pub fn canvas_delete_file(
     recycle_path(&path).map_err(|e| format!("删除文件失败：{e}"))
 }
 
-/// 卡片进画布时问一句「原文件还在吗」，不在了就在卡上标出来。
+/// 块指向的那份文件还在吗，拷贝态和引用态都问；不在了前端就把整块换成丢文件卡。
 #[tauri::command]
 pub fn canvas_file_exists(
     id: String,
@@ -2007,8 +2027,11 @@ pub fn canvas_file_exists(
     linked: bool,
     state: tauri::State<'_, CanvasState>,
 ) -> bool {
-    match file_source_path(&state, &id, &rel, linked) {
-        Ok(path) => path.is_file(),
+    if linked {
+        return PathBuf::from(&rel).is_file();
+    }
+    match resolve_dir(&state, &id) {
+        Ok(dir) => copy_source_path(&dir, &rel).is_ok(),
         Err(_) => false,
     }
 }
@@ -2092,10 +2115,4 @@ pub fn canvas_note_write_back(
         .unwrap_or(false);
     let bytes = encode_text(&text, format, crlf)?;
     fs::write(file, bytes).map_err(|e| format!("写回失败：{e}"))
-}
-
-/// 交给系统默认程序打开。实测 explorer.exe 只会弹一个资源管理器窗口，
-/// 必须走 ShellExecute；open 这个 crate 本来就是 opener 插件的依赖，不额外增加下载。
-fn open_in_system(path: &Path) -> Result<(), String> {
-    open::that_detached(path).map_err(|e| format!("打开失败：{e}"))
 }

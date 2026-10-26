@@ -45,8 +45,6 @@ export const copyCanvasFile = (id, path) => invoke("canvas_copy_file", { id, pat
 export const readFileText = (path) => invoke("canvas_file_text", { path });
 export const previewCanvasFile = (id, rel, linked) =>
   invoke("canvas_file_preview", { id, rel, linked: Boolean(linked) });
-export const openCanvasFile = (id, rel, linked) =>
-  invoke("canvas_open_file", { id, rel, linked: Boolean(linked) });
 export const revealCanvasFile = (id, rel, linked) =>
   invoke("canvas_reveal_file", { id, rel, linked: Boolean(linked) });
 export const deleteCanvasFile = (id, rel, linked) =>

@@ -221,7 +221,6 @@ async function switchRoot(target) {
             : "什么都不带，新文件夹从空的开始；旧数据原地留着，指回来还能看见",
         },
       ],
-      cancelText: "取消",
     });
     if (choice === null) return;
     mode = choice;

@@ -9,6 +9,13 @@
 
 let openDialog = null;
 
+/* 关闭用的 ×：跟工作台标题栏那颗同一个字形，别自己拿字符凑（文字 × 基线偏下、粗细也不对） */
+export const CLOSE_X_SVG = `
+  <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+    <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1" fill="none"/>
+  </svg>
+`;
+
 export function confirmDialog({
   title = "请确认",
   message = "",
@@ -169,14 +176,14 @@ export function promptDialog({
   });
 }
 
-/* 多选项弹层：confirmDialog 只有两个按钮，装不下「拷进画布 / 只引用原文件 / 取消」。
- * 返回选中项的 value，取消返回 null。上下键换选项，Enter 确认，Esc 或点空白算取消。 */
+/* 多选项弹层：confirmDialog 只有两个按钮，装不下「拷进画布 / 只引用原文件」。
+ * 返回选中项的 value，取消返回 null。上下键换选项，Enter 确认，
+ * 取消没有按钮——走右上角 × 、Esc 或点空白。 */
 export function choiceDialog({
   title = "请确认",
   message = "",
   note = "",
   options = [],
-  cancelText = "取消",
 } = {}) {
   openDialog?.(false);
 
@@ -186,12 +193,10 @@ export function choiceDialog({
     mask.innerHTML = `
       <div class="dialog dialog-choice-modal" role="dialog" aria-modal="true">
         <p class="dialog-title"></p>
+        <button class="dialog-close" type="button" aria-label="关闭">${CLOSE_X_SVG}</button>
         <p class="dialog-message"></p>
         <div class="dialog-choices"></div>
         <p class="dialog-note"></p>
-        <div class="dialog-actions">
-          <button class="dialog-btn dialog-cancel" type="button"></button>
-        </div>
       </div>
     `;
     const dialog = mask.querySelector(".dialog");
@@ -202,8 +207,7 @@ export function choiceDialog({
     const noteEl = dialog.querySelector(".dialog-note");
     noteEl.textContent = note;
     noteEl.hidden = !note;
-    const cancelBtn = dialog.querySelector(".dialog-cancel");
-    cancelBtn.textContent = cancelText;
+    const closeBtn = dialog.querySelector(".dialog-close");
 
     const box = dialog.querySelector(".dialog-choices");
     const buttons = options.map((option) => {
@@ -257,11 +261,11 @@ export function choiceDialog({
         if (document.activeElement?.closest?.(".dialog-choice")) return;
         e.preventDefault();
         e.stopPropagation();
-        (buttons[0] ?? cancelBtn).click();
+        buttons[0]?.click();
       }
     };
 
-    cancelBtn.addEventListener("click", () => finish(null));
+    closeBtn.addEventListener("click", () => finish(null));
     mask.addEventListener("pointerdown", (e) => {
       if (!dialog.contains(e.target)) finish(null);
     });

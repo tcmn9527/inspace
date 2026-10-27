@@ -7,6 +7,9 @@ export const createCanvas = (name) => invoke("canvas_create", { name });
 export const openCanvas = (id) => invoke("canvas_open", { id });
 export const saveCanvasItems = (id, items) => invoke("canvas_save_items", { id, items });
 export const saveCanvasCamera = (id, camera) => invoke("canvas_save_camera", { id, camera });
+/* 这张画布「复制的连接线属性」，跟着 canvas.json 走；没复制过时传 null */
+export const saveConnectorPreset = (id, preset) =>
+  invoke("canvas_save_connector", { id, connector: preset });
 export const renameCanvas = (id, name) => invoke("canvas_rename", { id, name });
 export const deleteCanvas = (id) => invoke("canvas_delete", { id });
 export const saveCanvasImage = (id, data, ext) => invoke("canvas_save_image", { id, data, ext });
@@ -45,6 +48,19 @@ export const copyCanvasFile = (id, path) => invoke("canvas_copy_file", { id, pat
 export const readFileText = (path) => invoke("canvas_file_text", { path });
 export const previewCanvasFile = (id, rel, linked) =>
   invoke("canvas_file_preview", { id, rel, linked: Boolean(linked) });
+/* 块内编辑文本文件：读整份、写回整份。路径后端自己从 items.json 那块查，
+   这里只给块 id；stamp 是编辑前那份文件的 mtime+大小，写回时拿它判断有没有被外部改过。 */
+export const readFileBody = (id, itemId) => invoke("canvas_file_body", { id, itemId });
+export const writeBackCanvasFile = (id, itemId, text, body, force) =>
+  invoke("canvas_file_write_back", {
+    id,
+    itemId,
+    text,
+    format: body.format,
+    crlf: Boolean(body.crlf),
+    stamp: body.stamp || "",
+    force: Boolean(force),
+  });
 export const revealCanvasFile = (id, rel, linked) =>
   invoke("canvas_reveal_file", { id, rel, linked: Boolean(linked) });
 export const deleteCanvasFile = (id, rel, linked) =>

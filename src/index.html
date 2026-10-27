@@ -685,16 +685,14 @@
             <g id="canvas-edge-transform"></g>
           </svg>
           <div class="canvas-world" id="canvas-world"></div>
-          <div class="canvas-port-layer" id="canvas-port-layer"></div>
-          <div class="canvas-select-layer" id="canvas-select-layer"></div>
           <div class="canvas-endpoint-layer" id="canvas-endpoint-layer"></div>
-          <p class="canvas-hint" id="canvas-hint">
-            拖动空白处平移 · 滚轮平移 · Ctrl+滚轮缩放 · 直接粘贴或拖入图片、音乐、视频，粘贴文字 · 工具栏可插入便签、笔记
-          </p>
+          <div class="canvas-guide-layer" id="canvas-guide-layer" aria-hidden="true"></div>
+          <p class="canvas-metrics" id="canvas-metrics" hidden></p>
 
           <!-- 鸟瞰窗：右下角整张画布的缩小版，拖亮框或点框外就把主画布带到那儿 -->
           <div class="canvas-minimap" id="canvas-minimap">
             <canvas class="canvas-minimap-canvas" id="canvas-minimap-canvas"></canvas>
+            <span class="canvas-minimap-count" id="canvas-minimap-count" aria-label="画布上的面板数量">0</span>
             <button
               class="canvas-minimap-min"
               id="canvas-minimap-min"

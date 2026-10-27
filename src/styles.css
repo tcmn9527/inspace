@@ -265,8 +265,8 @@ body.is-resizing {
   position: relative;
   width: var(--card-size);
   height: var(--card-size);
-  border: 1px solid var(--line);
-  border-radius: 8px; /* 用户要求：便签卡片改圆角，首页区与便签页一致 */
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px; /* 和画布上的面板同一套外壳：首页区、便签墙、画布便签块三处一致 */
   padding: 16px 12px; /* 上下留白比左右大一点，正文不贴卡片上下边 */
   color: #000000;
   overflow: hidden;
@@ -787,6 +787,43 @@ body.is-resizing {
   color: var(--danger);
 }
 
+/* 行首图标槽（画布「快速设置」用）：宽度固定，三行的文字才能左对齐；
+   颜色比正文淡一档，只做说明，不抢菜单文字。 */
+.menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  margin-right: 6px;
+  vertical-align: middle;
+  color: color-mix(in srgb, var(--fg) 62%, transparent);
+}
+
+.menu-icon svg {
+  display: block;
+}
+
+/* 行尾的当前值指示：文字靠左、指示靠右，且不吃指针——可点的一直是整行 */
+.ctx-menu button.has-trailing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.ctx-menu button.has-trailing .menu-icon {
+  margin-right: 0;
+  pointer-events: none;
+}
+
+.menu-icon-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--fg) 35%, transparent);
+  background: var(--menu-icon-color, transparent);
+}
+
 /* ---------- 取色盘（右键「设置文字颜色 / 设置背景颜色」） ---------- */
 .color-pop {
   position: fixed;
@@ -968,6 +1005,7 @@ body.is-resizing {
 }
 
 .dialog {
+  position: relative;
   width: 324px;
   padding: 18px 18px 14px;
   border: 1px solid var(--line);
@@ -991,13 +1029,52 @@ body.is-resizing {
   overflow-wrap: anywhere;
 }
 
+/* 属性卡：比通用弹框宽一点，路径按字符换行、整段可选中（全局禁了选字，这里单独放开） */
+.dialog-props {
+  width: 460px;
+  max-width: calc(100vw - 48px);
+  padding: 14px 18px;
+}
+
+/* × 号绝对定位在右上角，不参与标题行排版，否则把标题整个顶下去 */
+.dialog-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  border-color: var(--line);
+  color: var(--fg);
+}
+
+.props-path {
+  margin-top: 6px;
+  color: var(--fg);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 18px;
 }
-
 .dialog-btn {
   min-width: 72px;
   height: 30px;
@@ -1185,8 +1262,9 @@ body.is-resizing {
   border-radius: 5px;
   background: transparent;
   color: var(--muted);
-  font-size: 16px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
@@ -1230,8 +1308,8 @@ body.is-resizing {
   max-height: 132px;
   padding: 12px 10px;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
   font-size: 13px;
   line-height: 19px;
   text-align: left;
@@ -2231,8 +2309,21 @@ body.is-resizing {
   pointer-events: none;
 }
 
-.canvas-connector.is-selected .canvas-edge-visible {
+/* 选中态：在线条底下垫一条半透明粗光带，而不是把线条本身刷成主题色。
+   之前用 stroke: var(--accent) 覆盖，改颜色/线型时看到的都是主题蓝，看不出真实效果。 */
+.canvas-edge-halo {
+  fill: none;
   stroke: var(--accent);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.canvas-connector.is-selected .canvas-edge-halo {
+  opacity: 0.3;
 }
 
 .canvas-edge-hit {
@@ -2254,26 +2345,46 @@ body.is-resizing {
   pointer-events: none;
 }
 
-/* 连线端口：屏幕坐标，大小不随缩放变 */
-.canvas-port-layer {
+/* 连线端口：一个框装四个圈，框画在块自己身上（inset 由 JS 补），所以块被压在下面时端口也一起被压住。
+   框本身不吃指针，只有圆圈可点。 */
+.canvas-port-box {
   position: absolute;
-  inset: 0;
-  /* 端口圈要盖住块边框和选中框的描边，不能从圆圈中间穿过去 */
-  z-index: 3;
+  z-index: 2;
   pointer-events: none;
 }
 
 .canvas-port {
   position: absolute;
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--accent);
+  /* 块所在的 world 被相机缩放了，乘回倒数才在屏幕上保持 10px 一圈 */
+  width: calc(10px * var(--canvas-inv, 1));
+  height: calc(10px * var(--canvas-inv, 1));
+  border: calc(1px * var(--canvas-inv, 1)) solid var(--accent);
   border-radius: 50%;
   background: var(--surface);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
   transform: translate(-50%, -50%);
   pointer-events: auto;
   cursor: crosshair;
+}
+
+.canvas-port[data-side="top"] {
+  left: 50%;
+  top: 0;
+}
+
+.canvas-port[data-side="right"] {
+  left: 100%;
+  top: 50%;
+}
+
+.canvas-port[data-side="bottom"] {
+  left: 50%;
+  top: 100%;
+}
+
+.canvas-port[data-side="left"] {
+  left: 0;
+  top: 50%;
 }
 
 .canvas-port:hover {
@@ -2289,6 +2400,8 @@ body.is-resizing {
 }
 
 /* 图元 */
+/* 画布上的卡片型面板（便签/笔记/音频/文件/电子书/视频）共用同一套外壳：
+   1px --line 40% 边框、10px 圆角、--surface 底色，一律不投影。 */
 .canvas-item {
   position: absolute;
   box-sizing: border-box;
@@ -2307,7 +2420,7 @@ body.is-resizing {
 .canvas-item-text {
   padding: 4px 6px;
   border: 1px dashed transparent;
-  border-radius: 4px;
+  border-radius: 10px;
   line-height: 1.5;
   cursor: move;
   white-space: pre-wrap;
@@ -2353,8 +2466,8 @@ body.is-resizing {
   width: 100%;
   height: 100%;
   padding: 16px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
@@ -2389,10 +2502,9 @@ body.is-resizing {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
 }
 
 .canvas-note-body {
@@ -2432,7 +2544,7 @@ body.is-resizing {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  border-radius: 2px;
+  border-radius: 10px;
   pointer-events: none;
 }
 
@@ -2449,7 +2561,7 @@ body.is-resizing {
   padding: 8px 10px;
   border: 1px dashed color-mix(in srgb, var(--danger) 45%, transparent);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  background: var(--surface);
   text-align: center;
   user-select: none;
 }
@@ -2505,19 +2617,15 @@ body.is-resizing {
   width: 100%;
   height: 100%;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--line) 32%, transparent);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
   overflow: hidden;
   user-select: none;
 }
 
 .canvas-audio-player.is-playing {
   border-color: var(--accent);
-  box-shadow:
-    0 0 0 1px var(--accent),
-    0 10px 26px rgba(0, 0, 0, 0.45);
 }
 
 .canvas-audio-player.is-error {
@@ -2732,10 +2840,9 @@ body.is-resizing {
   width: 100%;
   height: 100%;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--line) 32%, transparent);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
   overflow: hidden;
   user-select: none;
 }
@@ -2830,6 +2937,39 @@ body.is-resizing {
   color: var(--danger);
 }
 
+/* 文本块的就地编辑：占掉预览那一格，点别处即写回源文件 */
+.canvas-file-editor {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+}
+
+.canvas-file-editor-tip {
+  padding: 0 2px 6px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+
+/* 编辑框跟预览那一格用同一套字：字号、行高、左右留白都对齐 .canvas-file-lines，
+   不然双击进编辑，同一份文本会当场换个样子，看着像内容被改了 */
+.canvas-file-textarea {
+  padding: 0 38px 0 0;
+  font-size: 11px;
+  line-height: 16px;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.canvas-item-file.is-editing {
+  cursor: default;
+}
+
 .canvas-file-table {
   border-collapse: collapse;
   font-size: 11px;
@@ -2863,10 +3003,9 @@ body.is-resizing {
   flex-direction: column;
   width: 100%;
   height: 100%;
-  border: 1px solid color-mix(in srgb, var(--line) 32%, transparent);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
   overflow: hidden;
   user-select: none;
 }
@@ -3037,19 +3176,15 @@ body.is-resizing {
   flex-direction: column;
   width: 100%;
   height: 100%;
-  border: 1px solid color-mix(in srgb, var(--line) 32%, transparent);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
   overflow: hidden;
   user-select: none;
 }
 
 .canvas-video-player.is-playing {
   border-color: var(--accent);
-  box-shadow:
-    0 0 0 1px var(--accent),
-    0 10px 26px rgba(0, 0, 0, 0.45);
 }
 
 .canvas-video-player.is-error {
@@ -3244,7 +3379,6 @@ body.is-resizing {
   border: none;
   border-radius: 0;
   background: #000;
-  box-shadow: none;
 }
 
 .canvas-video-player:fullscreen .canvas-video-stage {
@@ -3390,19 +3524,22 @@ body.is-resizing {
   cursor: move;
 }
 
-/* 选中框（屏幕坐标，不随缩放变粗） */
-.canvas-select-layer {
+/* 选中框：跟端口框一样画在块自己身上，inset 由 JS 按块的边框宽度补出来。
+   层级压在端口圈底下，免得 1px 描边从圆圈中间穿过去。 */
+.canvas-sel-box {
   position: absolute;
-  inset: 0;
-  z-index: 2;
+  z-index: 1;
+  border: calc(1px * var(--canvas-inv, 1)) solid var(--accent);
+  box-shadow: 0 0 0 calc(1px * var(--canvas-inv, 1))
+    color-mix(in srgb, var(--accent) 25%, transparent);
   pointer-events: none;
 }
 
-.canvas-sel-box {
-  position: absolute;
-  border: 1px solid var(--accent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
-  pointer-events: none;
+/* 挪块途中只留选中框：角上四个缩放手柄、边上四个端口圈都是停下来才用的东西，
+   跟着块一起飞只会糊成一片（多选整组拖动时最明显）。按下这一下就藏，松手回来。 */
+.canvas-stage.is-moving .canvas-handle,
+.canvas-stage.is-moving .canvas-port {
+  display: none;
 }
 
 /* 连线端点圆钮：压在端口圈之上，保证端点可拖 */
@@ -3413,14 +3550,34 @@ body.is-resizing {
   pointer-events: none;
 }
 
+/* 拖拽时的对齐辅助线：临时提示，压在所有面板之上，松手就清掉 */
+.canvas-guide-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.canvas-guide {
+  position: absolute;
+}
+
+.canvas-guide-vertical {
+  border-left: 1px dashed var(--accent);
+}
+
+.canvas-guide-horizontal {
+  border-top: 1px dashed var(--accent);
+}
+
 .canvas-handle {
   position: absolute;
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--accent);
-  border-radius: 2px;
+  width: calc(10px * var(--canvas-inv, 1));
+  height: calc(10px * var(--canvas-inv, 1));
+  border: calc(1px * var(--canvas-inv, 1)) solid var(--accent);
+  border-radius: calc(2px * var(--canvas-inv, 1));
   background: var(--surface);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
   pointer-events: auto;
 }
 
@@ -3598,15 +3755,23 @@ body.is-resizing {
   pointer-events: none;
 }
 
-/* 提示与空状态 */
-.canvas-hint {
+/* 左下角坐标条：选中面板的左上角 X/Y，样式跟右下角缩放条同一路子（浮层控件） */
+.canvas-metrics {
   position: absolute;
   left: 14px;
-  bottom: 10px;
+  bottom: 14px;
+  z-index: 6;
   margin: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
   color: var(--muted);
   font-size: 12px;
-  opacity: 0.72;
+  /* 拖动途中数字一直在跳，等宽数字才不会左右抖 */
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 
@@ -3639,6 +3804,24 @@ body.is-resizing {
 
 .canvas-minimap-canvas.is-grabbing {
   cursor: grabbing;
+}
+
+/* 左上角的块数，和右上角收起按键做是一对：同高、同底色、同圆角。
+   pointer-events:none —— 它压在画面上，不能挡住拖框和点跳。 */
+.canvas-minimap-count {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  height: 20px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .canvas-minimap-min {
@@ -3691,6 +3874,7 @@ body.is-resizing {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
+/* ---- 空状态：还没有画布 ---- */
 .canvas-empty {
   position: absolute;
   inset: 0;

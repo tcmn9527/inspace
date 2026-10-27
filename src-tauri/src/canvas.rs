@@ -68,6 +68,8 @@ pub struct CanvasData {
     pub meta: CanvasMeta,
     pub camera: Value,
     pub items: Value,
+    /// 这张画布「复制的连接线属性」（颜色/线型/箭头），没复制过就是 null
+    pub connector: Value,
 }
 
 fn now_ms() -> i64 {
@@ -482,6 +484,15 @@ fn read_meta(dir: &Path, fallback: &str) -> (String, Value) {
     (name, camera)
 }
 
+/// 复制下来的连接线属性；没复制过（或老画布）就是 null，由前端用各自的默认值。
+fn read_connector(dir: &Path) -> Value {
+    read_json(&dir.join(META_FILE))
+        .ok()
+        .flatten()
+        .and_then(|m| m.get("connector").cloned())
+        .unwrap_or(Value::Null)
+}
+
 fn read_items(dir: &Path) -> Result<Value, String> {
     let items = read_json(&dir.join(ITEMS_FILE))?.unwrap_or_else(|| json!([]));
     if !items.is_array() {
@@ -520,6 +531,7 @@ fn open_dir(dir: &Path, id: &str) -> Result<CanvasData, String> {
         },
         camera,
         items,
+        connector: read_connector(dir),
     })
 }
 
@@ -642,6 +654,27 @@ pub fn canvas_save_camera(
     let (name, _) = read_meta(&dir, &id);
     meta["name"] = json!(name);
     meta["camera"] = camera;
+    if meta.get("createdAt").is_none() {
+        meta["createdAt"] = json!(now_ms());
+    }
+    write_json(&dir.join(META_FILE), &meta)
+}
+
+/// 存这张画布复制的连接线属性；传 null 表示没复制过。
+#[tauri::command]
+pub fn canvas_save_connector(
+    id: String,
+    connector: Value,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    if !connector.is_null() && !connector.is_object() {
+        return Err("连接线属性格式不对".to_string());
+    }
+    let dir = resolve_dir(&state, &id)?;
+    let mut meta = read_json(&dir.join(META_FILE))?.unwrap_or_else(|| json!({}));
+    let (name, _) = read_meta(&dir, &id);
+    meta["name"] = json!(name);
+    meta["connector"] = connector;
     if meta.get("createdAt").is_none() {
         meta["createdAt"] = json!(now_ms());
     }
@@ -1748,6 +1781,144 @@ pub fn canvas_file_preview(
     })
 }
 
+/// 整篇覆盖用户自己的文件不能一步写：先落到旁边的 .tmp 再换过去。
+/// 直接 fs::write 摊在中间崩一次，那份文件就成半截甚至 0 字节了。
+fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut tmp_name = path
+        .file_name()
+        .ok_or_else(|| "文件名不合法".to_string())?
+        .to_os_string();
+    tmp_name.push(".tmp");
+    let tmp = path.with_file_name(tmp_name);
+    fs::write(&tmp, bytes).map_err(|e| format!("写入失败：{e}"))?;
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("替换文件失败：{e}")
+    })?;
+    Ok(())
+}
+
+/// 从 items.json 里挖出这块「文本文件块」，返回它自己记着的 (路径, 是不是引用)。
+/// 读写都只认这一条：前端递个路径进来就能改盘上任何文件，那不行。
+fn editable_text_item(dir: &Path, item_id: &str) -> Result<(String, bool), String> {
+    let items = read_items(dir)?;
+    let item = items
+        .as_array()
+        .and_then(|list| {
+            list.iter()
+                .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id))
+        })
+        .ok_or_else(|| "这块已经不在画布上了".to_string())?;
+    if item.get("type").and_then(Value::as_str) != Some("file")
+        || item.get("text").and_then(Value::as_bool) != Some(true)
+    {
+        return Err("只有文本文件块能这样编辑".to_string());
+    }
+    let src = item
+        .get("src")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "这块没记文件在哪".to_string())?;
+    let linked = item.get("linked").and_then(Value::as_bool) == Some(true);
+    Ok((src.to_string(), linked))
+}
+
+/// 这份文件现在的样子。编辑前拿一次、写回前再拿一次，对不上就是被别的程序动过。
+fn file_stamp(path: &Path) -> String {
+    fs::metadata(path)
+        .map(|meta| format!("{}:{}", file_mtime(path), meta.len()))
+        .unwrap_or_default()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBody {
+    pub text: String,
+    pub encoding: &'static str,
+    /// 写回时按这两个还原字节形态，跟笔记块那对口径一样
+    pub format: &'static str,
+    pub crlf: bool,
+    pub stamp: String,
+}
+
+/// 块内编辑器要的那份正文：整份读，不像预览那样掐头。
+/// 超过 4MB 直接拒——这么大一份正文塞进输入框，编辑器本身就先卡死了，
+/// 而且改一个字就要重写几 MB，不如让用户去原文件里改。
+#[tauri::command]
+pub fn canvas_file_body(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<FileBody, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let (src, linked) = editable_text_item(&dir, &item_id)?;
+    let path = file_source_path(&state, &id, &src, linked)?;
+    let meta = fs::metadata(&path).map_err(|_| "文件不在了".to_string())?;
+    if meta.len() > MAX_TEXT_BYTES {
+        return Err("这份文本超过 4MB，画布里只读不改，请到原文件里编辑".to_string());
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("读取失败：{e}"))?;
+    let decoded = decode_text(&bytes)?;
+    Ok(FileBody {
+        stamp: file_stamp(&path),
+        text: decoded.text,
+        encoding: encoding_label(decoded.format),
+        format: decoded.format,
+        crlf: decoded.crlf,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteBackResult {
+    /// 原文件在编辑期间被别的程序改过：没有直接盖上去，等用户点头
+    pub conflict: bool,
+    pub size: u64,
+    /// 落盘之后这份文件的样子，给下一次保存当基线
+    pub stamp: String,
+}
+
+/// 文本块写回它自己记着的那份文件。GBK 存的中文文件还按 GB18030 落盘，
+/// CRLF 的文件别因为画布改了一次就整篇换行大改。
+#[tauri::command]
+pub fn canvas_file_write_back(
+    id: String,
+    item_id: String,
+    text: String,
+    format: String,
+    crlf: bool,
+    stamp: String,
+    force: bool,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<WriteBackResult, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let (src, linked) = editable_text_item(&dir, &item_id)?;
+    let path = file_source_path(&state, &id, &src, linked)?;
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if !is_text_ext(&ext) {
+        return Err("这份文件不在文本白名单里，不往它上面写".to_string());
+    }
+    let now = file_stamp(&path);
+    if !force && !stamp.is_empty() && now != stamp {
+        let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        return Ok(WriteBackResult {
+            conflict: true,
+            size,
+            stamp: now,
+        });
+    }
+    let bytes = encode_text(&text, &format, crlf)?;
+    write_bytes_atomic(&path, &bytes)?;
+    Ok(WriteBackResult {
+        conflict: false,
+        size: bytes.len() as u64,
+        stamp: file_stamp(&path),
+    })
+}
+
 struct DecodedText {
     text: String,
     /// 记的是具体哪一种字节形态（utf8 / utf8bom / gb18030 / utf16le / utf16be），
@@ -2114,5 +2285,5 @@ pub fn canvas_note_write_back(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let bytes = encode_text(&text, format, crlf)?;
-    fs::write(file, bytes).map_err(|e| format!("写回失败：{e}"))
+    write_bytes_atomic(file, &bytes)
 }

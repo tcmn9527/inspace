@@ -457,8 +457,9 @@ function facingSide(point, bounds) {
   return dy >= 0 ? "bottom" : "top";
 }
 
-/* auto 端自动挑相对的两条边；固定端（用户从端口拖出）保持不动 */
-function resolveSides(fromSide, toSide, aBounds, bBounds) {
+/* auto 端自动挑相对的两条边；固定端（用户从端口拖出）保持不动。
+   只给「刚建立连线」和「拖端点时的预览线」用，渲染路径不再调它。 */
+export function pickSides(fromSide, toSide, aBounds, bBounds) {
   let sideA = SIDES.includes(fromSide) ? fromSide : "auto";
   let sideB = SIDES.includes(toSide) ? toSide : "auto";
   if (sideA === "auto" && sideB === "auto") {
@@ -580,13 +581,34 @@ function elbowPath(a, na, b, nb) {
 }
 
 export function routeConnector(shape, fromSide, toSide, aBounds, bBounds) {
-  const { sideA, sideB } = resolveSides(fromSide, toSide, aBounds, bBounds);
+  /* 边在连线建立那一刻就定死了：移动块只改线的走法，不改它接在哪条边上。
+     走到兜底说明这条线没被 pinConnectorSides 固化过（老数据在首次渲染时会补上）。 */
+  const sideA = SIDES.includes(fromSide) ? fromSide : "right";
+  const sideB = SIDES.includes(toSide) ? toSide : "left";
   const a = sideAnchor(aBounds, sideA);
   const b = sideAnchor(bBounds, sideB);
   const na = SIDE_NORMALS[sideA];
   const nb = SIDE_NORMALS[sideB];
   const d = shape === "curve" ? curvePath(a, na, b, nb) : elbowPath(a, na, b, nb);
   return { a, b, sideA, sideB, d };
+}
+
+/* 拖端点过程中的预览线：落点还没定，按当前几何临时挑边 */
+export function routeConnectorPreview(shape, fromSide, toSide, aBounds, bBounds) {
+  const { sideA, sideB } = pickSides(fromSide, toSide, aBounds, bBounds);
+  return routeConnector(shape, sideA, sideB, aBounds, bBounds);
+}
+
+/* 把 auto 端就地钉成当时那条边；返回是否真的改了数据 */
+export function pinConnectorSides(item, getBounds) {
+  const aBounds = getBounds(item.from.item);
+  const bBounds = getBounds(item.to.item);
+  if (!aBounds || !bBounds) return false;
+  const { sideA, sideB } = pickSides(item.from.side, item.to.side, aBounds, bBounds);
+  const changed = item.from.side !== sideA || item.to.side !== sideB;
+  item.from.side = sideA;
+  item.to.side = sideB;
+  return changed;
 }
 
 export function connectorGeometry(item, getBounds) {
@@ -1839,16 +1861,20 @@ export function createConnectorElement(item) {
 
   const visible = document.createElementNS(SVG_NS, "path");
   visible.classList.add("canvas-edge-visible");
+  /* 选中态画在线条底下：一条半透明粗光带，不覆盖线条本色 */
+  const halo = document.createElementNS(SVG_NS, "path");
+  halo.classList.add("canvas-edge-halo");
   /* 2px 的线太细，叠一条透明宽线专门接指针 */
   const hit = document.createElementNS(SVG_NS, "path");
   hit.classList.add("canvas-edge-hit");
 
-  group.append(visible, hit);
+  group.append(halo, visible, hit);
   syncConnectorElement(group, item, null);
   return group;
 }
 
 export function syncConnectorElement(group, item, geometry) {
+  const halo = group.querySelector(".canvas-edge-halo");
   const visible = group.querySelector(".canvas-edge-visible");
   const hit = group.querySelector(".canvas-edge-hit");
   const head = group.querySelector("marker path");
@@ -1872,6 +1898,7 @@ export function syncConnectorElement(group, item, geometry) {
   group.removeAttribute("visibility");
   visible.setAttribute("d", geometry.d);
   hit.setAttribute("d", geometry.d);
+  if (halo) halo.setAttribute("d", geometry.d);
 }
 
 /** 把屏幕尺寸按比例塞进 IMAGE_MAX_SIDE，并保持宽高比。 */

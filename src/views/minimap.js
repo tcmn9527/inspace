@@ -1,5 +1,6 @@
 /* 右下角鸟瞰窗：整张画布的缩小版 + 当前视窗框。
  * 拖那个框，主画布跟着走；点框外的任意处，把那处拉到屏幕正中。
+ * 点过一下之后框进入「选中」态，此时方向键能一格一格挪视野（Shift 大步）。
  * 画在一张 <canvas> 上而不是把块镜像成 DOM 节点：块数上百时每次改动重建节点会卡，
  * 而这里要的只是几百个矩形，一次绘制就够跟住相机。 */
 
@@ -8,6 +9,8 @@ const EDGE_PAD = 6; /* 小窗里四周留的空白（CSS px） */
 const FIT_PAD = 0.08; /* 取景范围按内容外扩的比例 */
 const MIN_FIT = 1200; /* 空画布时的兜底取景边长（世界像素），别让缩小版糊成一个点 */
 const MIN_DOT = 1.5; /* 块再小也至少画这么大，否则内容铺得远时看不见 */
+const NUDGE = 0.05; /* 方向键一格挪视野的 5% */
+const NUDGE_FAST = 0.25; /* 按住 Shift 一格挪 25% */
 
 /* 按类型分色，只求一眼分辨「找那张图还是找那段字」，不追求还原卡片外观。
    线、箭头、连线不在表里 —— 鸟瞰窗里不画它们。 */
@@ -33,12 +36,14 @@ let fitKey = "";
 let minimized = false;
 let queued = false;
 let drag = null;
+let focused = false; /* 点过一次视窗框之后，方向键归它 */
 
 export function initMinimap(options) {
   hooks = options;
   ui = {
     root: document.getElementById("canvas-minimap"),
     canvas: document.getElementById("canvas-minimap-canvas"),
+    count: document.getElementById("canvas-minimap-count"),
     min: document.getElementById("canvas-minimap-min"),
     key: document.getElementById("canvas-minimap-key"),
   };
@@ -55,7 +60,21 @@ export function initMinimap(options) {
     e.stopPropagation();
   });
   new ResizeObserver(() => redraw()).observe(ui.canvas);
+  document.addEventListener("keydown", onKeyDown);
   setMinimized(localStorage.getItem(STORAGE_KEY) === "min");
+}
+
+/* 取消「方向键归鸟瞰窗」；返回 true 表示刚才确实是选中态、这个按键事件已被用掉 */
+export function blurMinimapFocus() {
+  if (!focused) return false;
+  focused = false;
+  redraw();
+  return true;
+}
+
+/* 方向键此刻归谁：鸟瞰窗拿着的时候，画布就别用方向键挪块 */
+export function isMinimapFocused() {
+  return focused;
 }
 
 export function refreshMinimap() {
@@ -70,6 +89,8 @@ export function refreshMinimap() {
 function setMinimized(on) {
   if (!ui) return;
   minimized = on;
+  /* 面板都看不见了还吃方向键，会让人以为画布自己乱走 */
+  if (on) focused = false;
   ui.root.hidden = on;
   ui.key.hidden = !on;
   localStorage.setItem(STORAGE_KEY, on ? "min" : "open");
@@ -108,6 +129,7 @@ function onPointerDown(e) {
   e.preventDefault();
   e.stopPropagation();
   const p = localPoint(e);
+  focused = true;
   if (onBox(p)) {
     /* 拖框走增量：不依赖「这一点是哪个世界坐标」，取景怎么算都不会自反馈 */
     drag = { x: p.x, y: p.y };
@@ -142,6 +164,36 @@ function onPointerUp(e) {
   ui.canvas.classList.remove("is-grabbing");
   ui.canvas.releasePointerCapture?.(e.pointerId);
   hooks.commitCamera();
+  /* 拖框期间没人重画（相机变化只改主画布的 transform），松手补一次，
+     顺手把选中态画出来 */
+  redraw();
+}
+
+/* 选中之后方向键挪视野：一格是视野的 5%，按住 Shift 是 25% */
+function onKeyDown(e) {
+  if (!focused || minimized || !view) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const dx = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+  const dy = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+  if (!dx && !dy) return;
+  const camera = hooks.getCamera();
+  const size = hooks.getStageSize();
+  if (!camera || !size.w || !size.h) return;
+  const focusedEl = document.activeElement;
+  if (
+    focusedEl &&
+    (focusedEl.tagName === "INPUT" ||
+      focusedEl.tagName === "TEXTAREA" ||
+      focusedEl.isContentEditable)
+  ) {
+    return;
+  }
+  e.preventDefault();
+  const ratio = e.shiftKey ? NUDGE_FAST : NUDGE;
+  /* panBy 收的是世界像素，视野本身在世界里就是 stage 尺寸 / scale */
+  panBy(dx * ratio * (size.w / camera.scale), dy * ratio * (size.h / camera.scale));
+  hooks.commitCamera();
+  redraw();
 }
 
 function contentBounds(items) {
@@ -168,6 +220,31 @@ function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
+/* 选中态要把框线往前景色压暗一档。主题变量可能写成 hsl() 或 color-mix()，
+   画布不见得认得，所以借一个隐藏节点让浏览器自己解析成 rgb。 */
+let probe = null;
+
+function toRgb(color) {
+  if (!color) return null;
+  if (!probe) {
+    probe = document.createElement("span");
+    probe.style.display = "none";
+    document.body.appendChild(probe);
+  }
+  probe.style.color = "";
+  probe.style.color = color;
+  const m = /^rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/.exec(getComputedStyle(probe).color);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+function shade(color, amount) {
+  const base = toRgb(color);
+  const dark = toRgb(getComputedStyle(document.documentElement).getPropertyValue("--fg").trim());
+  if (!base || !dark) return color;
+  const mixed = base.map((v, i) => Math.round(v + (dark[i] - v) * amount));
+  return `rgb(${mixed.join(",")})`;
+}
+
 function redraw() {
   if (!ui || !ctx || !hooks.getCamera()) return;
   const rect = ui.canvas.getBoundingClientRect();
@@ -186,7 +263,11 @@ function redraw() {
   const camera = hooks.getCamera();
   const size = hooks.getStageSize();
   const items = hooks.getItems();
-  const selectedId = hooks.getSelectedId();
+  const selectedIds = hooks.getSelectedIds();
+  if (ui.count) {
+    /* 连线不是「一块面板」，按画布自己的口径排除 */
+    ui.count.textContent = String(items.filter((item) => item.type !== "connector").length);
+  }
   const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
   const viewport = {
     x: -camera.x / camera.scale,
@@ -244,12 +325,12 @@ function redraw() {
     const rw = Math.max((Number(item.w) || 0) * s, MIN_DOT);
     const rh = Math.max((Number(item.h) || 0) * s, MIN_DOT);
     const visible = x + rw >= box.x && x <= box.x + box.w && y + rh >= box.y && y <= box.y + box.h;
-    ctx.globalAlpha = item.id === selectedId ? 1 : visible ? 0.95 : 0.45;
+    ctx.globalAlpha = selectedIds.has(item.id) ? 1 : visible ? 0.95 : 0.45;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.roundRect(x, y, rw, rh, Math.min(2, rw / 2, rh / 2));
     ctx.fill();
-    if (item.id === selectedId) {
+    if (selectedIds.has(item.id)) {
       ctx.globalAlpha = 1;
       ctx.strokeStyle = accent;
       ctx.lineWidth = 1;
@@ -258,7 +339,9 @@ function redraw() {
   }
   ctx.globalAlpha = 1;
 
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(box.x + 0.5, box.y + 0.5, Math.max(box.w - 1, 1), Math.max(box.h - 1, 1));
+  /* 选中态：框线加粗并压暗一档（2px 是偶数，不半边对齐） */
+  ctx.strokeStyle = focused ? shade(accent, 0.45) : accent;
+  ctx.lineWidth = focused ? 2 : 1;
+  const inset = focused ? 0 : 0.5;
+  ctx.strokeRect(box.x + inset, box.y + inset, Math.max(box.w - 1, 1), Math.max(box.h - 1, 1));
 }

@@ -68,6 +68,8 @@ export const revealCanvasFile = (id, rel, linked) =>
   invoke("canvas_reveal_file", { id, rel, linked: Boolean(linked) });
 export const deleteCanvasFile = (id, rel, linked) =>
   invoke("canvas_delete_file", { id, rel, linked: Boolean(linked) });
+/* 便签块 / 画布自己的笔记块：要显示的是它那份内容文件，路径由后端按块 id 从 items.json 认 */
+export const revealBlock = (id, itemId) => invoke("canvas_reveal_block", { id, itemId });
 export const canvasFileExists = (id, rel, linked) =>
   invoke("canvas_file_exists", { id, rel, linked: Boolean(linked) });
 /* 电子书：放上画布前先整本读一遍目录，读不了的（DRM/KF8）当场说清楚 */
@@ -88,8 +90,21 @@ export const saveCanvasNoteImage = (id, itemId, data, ext) =>
   invoke("canvas_save_note_image", { id, itemId, data, ext });
 export const readCanvasNoteImage = (id, itemId, rel) =>
   invoke("canvas_read_note_image", { id, itemId, rel });
-export const deleteCanvasNoteAssets = (id, itemId) =>
-  invoke("canvas_delete_note_assets", { id, itemId });
+/* 画布自己的便签/笔记：一块一份文件，住在 <画布>/stickies、<画布>/notes 里，
+   跟工作台首页那两处毫无关系——改画布这张便签，首页那张不动。 */
+export const readSticky = (id, itemId) => invoke("canvas_read_sticky", { id, itemId });
+export const writeSticky = (id, itemId, sticky) => invoke("canvas_write_sticky", { id, itemId, sticky });
+export const duplicateSticky = (id, itemId, toId, toItem) =>
+  invoke("canvas_duplicate_sticky", { id, itemId, toId, toItem });
+export const deleteSticky = (id, itemId) => invoke("canvas_delete_sticky", { id, itemId });
+export const readNoteText = (id, itemId) => invoke("canvas_read_note", { id, itemId });
+export const writeNoteText = (id, itemId, text) => invoke("canvas_write_note", { id, itemId, text });
+export const duplicateNote = (id, itemId, toId, toItem) =>
+  invoke("canvas_duplicate_note", { id, itemId, toId, toItem });
+export const deleteNote = (id, itemId) => invoke("canvas_delete_note", { id, itemId });
+/* 复制块时把那份副本再拷进目标画布，返回新的相对路径（引用态那块没副本可拷） */
+export const duplicateMedia = (id, itemId, toId) =>
+  invoke("canvas_duplicate_media", { id, itemId, toId });
 export const listStickyNotes = () => invoke("list_sticky_notes");
 export const readNote = (rel) => invoke("notes_read", { rel });
 export const readNoteImage = (noteRel, rel) => invoke("notes_read_image", { noteRel, rel });

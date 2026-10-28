@@ -2310,11 +2310,13 @@ body.is-resizing {
   pointer-events: none;
 }
 
-/* 选中态：在线条底下垫一条半透明粗光带，而不是把线条本身刷成主题色。
-   之前用 stroke: var(--accent) 覆盖，改颜色/线型时看到的都是主题蓝，看不出真实效果。 */
+/* 选中态：在线条底下垫一条粗光带，而不是把线条本身刷成主题色。
+   之前用 stroke: var(--accent) 覆盖，改颜色/线型时看到的都是主题蓝，看不出真实效果。
+   默认连线现在就走强调色，光带再原样用 accent 等于叠在同色上看不见，
+   所以往主题前景方向压一档：浅色主题下偏深、深色主题下偏浅，总跟线色拉得开。 */
 .canvas-edge-halo {
   fill: none;
-  stroke: var(--accent);
+  stroke: color-mix(in srgb, var(--accent) 70%, var(--fg));
   stroke-width: 8;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -2324,7 +2326,7 @@ body.is-resizing {
 }
 
 .canvas-connector.is-selected .canvas-edge-halo {
-  opacity: 0.3;
+  opacity: 0.4;
 }
 
 .canvas-edge-hit {
@@ -2386,6 +2388,24 @@ body.is-resizing {
 .canvas-port[data-side="left"] {
   left: 0;
   top: 50%;
+}
+
+/* 选中态端口圈：块进了选中集合，四边这四颗就变大、涂实心，外头再饶一道淡光。
+   描边和柔光彻底废掉之后，「这块被选中」全靠它说事，单选多选一个样。 */
+.canvas-port[data-sel] {
+  width: calc(13px * var(--canvas-inv, 1));
+  height: calc(13px * var(--canvas-inv, 1));
+  border-color: var(--surface);
+  background: var(--accent);
+  box-shadow:
+    0 0 0 calc(2px * var(--canvas-inv, 1))
+      color-mix(in srgb, var(--accent) 32%, transparent),
+    0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
+}
+
+/* 只当记号、不吃鼠标：换到画框/划线工具、以及拖块拖连线的这一会儿 */
+.canvas-port[data-inert] {
+  pointer-events: none;
 }
 
 .canvas-port:hover {
@@ -3610,55 +3630,19 @@ body.is-resizing {
   cursor: move;
 }
 
-/* 选中框：跟端口框一样画在块自己身上，inset 由 JS 按块的边框宽度补出来。
-   层级压在端口圈底下，免得描边从圆圈中间穿过去。
-   三层叠着来：先让出一道缝，缝外落一道实线，实线外面再罩一圈柔光。
-   缝里是干净的画布底色，所以缩到块挨成一片时，这圈也不会被当成块自己那条 1px 面板边线；
-   柔光靠的是面积而不是线宽，头发丝粗细也能看出哪块被选中。
-   三个尺寸都乘 --canvas-inv（1/缩放），所以屏幕上永远是这么粗，不跟画布缩放走。 */
+/* 选中框：现在只是一层装把手的壳，自己不画任何东西。
+   块被选中的记号改由四边的端口圈（.canvas-port[data-sel]）来担，单选多选都一样，
+   描边、柔光全废——一堆块并排选中时那一圈线糊成一片，反而看不清哪块进了集合。
+   壳仍然画在块自己身上，跟着块的层级走；inset 由 JS 按块的边框宽度补，把手才贴得住真实外沿。 */
 .canvas-sel-box {
   position: absolute;
   z-index: 1;
   border-radius: inherit;
-  outline: calc(1.5px * var(--canvas-inv, 1)) solid var(--accent);
-  outline-offset: calc(2px * var(--canvas-inv, 1));
   pointer-events: none;
 }
 
-/* 柔光环：内沿正好贴在实线外沿上（2 + 1.5），再往粗 3px，所以那道缝不会被染色 */
-.canvas-sel-box::before {
-  content: "";
-  position: absolute;
-  inset: calc(-3.5px * var(--canvas-inv, 1));
-  border: calc(3px * var(--canvas-inv, 1)) solid
-    color-mix(in srgb, var(--accent) 22%, transparent);
-  border-radius: inherit;
-}
-
-/* 光着身子的选中框：单选用的。四角把手 + 四个端口圈已经说清了这块被选中，
-   描边和柔光都收掉，只剩装把手的那层壳（多选时没有这个标记，照旧描边） */
-.canvas-sel-box[data-bare] {
-  outline: none;
-}
-
-.canvas-sel-box[data-bare]::before {
-  display: none;
-}
-
-/* 按下挪块的这一会儿，单选一律不描边——手里拽着的那块本来就跟着手走，一圈线是多余的回声。
-   播放器、附件条那类没把手的块靠这条也一起安静下来；多选留着框，整组拖动时得看出范围。 */
-.canvas-stage.is-moving .canvas-sel-box:not([data-group]) {
-  outline: none;
-}
-
-.canvas-stage.is-moving .canvas-sel-box:not([data-group])::before {
-  display: none;
-}
-
-/* 挪块途中只留选中框：角上四个缩放手柄、边上四个端口圈都是停下来才用的东西，
-   跟着块一起飞只会糊成一片（多选整组拖动时最明显）。按下这一下就藏，松手回来。 */
-.canvas-stage.is-moving .canvas-handle,
-.canvas-stage.is-moving .canvas-port {
+/* 挪块途中只藏四角把手（停下来才用来改大小），端口圈和线端点圈是唯一的选中记号，得跟着块飞 */
+.canvas-stage.is-moving .canvas-handle[data-handle="corner"] {
   display: none;
 }
 
@@ -3737,10 +3721,24 @@ body.is-resizing {
   cursor: nwse-resize;
 }
 
+/* 线/箭头两头的端点圈：和选中态端口圈同一副长相——这俩本来就只在被选中时才画出来。
+   多选一堆线时它们只报「这几根进了集合」，不给人拖，所以 pointer-events 关掉。 */
 .canvas-handle-point {
   border-radius: 50%;
+  width: calc(13px * var(--canvas-inv, 1));
+  height: calc(13px * var(--canvas-inv, 1));
+  border-color: var(--surface);
+  background: var(--accent);
+  box-shadow:
+    0 0 0 calc(2px * var(--canvas-inv, 1))
+      color-mix(in srgb, var(--accent) 32%, transparent),
+    0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
   transform: translate(-50%, -50%);
   cursor: move;
+}
+
+.canvas-handle-point[data-inert] {
+  pointer-events: none;
 }
 
 /* 顶部栏 */

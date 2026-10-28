@@ -22,7 +22,7 @@ export const STICKY_DEFAULT_COLOR = "#bfa648";
 export const STICKY_DEFAULT_TEXT = "#000000";
 export const NOTE_DEFAULT_WIDTH = 520;
 export const NOTE_DEFAULT_HEIGHT = 420;
-/* 文件卡片按附件条来做：宽度固定，长名字省略号收尾，不给缩放把手（同音频播放器） */
+/* 文件卡片按附件条来做：宽度默认够长名字省略号收尾 */
 export const FILE_DEFAULT_WIDTH = 320;
 export const FILE_DEFAULT_HEIGHT = 84;
 /* PDF 页按 A4 比例：420 宽时一页约 594 高，块给 560 就基本是一屏 */
@@ -36,8 +36,44 @@ export const EBOOK_DEFAULT_WIDTH = 560;
 export const EBOOK_DEFAULT_HEIGHT = 640;
 export const EBOOK_MIN_WIDTH = 300;
 export const EBOOK_MIN_HEIGHT = 220;
+/* 每类面板拖角缩放的地板：拉到这里就不动了，免得块缩成看不见内容的一小坨 */
+export const AUDIO_MIN_WIDTH = 160;
+export const AUDIO_MIN_HEIGHT = 64;
+export const FILE_MIN_WIDTH = 160;
+export const FILE_MIN_HEIGHT = 56;
+export const STICKY_MIN_WIDTH = 120;
+export const STICKY_MIN_HEIGHT = 60;
+export const NOTE_MIN_WIDTH = 160;
+export const NOTE_MIN_HEIGHT = 120;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+/* 连线、直线、箭头的新默认色：跟着当前主题的强调色走，比死灰有精神，也不会和面板边框混成一片。
+   主题变量常写成 hsl()，而块上存的是死值（切主题不回头改已画好的线），
+   所以先借一个隐藏节点让浏览器解析成 rgb，再转成十六进制——右键「线条颜色」的取色器只认十六进制。 */
+let colorProbe = null;
+
+function accentStroke() {
+  try {
+    if (!colorProbe) {
+      colorProbe = document.createElement("span");
+      colorProbe.style.display = "none";
+      document.body.append(colorProbe);
+    }
+    colorProbe.style.color = "";
+    colorProbe.style.color = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent")
+      .trim();
+    const parts = getComputedStyle(colorProbe).color.match(/[\d.]+/g);
+    if (!parts || parts.length < 3) return DEFAULT_BORDER;
+    return `#${parts
+      .slice(0, 3)
+      .map((v) => Math.round(Number(v)).toString(16).padStart(2, "0"))
+      .join("")}`;
+  } catch {
+    return DEFAULT_BORDER;
+  }
+}
 
 let seq = 0;
 
@@ -81,7 +117,7 @@ export function normalizeItem(raw) {
       to,
       shape: raw.shape === "curve" ? "curve" : "elbow",
       arrow: raw.arrow === "none" ? "none" : raw.arrow === "both" ? "both" : "end",
-      color: typeof raw.color === "string" && raw.color ? raw.color : DEFAULT_BORDER,
+      color: typeof raw.color === "string" && raw.color ? raw.color : accentStroke(),
     };
   }
   if (type === "rect" || type === "ellipse") {
@@ -103,7 +139,7 @@ export function normalizeItem(raw) {
       y: num(raw.y),
       x2: num(raw.x2),
       y2: num(raw.y2),
-      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : accentStroke(),
       z: layerOf(raw),
     };
   }
@@ -143,8 +179,8 @@ export function normalizeItem(raw) {
       ...base,
       x: num(raw.x),
       y: num(raw.y),
-      w: Math.max(160, num(raw.w, AUDIO_DEFAULT_WIDTH)),
-      h: Math.max(64, num(raw.h, AUDIO_DEFAULT_HEIGHT)),
+      w: Math.max(AUDIO_MIN_WIDTH, num(raw.w, AUDIO_DEFAULT_WIDTH)),
+      h: Math.max(AUDIO_MIN_HEIGHT, num(raw.h, AUDIO_DEFAULT_HEIGHT)),
       src: typeof raw.src === "string" ? raw.src : "",
       name: typeof raw.name === "string" ? raw.name : "",
       linked: raw.linked === true,
@@ -174,8 +210,8 @@ export function normalizeItem(raw) {
       ...base,
       x: num(raw.x),
       y: num(raw.y),
-      w: Math.max(120, num(raw.w, STICKY_DEFAULT_WIDTH)),
-      h: Math.max(60, num(raw.h, STICKY_DEFAULT_HEIGHT)),
+      w: Math.max(STICKY_MIN_WIDTH, num(raw.w, STICKY_DEFAULT_WIDTH)),
+      h: Math.max(STICKY_MIN_HEIGHT, num(raw.h, STICKY_DEFAULT_HEIGHT)),
       text: typeof raw.text === "string" ? raw.text : "",
       color: typeof raw.color === "string" && raw.color ? raw.color : STICKY_DEFAULT_COLOR,
       textColor:
@@ -194,8 +230,8 @@ export function normalizeItem(raw) {
       ...base,
       x: num(raw.x),
       y: num(raw.y),
-      w: Math.max(160, num(raw.w, NOTE_DEFAULT_WIDTH)),
-      h: Math.max(120, num(raw.h, NOTE_DEFAULT_HEIGHT)),
+      w: Math.max(NOTE_MIN_WIDTH, num(raw.w, NOTE_DEFAULT_WIDTH)),
+      h: Math.max(NOTE_MIN_HEIGHT, num(raw.h, NOTE_DEFAULT_HEIGHT)),
       path: typeof raw.path === "string" ? raw.path : "",
       name: typeof raw.name === "string" ? raw.name : "",
       source: typeof raw.source === "string" ? raw.source : "",
@@ -213,8 +249,8 @@ export function normalizeItem(raw) {
       ...base,
       x: num(raw.x),
       y: num(raw.y),
-      w: Math.max(160, num(raw.w, FILE_DEFAULT_WIDTH)),
-      h: Math.max(56, num(raw.h, FILE_DEFAULT_HEIGHT)),
+      w: Math.max(FILE_MIN_WIDTH, num(raw.w, FILE_DEFAULT_WIDTH)),
+      h: Math.max(FILE_MIN_HEIGHT, num(raw.h, FILE_DEFAULT_HEIGHT)),
       src: typeof raw.src === "string" ? raw.src : "",
       name: typeof raw.name === "string" ? raw.name : "",
       ext: typeof raw.ext === "string" ? raw.ext : "",
@@ -246,6 +282,20 @@ export function normalizeItem(raw) {
   return null;
 }
 
+/* 便签和笔记的正文不归 items.json 管：一张便签是 <画布>/stickies/<块id>.json，
+   一篇笔记是 <画布>/notes/<块id>.md。运行时对象上那些字段只是从文件里读回来的缓存，
+   存回去就成一份数据两处摆，改一处漏一处。 */
+export function toPersisted(item) {
+  if (item.type === "sticky") {
+    return { id: item.id, type: item.type, x: item.x, y: item.y, z: item.z };
+  }
+  if (item.type === "note") {
+    const { source, ...rest } = item;
+    return rest;
+  }
+  return item;
+}
+
 export function makeBox(type, x1, y1, x2, y2) {
   return {
     id: newId(),
@@ -267,7 +317,7 @@ export function makeLine(type, x1, y1, x2, y2) {
     y: y1,
     x2,
     y2,
-    borderColor: DEFAULT_BORDER,
+    borderColor: accentStroke(),
   };
 }
 
@@ -421,7 +471,7 @@ export function makeConnector(fromId, fromSide, toId) {
     to: { item: toId, side: "auto" },
     shape: "elbow",
     arrow: "end",
-    color: DEFAULT_BORDER,
+    color: accentStroke(),
   };
 }
 
@@ -647,11 +697,20 @@ const MISSING_FILE_SVG = `
     <path d="M9.2 12.5l5.6 5.6M14.8 12.5l-5.6 5.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
   </svg>`;
 
-/** 块指向的那份文件在磁盘上的绝对位置：引用态记的就是绝对路径，拷贝态拼上画布目录。 */
+/** 便签/笔记自己那份内容文件在画布目录里的相对位置；复制粘贴和丢文件卡都按它说话。 */
+export function contentRelOf(item) {
+  if (item.type === "sticky") return `stickies/${item.id}.json`;
+  if (item.type === "note") return `notes/${item.id}.md`;
+  return "";
+}
+
+/** 块指向的那份文件在磁盘上的绝对位置：引用态记的就是绝对路径，其余一律按画布目录拼。 */
 export function absolutePathOf(item, canvasDir) {
-  const rel = item.type === "note" ? item.path : item.src;
-  if (!rel) return "";
-  if (item.type === "note" || item.linked) return rel;
+  /* 笔记块上那个 path 只在引用态有意义：拷贝进来的那块还会留着「来自哪儿」，
+     可它现在真正拥有的是画布里的 notes/<块id>.md */
+  const pointer = item.linked ? (item.type === "note" ? item.path : item.src) : item.src;
+  const rel = pointer || contentRelOf(item);
+  if (!rel || item.linked) return rel;
   if (!canvasDir) return rel;
   return `${canvasDir.replace(/[\\/]$/, "")}\\${rel.replace(/[\\/]/g, "\\")}`;
 }

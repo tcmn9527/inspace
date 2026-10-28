@@ -8,7 +8,8 @@
 //!     audio/        粘贴/拖入的音频
 //!     video/        拖入/选择的视频（小文件拷贝进来，大文件只记原始路径）
 //!     files/        拖入/选择的其它文件，一律拷副本；文本类在卡片里给只读预览，双击交系统程序打开
-//!     notes/<块id>/ 画布笔记块自己的图片副本（改笔记不动原 .md）
+//!     stickies/     便签块的内容，一块一个 <块id>.json
+//!     notes/        笔记块的内容，一块一个 <块id>.md，图片副本在同名的 <块id>/ 目录里
 //!
 //! 删除画布时整个文件夹进系统回收站。
 //!
@@ -36,6 +37,7 @@ const ITEMS_FILE: &str = "items.json";
 const IMAGE_DIR: &str = "images";
 const AUDIO_DIR: &str = "audio";
 const NOTE_DIR: &str = "notes";
+const STICKY_DIR: &str = "stickies";
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 const BAD_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
@@ -411,20 +413,65 @@ fn media_url(
     Ok(path.to_string_lossy().to_string())
 }
 
-/// 笔记块图片目录：<画布>/notes/<块id>/。块 id 是前端生成的单层名字。
-fn note_item_dir(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
-    let id = item_id.trim();
+/// 块 id 是前端生成的一层名字，被拿来当文件名，所以先过一遍：不许有点、斜杠、冒号、控制字符。
+/// 便签和笔记的文件名直接用它，写之前都必须过这里。
+fn check_item_id(raw: &str) -> Result<String, String> {
+    let id = raw.trim();
     let valid = !id.is_empty()
         && id != "."
         && id != ".."
         && !id.contains('/')
         && !id.contains('\\')
         && !id.contains(':')
+        && !id.contains('.')
         && !id.chars().any(|c| c.is_control());
     if !valid {
-        return Err("笔记块标识不合法".to_string());
+        return Err("块标识不合法".to_string());
     }
-    Ok(dir.join(NOTE_DIR).join(id))
+    Ok(id.to_string())
+}
+
+/// 笔记块的正文：<画布>/notes/<块id>.md。
+fn note_text_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
+    Ok(dir
+        .join(NOTE_DIR)
+        .join(format!("{}.md", check_item_id(item_id)?)))
+}
+
+/// 便签块的正文：<画布>/stickies/<块id>.json。
+fn sticky_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
+    Ok(dir
+        .join(STICKY_DIR)
+        .join(format!("{}.json", check_item_id(item_id)?)))
+}
+
+/// 空壳目录不留：删掉最后一张便签/最后一篇笔记之后把 `stickies/`、`notes/` 一起收走，
+/// 免得列表里挂着一张什么也没有的画布文件夹。
+fn prune_empty(dir: &Path) {
+    if dir.is_dir() && fs::read_dir(dir).map(|mut i| i.next().is_none()).unwrap_or(false) {
+        let _ = fs::remove_dir(dir);
+    }
+}
+
+/// 复制笔记块要连它自己的图片目录一起搬；目标已存在就整体覆盖（新块的新目录，不可能有人用）。
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("创建笔记图片目录失败：{e}"))?;
+    let entries = fs::read_dir(src).map_err(|e| format!("读取笔记图片目录失败：{e}"))?;
+    for entry in entries.flatten() {
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_all(&from, &to)?;
+        } else {
+            fs::copy(&from, &to).map_err(|e| format!("复制笔记图片失败：{e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// 笔记块图片目录：<画布>/notes/<块id>/。块 id 是前端生成的单层名字。
+fn note_item_dir(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
+    Ok(dir.join(NOTE_DIR).join(check_item_id(item_id)?))
 }
 
 /// 笔记块图片的相对路径只允许 notes/<本块id>/<文件名>。
@@ -918,22 +965,210 @@ pub fn canvas_read_note_image(
     image_data_url(&path, "笔记图片不在了")
 }
 
-/// 删除笔记块时清掉它自己的图片副本目录（原笔记不受影响）。
+// ---------- 便签块与笔记块：一块一份文件 ----------
+//
+// 画布上的便签和笔记各有一份自己的文件，住在画布目录里，和工作台首页的
+// `stickies/`、`notes/` 毫无瓜葛：画布上改这张便签，首页那张不动，反之也一样。
+// 字段口径跟首页便签同构（title/body/color/textColor/width/height），
+// 所以「一个便签就是一个 json 文件」这句话在两个地方字面一致。
+
+const MAX_STICKY_CHARS: usize = 200_000;
+const MAX_STICKY_HEAD_CHARS: usize = 200;
+const MAX_COLOR_CHARS: usize = 32;
+
+/// 不管前端递来什么，只收认得的几个字段，字符串掐长度、尺寸夹到合理范围。
+/// 落盘的便签文件永远是这个样子，读的时候再遇到坏值也有默认兜着。
+fn sticky_of(raw: &Value) -> Value {
+    let text = |key: &str, max: usize| -> String {
+        raw.get(key)
+            .and_then(Value::as_str)
+            .map(|s| s.chars().take(max).collect())
+            .unwrap_or_default()
+    };
+    let size = |key: &str| -> Option<f64> {
+        raw.get(key)
+            .and_then(Value::as_f64)
+            .filter(|v| v.is_finite())
+            .map(|v| v.clamp(8.0, 20000.0))
+    };
+    json!({
+        "title": text("title", MAX_STICKY_HEAD_CHARS),
+        "body": text("body", MAX_STICKY_CHARS),
+        "color": text("color", MAX_COLOR_CHARS),
+        "textColor": text("textColor", MAX_COLOR_CHARS),
+        "width": size("width"),
+        "height": size("height"),
+        "updatedAt": now_ms(),
+    })
+}
+
+/// 这块便签的文件；还没落过盘就返回 null，由前端拿块上残留的旧正文补写一次。
 #[tauri::command]
-pub fn canvas_delete_note_assets(
+pub fn canvas_read_sticky(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Option<Value>, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = sticky_file(&dir, &item_id)?;
+    read_json(&path).map(|value| value.map(|raw| sticky_of(&raw)))
+}
+
+#[tauri::command]
+pub fn canvas_write_sticky(
+    id: String,
+    item_id: String,
+    sticky: Value,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Value, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = sticky_file(&dir, &item_id)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建便签目录失败：{e}"))?;
+    }
+    let value = sticky_of(&sticky);
+    write_json(&path, &value)?;
+    Ok(value)
+}
+
+/// 复制便签块：读源画布那块的那份 json，原样写成目标块自己的文件。
+/// 两边各是各的文件，之后改谁都不影响谁。
+#[tauri::command]
+pub fn canvas_duplicate_sticky(
+    id: String,
+    item_id: String,
+    to_id: String,
+    to_item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Value, String> {
+    let from = sticky_file(&resolve_dir(&state, &id)?, &item_id)?;
+    let raw = read_json(&from)?.ok_or_else(|| "这张便签的文件不在了".to_string())?;
+    let dir = resolve_dir(&state, &to_id)?;
+    let to = sticky_file(&dir, &to_item_id)?;
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建便签目录失败：{e}"))?;
+    }
+    let value = sticky_of(&raw);
+    write_json(&to, &value)?;
+    Ok(value)
+}
+
+/// 画布笔记块的正文（不是引用态；引用态那份走 notes_read / canvas_note_write_back 碰用户自己的文件）。
+#[tauri::command]
+pub fn canvas_read_note(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Option<String>, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = note_text_file(&dir, &item_id)?;
+    if !path.is_file() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| format!("读取笔记失败：{e}"))
+}
+
+#[tauri::command]
+pub fn canvas_write_note(
+    id: String,
+    item_id: String,
+    text: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = note_text_file(&dir, &item_id)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建笔记目录失败：{e}"))?;
+    }
+    write_bytes_atomic(&path, text.as_bytes())
+}
+
+/// 复制笔记块：正文 .md 和它自己的图片目录一起搬到目标块名下，成为互不相干的另一篇。
+#[tauri::command]
+pub fn canvas_duplicate_note(
+    id: String,
+    item_id: String,
+    to_id: String,
+    to_item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    let from_dir = resolve_dir(&state, &id)?;
+    let to_dir = resolve_dir(&state, &to_id)?;
+    let from_text = note_text_file(&from_dir, &item_id)?;
+    let bytes = fs::read(&from_text).map_err(|_| "这篇笔记的文件不在了".to_string())?;
+    let to_text = note_text_file(&to_dir, &to_item_id)?;
+    if let Some(parent) = to_text.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建笔记目录失败：{e}"))?;
+    }
+    write_bytes_atomic(&to_text, &bytes)?;
+    let from_assets = note_item_dir(&from_dir, &item_id)?;
+    if from_assets.is_dir() {
+        copy_dir_all(&from_assets, &note_item_dir(&to_dir, &to_item_id)?)?;
+    }
+    Ok(())
+}
+
+/// 删掉一块便签：它自己那份 json 进系统回收站，画布上没别的地方用它。
+#[tauri::command]
+pub fn canvas_delete_sticky(
     id: String,
     item_id: String,
     state: tauri::State<'_, CanvasState>,
 ) -> Result<(), String> {
     let dir = resolve_dir(&state, &id)?;
-    let target = note_item_dir(&dir, &item_id)?;
-    if target.is_dir() {
-        fs::remove_dir_all(&target).map_err(|e| format!("清理笔记图片失败：{e}"))?;
+    let path = sticky_file(&dir, &item_id)?;
+    if path.is_file() {
+        recycle_path(&path).map_err(|e| format!("删除便签失败：{e}"))?;
     }
-    let notes = dir.join(NOTE_DIR);
-    if notes.is_dir() && fs::read_dir(&notes).map(|mut i| i.next().is_none()).unwrap_or(false) {
-        let _ = fs::remove_dir(&notes);
+    prune_empty(&dir.join(STICKY_DIR));
+    Ok(())
+}
+
+/// 删掉一块笔记：正文 .md 连它的图片目录一起进系统回收站（引用态的原文件不归这里管）。
+#[tauri::command]
+pub fn canvas_delete_note(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    let dir = resolve_dir(&state, &id)?;
+    let assets = note_item_dir(&dir, &item_id)?;
+    if assets.is_dir() {
+        recycle_path(&assets).map_err(|e| format!("清理笔记图片失败：{e}"))?;
     }
+    let text = note_text_file(&dir, &item_id)?;
+    if text.is_file() {
+        recycle_path(&text).map_err(|e| format!("删除笔记失败：{e}"))?;
+    }
+    prune_empty(&dir.join(NOTE_DIR));
+    Ok(())
+}
+
+/// 带用户去看这块便签/笔记自己那份文件躺在哪儿：路径只从 items.json 里那块记的类型算，
+/// 前端递来的块 id 是唯一线索，所以这儿开不出画布目录以外的东西。
+#[tauri::command]
+pub fn canvas_reveal_block(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    let dir = resolve_dir(&state, &id)?;
+    let items = read_items(&dir)?;
+    let found = items
+        .as_array()
+        .and_then(|list| {
+            list.iter()
+                .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id.as_str()))
+        })
+        .ok_or_else(|| "这块已经不在画布上了".to_string())?;
+    let path = match found.get("type").and_then(Value::as_str).unwrap_or_default() {
+        "sticky" => sticky_file(&dir, &item_id)?,
+        "note" => note_text_file(&dir, &item_id)?,
+        _ => return Err("这块没有自己的文件".to_string()),
+    };
+    reveal_path(&path);
     Ok(())
 }
 
@@ -1707,6 +1942,77 @@ pub fn canvas_copy_file(
         jobs.finish(&thread_job);
     });
     Ok(job)
+}
+
+/// 复制一块的时候，把源块自己拥有的那份副本原样再拷一份，落进目标画布的同一个子目录，
+/// 返回新的相对路径。路径不从嘴里信：只认源画布 items.json 里那条记录，
+/// 引用态那块本来就没有副本可拷（前端直接克隆 JSON，还是指着同一份原文件）。
+/// 命令放在 async 上，视频几十 GB 也只是占住一个工作线程，不堵命令线程。
+#[tauri::command]
+pub async fn canvas_duplicate_media(
+    id: String,
+    item_id: String,
+    to_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Value, String> {
+    let from_dir = resolve_dir(&state, &id)?;
+    let to_dir = resolve_dir(&state, &to_id)?;
+    let items = read_items(&from_dir)?;
+    let item = items
+        .as_array()
+        .and_then(|list| {
+            list.iter()
+                .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id.as_str()))
+        })
+        .ok_or_else(|| "这块已经不在画布上了".to_string())?;
+    if item.get("linked").and_then(Value::as_bool) == Some(true) {
+        return Err("这块没有副本可拷".to_string());
+    }
+    let (sub, missing) = match item.get("type").and_then(Value::as_str).unwrap_or_default() {
+        "image" => (IMAGE_DIR, "图片"),
+        "audio" => (AUDIO_DIR, "音频"),
+        "video" => (VIDEO_DIR, "视频"),
+        "file" | "ebook" => (FILE_DIR, "文件"),
+        _ => return Err("这种块没有副本可拷".to_string()),
+    };
+    let src_rel = item
+        .get("src")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "这块没记文件在哪".to_string())?;
+    let src = media_path(&from_dir, src_rel, sub, missing)?;
+    let rel = store_copy(&to_dir, &src, sub)?;
+
+    let mut out = json!({ "rel": rel });
+    // 视频转出来的那条 AAC 音轨是副本的副本，跟着一起搬，不然粘过去没声音
+    if let Some(track) = item
+        .get("audioRel")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        let from = copy_source_path(&from_dir, track)?;
+        let track_sub = track.replace('\\', "/").split('/').next().unwrap_or(AUDIO_DIR).to_string();
+        out["audioRel"] = json!(store_copy(&to_dir, &from, &track_sub)?);
+    }
+    Ok(out)
+}
+
+/// 把一份已经在盘上的副本按新名字收进 `<目标画布>/<子目录>/`，返回带目录名的相对路径。
+/// 扩展名只收字母数字（名字由我们自己写，别把花样带进新文件），撞名靠 unique_media_path 让号。
+fn store_copy(dir: &Path, src: &Path, sub: &str) -> Result<String, String> {
+    let target_dir = dir.join(sub);
+    fs::create_dir_all(&target_dir).map_err(|e| format!("创建副本目录失败：{e}"))?;
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let dest = unique_media_path(&target_dir, &safe_file_ext(&ext));
+    fs::copy(src, &dest).map_err(|e| format!("拷贝副本失败：{e}"))?;
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "文件名不合法".to_string())?;
+    Ok(format!("{sub}/{name}"))
 }
 
 /// 取文件块的可读绝对路径（前端 convertFileSrc 成 asset 地址），顺手开一次读权限。

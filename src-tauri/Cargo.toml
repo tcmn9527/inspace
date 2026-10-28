@@ -35,15 +35,8 @@ flate2 = "1"
 # epub/mobi 的 OPF、NCX 是 XML，用流式读，坏一两个标签也不至于整本打不开
 quick-xml = "0.42"
 # bundled：自带 SQLite 源码，不依赖系统 SQLite。
-# 关掉默认特性（cache/hashlink/wasm 等）以减少本机内存紧张时的编译负担。
+# 关掉默认特性（cache/hashlink/wasm 等），只留用得到的那部分。
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
-
-
-# 本机当前可提交内存仅 ~2 GB（strata 进程常驻 40+ GB），
-# dev 默认的 debuginfo=2 会让 windows / tauri 这类 crate 的 rustc 直接 OOM，
-# 因此关闭调试信息以换取可编译性；内存恢复后可删除此项。
-[profile.dev]
-debug = 0
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

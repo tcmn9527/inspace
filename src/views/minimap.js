@@ -7,6 +7,7 @@
 const STORAGE_KEY = "workbench.canvas.minimap";
 const EDGE_PAD = 6; /* 小窗里四周留的空白（CSS px） */
 const FIT_PAD = 0.08; /* 取景范围按内容外扩的比例 */
+const VIEWPORT_FIT = 1.6; /* 取景至少是视野这么大：框最多占小窗约三分之二，才看得出在挪 */
 const MIN_FIT = 1200; /* 空画布时的兜底取景边长（世界像素），别让缩小版糊成一个点 */
 const MIN_DOT = 1.5; /* 块再小也至少画这么大，否则内容铺得远时看不见 */
 const NUDGE = 0.05; /* 方向键一格挪视野的 5% */
@@ -31,8 +32,6 @@ let hooks = null;
 let ui = null;
 let ctx = null;
 let view = null; /* 上一次绘制的换算参数，命中测试要用 */
-let fit = null; /* 取景范围（世界坐标），只在内容变了才重算 */
-let fitKey = "";
 let minimized = false;
 let queued = false;
 let drag = null;
@@ -278,7 +277,9 @@ function redraw() {
 
   /* 取景只跟内容走：把视窗也算进来会自我放大 —— 往外拖一点 → 取景变大 → 缩小比变小
      → 同一格鼠标对应的世界距离更远 → 拖得更远，实测 60px 鼠标能甩出 5000px 相机。
-     代价是跑到内容外面时框会顶出小窗，所以下面把它贴到边上画，至少看得出「偏哪一边」。 */
+     代价是跑到内容外面时框会顶出小窗，所以下面把它贴到边上画，至少看得出「偏哪一边」。
+     地板按视窗的「大小」放（不看相机在哪儿），所以拖框喂不出正反馈：
+     内容只有两块时，光靠 MIN_FIT 兜底会窄于视野，框一画就铺满小窗、贴边钉死，怎么挪都不动。 */
   const content =
     contentBounds(items) ||
     (() => {
@@ -286,18 +287,21 @@ function redraw() {
       const half = MIN_FIT / 2;
       return { x1: -half, y1: -half, x2: half, y2: half };
     })();
-  const key = `${content.x1},${content.y1},${content.x2},${content.y2}`;
-  if (key !== fitKey || !fit) {
-    const padX = Math.max((content.x2 - content.x1) * FIT_PAD, MIN_FIT * FIT_PAD);
-    const padY = Math.max((content.y2 - content.y1) * FIT_PAD, MIN_FIT * FIT_PAD);
-    fit = { x1: content.x1 - padX, y1: content.y1 - padY, x2: content.x2 + padX, y2: content.y2 + padY };
-    fitKey = key;
-  }
-  const fitW = Math.max(fit.x2 - fit.x1, MIN_FIT);
-  const fitH = Math.max(fit.y2 - fit.y1, MIN_FIT);
+  const cx = (content.x1 + content.x2) / 2;
+  const cy = (content.y1 + content.y2) / 2;
+  const halfW = Math.max(
+    (content.x2 - content.x1) / 2 + Math.max((content.x2 - content.x1) * FIT_PAD, MIN_FIT * FIT_PAD),
+    (viewport.w * VIEWPORT_FIT) / 2,
+  );
+  const halfH = Math.max(
+    (content.y2 - content.y1) / 2 + Math.max((content.y2 - content.y1) * FIT_PAD, MIN_FIT * FIT_PAD),
+    (viewport.h * VIEWPORT_FIT) / 2,
+  );
+  const fitW = halfW * 2;
+  const fitH = halfH * 2;
   const s = Math.min((w - EDGE_PAD * 2) / fitW, (h - EDGE_PAD * 2) / fitH);
-  const ox = (w - fitW * s) / 2 - fit.x1 * s;
-  const oy = (h - fitH * s) / 2 - fit.y1 * s;
+  const ox = (w - fitW * s) / 2 - (cx - halfW) * s;
+  const oy = (h - fitH * s) / 2 - (cy - halfH) * s;
 
   const vw = viewport.w * s;
   const vh = viewport.h * s;

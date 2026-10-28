@@ -26,10 +26,6 @@ import {
   DEFAULT_BORDER,
   EBOOK_DEFAULT_HEIGHT,
   EBOOK_DEFAULT_WIDTH,
-  FILE_DEFAULT_HEIGHT,
-  FILE_DEFAULT_WIDTH,
-  FILE_TEXT_EXPANDED_HEIGHT,
-  FILE_TEXT_WIDTH,
   NOTE_DEFAULT_HEIGHT,
   NOTE_DEFAULT_WIDTH,
   STICKY_DEFAULT_COLOR,
@@ -39,8 +35,10 @@ import {
   connectorGeometry,
   createConnectorElement,
   createItemElement,
+  fileBlockSize,
   fitImageSize,
   formatSize,
+  isPdfExt,
   itemBounds,
   makeAudio,
   makeBox,
@@ -136,6 +134,9 @@ let noteImageCache = new Map();
    键带上存在方式，免得同一个路径的拷贝态和引用态串了。 */
 let filePreviewCache = new Map();
 const previewKey = (item) => `${item.linked ? "L" : "C"}|${item.src}`;
+/* PDF 块的 asset 地址：一份文件问后端一次（顺带开的那次读权限也就够了），
+   翻页和拖角缩放重画都复用这条地址 */
+let pdfUrlCache = new Map();
 /* 书的目录进画布只读一次，翻章不用再解析整本；键和预览一样带上存在方式 */
 let ebookTocCache = new Map();
 const ebookKey = (canvasId, item) => `${canvasId}|${item.linked}|${item.src}`;
@@ -400,6 +401,7 @@ async function switchTo(id) {
     probeCache.clear();
     noteImageCache = new Map();
     filePreviewCache = new Map();
+    pdfUrlCache = new Map();
     ebookTocCache = new Map();
     mediaMissing = new Set();
     await loadImages();
@@ -538,6 +540,7 @@ function showEmpty() {
   videoCache.clear();
   noteImageCache.clear();
   filePreviewCache.clear();
+  pdfUrlCache.clear();
   ebookTocCache.clear();
   mediaMissing = new Set();
   updateChrome();
@@ -828,6 +831,15 @@ function addItemElement(item) {
       return preview;
     },
     checkFile: (block) => store.canvasFileExists(canvasId, block.src, block.linked),
+    loadPdfUrl: async (block) => {
+      const key = previewKey(block);
+      const cached = pdfUrlCache.get(key);
+      if (cached) return cached;
+      const url = await store.fileUrl(canvasId, block.src, block.linked);
+      pdfUrlCache.set(key, url);
+      return url;
+    },
+    onPdfPage: () => scheduleItemsSave(),
     canvasDir,
     /* 换成丢文件卡会把块里的内容连选中框一起清空，所以换完补回选中记号 */
     onMissing: (block) => {
@@ -991,9 +1003,13 @@ function drawSelectionFor(item, el, lone) {
   }
 
   const box = addOverlayBox(el, "canvas-sel-box");
-  if (!lone) return;
+  /* 多选进集合的块：按下挪动途中也得留着一圈线，整组拖动时全靠它看出范围 */
+  if (!lone) box.dataset.group = "1";
 
   if (item.type === "line" || item.type === "arrow") {
+    /* 线的两头本来就钉着端点圆钮，单选不必再描一圈 */
+    if (lone) box.dataset.bare = "1";
+    if (!lone) return;
     const bounds = itemBounds(item, el);
     for (const end of ["a", "b"]) {
       const point = end === "a" ? { x: item.x, y: item.y } : { x: item.x2, y: item.y2 };
@@ -1011,16 +1027,21 @@ function drawSelectionFor(item, el, lone) {
 
   const dirs = ["nw", "ne", "sw", "se"];
   /* 播放器和非文本附件条的排版是固定的，拉角只会把它们挤变形，所以不给缩放把手；
-     文本块是在读内容，宽高由用户说了算，把手照给 */
-  const fixedLayout = item.type === "audio" || (item.type === "file" && !item.text);
-  if (!fixedLayout) {
-    for (const dir of dirs) {
-      const handle = document.createElement("span");
-      handle.className = `canvas-handle canvas-handle-${dir}`;
-      handle.dataset.handle = "corner";
-      handle.dataset.dir = dir;
-      box.append(handle);
-    }
+     文本块和 PDF 块都在读内容，宽高由用户说了算（PDF 按新宽度重画那一页），把手照给 */
+  const fixedLayout =
+    item.type === "audio" ||
+    (item.type === "file" && !item.text && !isPdfExt(item.ext));
+  /* 单选就靠四角把手和四个端口圈说事，不再描边；多选一堆块里得一眼分清哪几个进了集合，边框才回来。
+     不给把手的那两种块（播放器、附件条）单选也留着边框，不然点中了屏幕上一点反应都没有。 */
+  if (lone && !fixedLayout) box.dataset.bare = "1";
+  if (!lone || fixedLayout) return;
+
+  for (const dir of dirs) {
+    const handle = document.createElement("span");
+    handle.className = `canvas-handle canvas-handle-${dir}`;
+    handle.dataset.handle = "corner";
+    handle.dataset.dir = dir;
+    box.append(handle);
   }
 }
 
@@ -3361,16 +3382,10 @@ async function askInsertMode(count) {
  * 返回插好的块，一批多个文件时靠它排偏移。 */
 async function addDroppedFile(info, topLeft, mode) {
   if (!current) return null;
-  const at =
-    topLeft ||
-    insertPoint(
-      info.markdown ? NOTE_DEFAULT_WIDTH : info.text ? FILE_TEXT_WIDTH : FILE_DEFAULT_WIDTH,
-      info.markdown
-        ? NOTE_DEFAULT_HEIGHT
-        : info.text
-          ? FILE_TEXT_EXPANDED_HEIGHT
-          : FILE_DEFAULT_HEIGHT,
-    );
+  const size = info.markdown
+    ? { w: NOTE_DEFAULT_WIDTH, h: NOTE_DEFAULT_HEIGHT }
+    : fileBlockSize(info);
+  const at = topLeft || insertPoint(size.w, size.h);
   if (info.markdown) return placeMarkdownFile(info, at, mode);
   return addFileBlock(info, at, mode);
 }

@@ -11,6 +11,10 @@
 
 const STORAGE_KEY = "workbench.theme";
 
+/* 没选过主题时套这套（雪白）。只影响首次运行——选过一次就存进 localStorage，
+ * 之后每次启动都跟着他自己的选择走，不会被他手动定的主题顶掉。 */
+const DEFAULT_THEME = "snow";
+
 /* [id, 名称, 底色色相, 底色饱和度, 强调色相, 底色明度] —— 深色系 */
 export const THEMES = [
   ["graphite", "石墨", 220, 6, 210, 6],
@@ -99,7 +103,7 @@ let currentId = null;
 const ALL_THEMES = [...THEMES, ...LIGHT_THEMES];
 
 function apply(id, { persist = true } = {}) {
-  const theme = ALL_THEMES.find((t) => t[0] === id) || THEMES[0];
+  const theme = ALL_THEMES.find((t) => t[0] === id) || ALL_THEMES.find((t) => t[0] === DEFAULT_THEME);
   const vars = palette(theme);
   for (const [key, value] of Object.entries(vars)) {
     document.documentElement.style.setProperty(key, value);
@@ -125,7 +129,7 @@ try {
 } catch {
   saved = null;
 }
-apply(saved || THEMES[0][0], { persist: false });
+apply(saved || DEFAULT_THEME, { persist: false });
 
 // ---------- 选择框 ----------
 

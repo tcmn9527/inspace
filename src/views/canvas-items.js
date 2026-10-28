@@ -2,6 +2,7 @@
  * 所有坐标都是世界坐标（未乘缩放），图元本身互不嵌套。 */
 
 import { renderMarkdown } from "./markdown.js";
+import { isCancelled, openPdf, pdfPageSize, pdfProblem, renderPdfPage } from "./canvas-pdf.js";
 
 export const DEFAULT_BORDER = "#9a9a9a";
 export const TEXT_DEFAULT_WIDTH = 320;
@@ -24,6 +25,9 @@ export const NOTE_DEFAULT_HEIGHT = 420;
 /* 文件卡片按附件条来做：宽度固定，长名字省略号收尾，不给缩放把手（同音频播放器） */
 export const FILE_DEFAULT_WIDTH = 320;
 export const FILE_DEFAULT_HEIGHT = 84;
+/* PDF 页按 A4 比例：420 宽时一页约 594 高，块给 560 就基本是一屏 */
+export const PDF_DEFAULT_WIDTH = 420;
+export const PDF_DEFAULT_HEIGHT = 560;
 /* 文本类文件在卡片里直接给只读预览：折叠只露几行，展开后才允许自己拉大小 */
 export const FILE_TEXT_WIDTH = 420;
 export const FILE_TEXT_EXPANDED_HEIGHT = 320;
@@ -218,6 +222,9 @@ export function normalizeItem(raw) {
       text: raw.text === true,
       /* 引用态 src 就是原文件绝对路径，画布 files/ 里没有副本 */
       linked: raw.linked === true,
+      /* PDF 块读到哪儿是这块自己的状态：第几页 + 这一页滚过去几成，重开接着读 */
+      page: Math.max(1, Math.trunc(num(raw.page, 1))),
+      pageFrac: Math.min(1, Math.max(0, num(raw.pageFrac, 0))),
       z: layerOf(raw),
     };
   }
@@ -358,17 +365,27 @@ export function makeNote(x, y, path, name, source, link = {}) {
 
 /* 文件块只存定位用的路径和卡片上要显示的名字/体积/扩展名，内容不进 items.json。
    拷贝态 src 是画布 files/ 里的相对路径，引用态是原文件绝对路径。
-   文本块给一个能读几行的默认高度，剩下由用户自己拉。 */
+   文本块给一个能读几行的默认高度，PDF 块按 A4 竖排给一屏，剩下由用户自己拉。 */
+export function fileBlockSize(info) {
+  const pdf = isPdfExt(info.ext);
+  const text = info.text === true;
+  return {
+    w: pdf ? PDF_DEFAULT_WIDTH : text ? FILE_TEXT_WIDTH : FILE_DEFAULT_WIDTH,
+    h: pdf ? PDF_DEFAULT_HEIGHT : text ? FILE_TEXT_EXPANDED_HEIGHT : FILE_DEFAULT_HEIGHT,
+  };
+}
+
 export function makeFile(x, y, info) {
   const text = info.text === true;
   const linked = Boolean(info.linked);
+  const size = fileBlockSize(info);
   return {
     id: newId(),
     type: "file",
     x,
     y,
-    w: text ? FILE_TEXT_WIDTH : FILE_DEFAULT_WIDTH,
-    h: text ? FILE_TEXT_EXPANDED_HEIGHT : FILE_DEFAULT_HEIGHT,
+    w: size.w,
+    h: size.h,
     src: linked ? info.path : info.rel,
     name: info.name || "未命名文件",
     ext: info.ext || "",
@@ -792,6 +809,12 @@ function createFileCard(item, options) {
     if (!found) options.onMissing?.(item);
   });
 
+  if (isPdfExt(item.ext)) {
+    card.classList.add("canvas-file-card-pdf");
+    card.append(createPdfBody(item, options));
+    return card;
+  }
+
   if (!item.text) return card;
 
   const body = document.createElement("div");
@@ -799,6 +822,351 @@ function createFileCard(item, options) {
   card.append(body);
   fillFilePreview(card, body, sub, item, options);
   return card;
+}
+
+/* 画布那边也靠这个决定给不给缩放手柄，所以是导出的 */
+export function isPdfExt(ext) {
+  return String(ext || "").toLowerCase() === "pdf";
+}
+
+/* PDF 块是一条纵向页链：滚轮一路往下就能读过整本，不用一下下点翻页。
+   一块只把视窗附近那几页真画成位图，其余靠算出来的页高撑住滚动条——
+   几百页全画出来内存先炸，什么都不画又没了位置感。
+   底部一行照旧留着：跳整页比滚过去快，页码跟着视窗走。
+   要在块里看小字就在块上拖角把宽度拉大，页链会按新宽度重排重画。 */
+
+const PDF_PAGE_GAP = 10;      /* 页与页之间留条缝，滚的时候看得出换了页 */
+const PDF_OVERSCAN = 1;       /* 视窗上下各多备一屏，滚到头不至于先看见空白 */
+const PDF_MAX_PAGES = 8;      /* 同时挂着几页位图：2x 屏上一张 A4 就是几 MB，够眼前用了 */
+const PDF_MEASURE_CHUNK = 12; /* 后台核对页高攒几页排一次版，别问一页重排一次 */
+
+function createPdfBody(item, options) {
+  const wrap = document.createElement("div");
+  wrap.className = "canvas-file-pdf";
+
+  const stage = document.createElement("div");
+  stage.className = "canvas-file-pdf-stage";
+  const track = document.createElement("div");
+  track.className = "canvas-file-pdf-track";
+  stage.append(track);
+
+  const bar = document.createElement("div");
+  bar.className = "canvas-file-pdf-bar";
+  const prev = document.createElement("button");
+  prev.type = "button";
+  prev.className = "canvas-file-pdf-step";
+  prev.append(chevronSvg("M10 4 6 8l4 4"));
+  prev.title = "上一页";
+  prev.setAttribute("aria-label", "上一页");
+  const pos = document.createElement("span");
+  pos.className = "canvas-file-pdf-pos";
+  const next = document.createElement("button");
+  next.type = "button";
+  next.className = "canvas-file-pdf-step";
+  next.append(chevronSvg("M6 4l4 4-4 4"));
+  next.title = "下一页";
+  next.setAttribute("aria-label", "下一页");
+  bar.append(prev, pos, next);
+
+  const state = document.createElement("div");
+  state.className = "canvas-file-pdf-state";
+  state.hidden = true;
+
+  wrap.append(stage, bar, state);
+  for (const control of [prev, next]) stopOnCard(control);
+
+  /* 页号 -> 此刻真挂在页链里的那一格（painted 才是已经画到位图上的） */
+  const live = new Map();
+  let dims = [];    /* 页号 -> 宽高，只用比值：渲染过的记 CSS 像素，后台核对的记 PDF 点 */
+  let tops = [];    /* 页号 -> 这一页在页链里的起点 */
+  let heights = [];
+  let guess = null; /* 还没问到的页先按它撑，几百页不必一上来就问完 */
+  let chain = 0;
+  let url = "";
+  let total = 0;
+  let width = 0;
+  /* 卡片被换掉（丢文件、复制进画布、重画整张）后旧回调不能再碰 DOM，作废看 seq；
+     宽度又变了一轮，画到一半那一张也不认了，作废看 gen */
+  let seq = 0;
+  let gen = 0;
+  let queue = [];
+  let busy = null;
+  /* 卡片还没进文档时量到的宽是 0，这一轮的活儿只能等 ResizeObserver 接手，
+     但记忆里那个位置得先存着，不然接手时人已经被放到第一页了 */
+  let pendingAnchor = null;
+
+  const clamp01 = (n) => Math.min(1, Math.max(0, Number(n) || 0));
+  const dimOf = (at) => dims[at] || guess;
+
+  function chrome(at) {
+    pos.textContent = total ? `${at} / ${total}` : "";
+    prev.disabled = at <= 1;
+    next.disabled = at >= total;
+  }
+
+  /* 读一份几十 MB 的书要半秒左右，这段时间在页下面留一行小字；第一页画出来就收掉 */
+  function note(text) {
+    state.hidden = !text;
+    state.textContent = text;
+  }
+
+  function fail(text) {
+    seq += 1;
+    stage.hidden = true;
+    bar.hidden = true;
+    state.hidden = false;
+    state.textContent = text;
+  }
+
+  function layout() {
+    let y = 0;
+    for (let at = 1; at <= total; at += 1) {
+      const d = dimOf(at);
+      const h = d && width ? Math.max(1, Math.round((d.height * width) / d.width)) : 0;
+      tops[at] = y;
+      heights[at] = h;
+      const box = live.get(at);
+      if (box) {
+        box.el.style.top = `${y}px`;
+        box.el.style.width = `${width}px`;
+        box.el.style.height = `${h}px`;
+        /* 位图是按旧宽度画的，先拉成新格子的大小顶一下，标脏排队重画 */
+        if (box.renderedWidth !== width) {
+          box.canvas.style.width = `${width}px`;
+          box.canvas.style.height = `${h}px`;
+          box.painted = false;
+        }
+      }
+      y += h + PDF_PAGE_GAP;
+    }
+    chain = Math.max(0, y - PDF_PAGE_GAP);
+    track.style.height = `${chain}px`;
+  }
+
+  function pageAt(y) {
+    let lo = 1;
+    let hi = total;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (tops[mid] <= y) lo = mid;
+      else hi = mid - 1;
+    }
+    return Math.min(Math.max(1, lo), total);
+  }
+
+  /* 位置记成「第几页 + 这页滚过去几成」：宽度再拉也没事，落回来还在同一行附近 */
+  function anchor() {
+    const at = pageAt(stage.scrollTop);
+    return { page: at, frac: clamp01((stage.scrollTop - tops[at]) / (heights[at] || 1)) };
+  }
+
+  function restore(at, frac) {
+    const y = (tops[at] || 0) + clamp01(frac) * (heights[at] || 0);
+    stage.scrollTop = Math.max(0, Math.min(chain, y));
+  }
+
+  /* 页高补齐了：把它上面那些页多出来、少掉的那截补给滚动位置，
+     眼前的字就不会被人推走——不补的话每核对一页，正文就往上蹿一截 */
+  function relayout() {
+    const at = anchor().page;
+    const before = tops[at] || 0;
+    layout();
+    const delta = (tops[at] || 0) - before;
+    if (delta) stage.scrollTop = Math.max(0, stage.scrollTop + delta);
+  }
+
+  /* 宽度是页链唯一的排版依据：变了就整个重排，画到一半的那张直接掐掉 */
+  function applyWidth(next) {
+    const a = pendingAnchor || anchor();
+    pendingAnchor = null;
+    width = next;
+    gen += 1;
+    if (busy) busy.slot.task?.cancel();
+    layout();
+    restore(a.page, a.frac);
+    chrome(anchor().page);
+    syncWindow();
+  }
+
+  function addSlot(at) {
+    const el = document.createElement("div");
+    el.className = "canvas-file-pdf-slot";
+    el.style.top = `${tops[at]}px`;
+    el.style.width = `${width}px`;
+    el.style.height = `${heights[at]}px`;
+    const canvas = document.createElement("canvas");
+    canvas.className = "canvas-file-pdf-page";
+    canvas.setAttribute("aria-label", `PDF 第 ${at} 页`);
+    el.append(canvas);
+    track.append(el);
+    live.set(at, { el, canvas, painted: false, renderedWidth: 0 });
+  }
+
+  /* 只留离当前页最近的那几页：出界的连格子一起撤，浏览器才收得回那张位图 */
+  function syncWindow() {
+    if (!total || !width || stage.hidden) return;
+    const near = anchor().page;
+    const from = pageAt(Math.max(0, stage.scrollTop - stage.clientHeight * PDF_OVERSCAN));
+    const to = pageAt(Math.min(chain, stage.scrollTop + stage.clientHeight * (1 + PDF_OVERSCAN)));
+    const inWindow = [];
+    for (let at = from; at <= to; at += 1) inWindow.push(at);
+    inWindow.sort((a, b) => Math.abs(a - near) - Math.abs(b - near));
+    const keep = new Set(inWindow.slice(0, PDF_MAX_PAGES));
+    for (const at of [...live.keys()]) {
+      if (keep.has(at)) continue;
+      live.get(at).el.remove();
+      live.delete(at);
+    }
+    queue = [...keep].filter((at) => !live.get(at)?.painted);
+    queue.sort((a, b) => Math.abs(a - near) - Math.abs(b - near));
+    for (const at of queue) if (!live.has(at)) addSlot(at);
+    void pump();
+  }
+
+  /* 一次只画一张：多张并行会一起抢 worker，滚起来反而更慢 */
+  async function pump() {
+    if (busy) return;
+    const at = queue.shift();
+    if (!at) return;
+    const box = live.get(at);
+    if (!box || box.painted) {
+      void pump();
+      return;
+    }
+    const card = seq;
+    const mine = gen;
+    const slot = { task: null };
+    busy = { slot };
+    try {
+      const result = await renderPdfPage({ url, page: at, canvas: box.canvas, width, slot });
+      busy = null;
+      if (card !== seq || mine !== gen || !wrap.isConnected) return;
+      box.painted = true;
+      box.renderedWidth = width;
+      /* 真画出来的比例跟撑出来的格子对不上就以它为准，顺手重排一次 */
+      if (Math.abs(result.height - (heights[at] || 0)) > 1) {
+        dims[at] = { width: result.width, height: result.height };
+        relayout();
+      }
+      note("");
+      void pump();
+    } catch (error) {
+      busy = null;
+      /* 掐掉的、作废的不算读坏了，接着画下一张 */
+      if (isCancelled(error) || mine !== gen) {
+        void pump();
+        return;
+      }
+      fail(pdfProblem(error));
+    }
+  }
+
+  function go(delta) {
+    if (!total) return;
+    restore(Math.min(Math.max(1, anchor().page + delta), total), 0);
+  }
+
+  prev.addEventListener("click", () => go(-1));
+  next.addEventListener("click", () => go(1));
+
+  let scrollTick = false;
+  let notifyTimer = null;
+
+  /* 存盘这一下攒着点：scheduleItemsSave 会顺带重画鸟瞰窗，滚一页的工夫敲几十次不值当 */
+  function notifyPosition() {
+    clearTimeout(notifyTimer);
+    notifyTimer = null;
+    if (!wrap.isConnected) return;
+    const a = anchor();
+    item.page = a.page;
+    item.pageFrac = a.frac;
+    options.onPdfPage?.(item);
+  }
+
+  stage.addEventListener("scroll", () => {
+    if (scrollTick) return;
+    scrollTick = true;
+    requestAnimationFrame(() => {
+      scrollTick = false;
+      if (!total || stage.hidden) return;
+      const a = anchor();
+      chrome(a.page);
+      /* 读到哪儿当场就记在块上：他可能滚完这一下就切画布，字段得是新的 */
+      item.page = a.page;
+      item.pageFrac = a.frac;
+      clearTimeout(notifyTimer);
+      notifyTimer = setTimeout(notifyPosition, 400);
+      syncWindow();
+    });
+  });
+  stage.addEventListener("scrollend", notifyPosition);
+
+  /* 拖角改宽度：整条页链按新宽重排，画过的先拉成新格子的大小顶着，再一页页重画清楚 */
+  new ResizeObserver(() => {
+    if (!total || stage.hidden) return;
+    const now = stage.clientWidth;
+    if (now <= 0 || Math.abs(now - width) < 1) return;
+    applyWidth(now);
+  }).observe(stage);
+
+  /* 每页多大要一页页问 pdf.js（不画，读几 KB 字典就回），几百页得后台慢慢补。
+     问回来一次重排一次，重排前给滚动位置补差价，所以补尺寸这件事他基本看不见。 */
+  async function measureRest(mine) {
+    let fresh = 0;
+    for (let at = 1; at <= total; at += 1) {
+      if (mine !== seq || !wrap.isConnected) return;
+      if (dims[at]) continue;
+      try {
+        const box = await pdfPageSize(url, at);
+        if (mine !== seq || !wrap.isConnected) return;
+        dims[box.page] = { width: box.width, height: box.height };
+        fresh += 1;
+      } catch {
+        return; /* 问不到就算了，反正有比例撑着，读不读得下去不归它 */
+      }
+      if (fresh >= PDF_MEASURE_CHUNK) {
+        fresh = 0;
+        relayout();
+        /* 让出主线程，别让几百次询问把滚动卡成幻灯片 */
+        await new Promise((done) => setTimeout(done, 0));
+      }
+    }
+    if (fresh) relayout();
+  }
+
+  (async function start() {
+    const mine = seq;
+    if (!options.loadPdfUrl) {
+      fail("这份 PDF 暂时预览不了");
+      return;
+    }
+    note(`正在读这份 ${formatSize(item.size)} 的 PDF…`);
+    try {
+      url = await options.loadPdfUrl(item);
+      const doc = await openPdf(url);
+      if (mine !== seq || !wrap.isConnected) return;
+      total = doc.numPages;
+      dims = new Array(total + 1);
+      tops = new Array(total + 1);
+      heights = new Array(total + 1);
+      bar.hidden = total <= 1;
+      /* 先把记忆里那一页的尺寸问回来：页链撑得起来，才谈得上滚回上次那一行 */
+      const at = Math.min(Math.max(1, Math.trunc(item.page) || 1), total);
+      const first = await pdfPageSize(url, at);
+      if (mine !== seq || !wrap.isConnected) return;
+      guess = { width: first.width, height: first.height };
+      dims[first.page] = guess;
+      pendingAnchor = { page: at, frac: clamp01(item.pageFrac) };
+      if (stage.clientWidth > 0) applyWidth(stage.clientWidth);
+      else chrome(at);
+      void measureRest(mine);
+    } catch (error) {
+      if (mine !== seq) return;
+      fail(pdfProblem(error));
+    }
+  })();
+
+  return wrap;
 }
 
 function stopOnCard(button) {

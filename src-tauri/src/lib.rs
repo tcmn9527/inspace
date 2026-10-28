@@ -123,6 +123,7 @@ pub fn run() {
             canvas::canvas_copy_file,
             canvas::canvas_file_text,
             canvas::canvas_file_preview,
+            canvas::canvas_file_url,
             canvas::canvas_file_body,
             canvas::canvas_file_write_back,
             canvas::canvas_reveal_file,

@@ -48,6 +48,9 @@ export const copyCanvasFile = (id, path) => invoke("canvas_copy_file", { id, pat
 export const readFileText = (path) => invoke("canvas_file_text", { path });
 export const previewCanvasFile = (id, rel, linked) =>
   invoke("canvas_file_preview", { id, rel, linked: Boolean(linked) });
+/* PDF 块：整份不进内存，后端开一次 asset 读权限给出地址，pdf.js 按 Range 一段段要 */
+export const fileUrl = async (id, src, linked) =>
+  convertFileSrc(await invoke("canvas_file_url", { id, src, linked: Boolean(linked) }));
 /* 块内编辑文本文件：读整份、写回整份。路径后端自己从 items.json 那块查，
    这里只给块 id；stamp 是编辑前那份文件的 mtime+大小，写回时拿它判断有没有被外部改过。 */
 export const readFileBody = (id, itemId) => invoke("canvas_file_body", { id, itemId });

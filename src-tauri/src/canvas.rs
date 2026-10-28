@@ -1709,6 +1709,19 @@ pub fn canvas_copy_file(
     Ok(job)
 }
 
+/// 取文件块的可读绝对路径（前端 convertFileSrc 成 asset 地址），顺手开一次读权限。
+/// PDF 预览要的是文件本身，走这条比把整本 base64 塞进内存划算。
+#[tauri::command]
+pub fn canvas_file_url(
+    id: String,
+    src: String,
+    linked: bool,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<String, String> {
+    media_url(&state, &app, &id, &src, linked, FILE_DIR, "文件")
+}
+
 /// 抄 Markdown 正文进笔记块用，编码解不出来就别抄。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

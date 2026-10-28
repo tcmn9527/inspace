@@ -5,7 +5,8 @@
   line-height: 20px;
   font-weight: 400;
 
-  /* ---- 主题色板（由 theme.js 覆盖；这里是与设计稿一致的默认「石墨」） ---- */
+  /* ---- 主题色板兜底值：theme.js 在首帧前就按选中的主题覆盖掉（默认「雪白」）。
+     这里留一套深色的，是为了 theme.js 没跑起来时页面仍可读。 ---- */
   --bg: #000000; /* 页面底 */
   --surface: #141414; /* 浮层/菜单底 */
   --surface-2: #0d0d0d; /* 输入框等更深的凹陷面 */
@@ -2847,8 +2848,8 @@ body.is-resizing {
   user-select: none;
 }
 
-/* 非文本的附件条就一行，垂直居中；文本块顶格排，好给预览留高度 */
-.canvas-file-card:not(.canvas-file-card-text) {
+/* 非文本的附件条就一行，垂直居中；文本块和 PDF 块顶格排，好给下面留高度 */
+.canvas-file-card:not(.canvas-file-card-text):not(.canvas-file-card-pdf) {
   justify-content: center;
 }
 
@@ -2902,6 +2903,91 @@ body.is-resizing {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* PDF 块：页面画在 canvas 上铺满块宽，比块高就在这一格里滚；底下一行只管翻页 */
+.canvas-file-pdf {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+}
+
+.canvas-file-pdf-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border-radius: 6px;
+}
+
+.canvas-file-pdf-track {
+  position: relative;
+}
+
+/* 页链里一页一格。格子先按算出来的页高把纸撑在这儿，位图晚一点才画上去也不露底色 */
+.canvas-file-pdf-slot {
+  position: absolute;
+  left: 0;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+}
+
+/* 纸本身永远是白的，不跟着主题走：深色主题下看 PDF 还是看纸面，别把页面染成黑底 */
+.canvas-file-pdf-page {
+  display: block;
+}
+
+.canvas-file-pdf-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.canvas-file-pdf-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.canvas-file-pdf-step:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.canvas-file-pdf-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.canvas-file-pdf-pos {
+  min-width: 48px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 加载中那一行，和预览不了的三种话（有密码、读坏了、没接上）都走这里 */
+.canvas-file-pdf-state {
+  flex: 0 0 auto;
+  padding-top: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
 }
 
 /* 文本预览：整块常显，超出卡片高度就自己滚 */
@@ -3525,14 +3611,48 @@ body.is-resizing {
 }
 
 /* 选中框：跟端口框一样画在块自己身上，inset 由 JS 按块的边框宽度补出来。
-   层级压在端口圈底下，免得 1px 描边从圆圈中间穿过去。 */
+   层级压在端口圈底下，免得描边从圆圈中间穿过去。
+   三层叠着来：先让出一道缝，缝外落一道实线，实线外面再罩一圈柔光。
+   缝里是干净的画布底色，所以缩到块挨成一片时，这圈也不会被当成块自己那条 1px 面板边线；
+   柔光靠的是面积而不是线宽，头发丝粗细也能看出哪块被选中。
+   三个尺寸都乘 --canvas-inv（1/缩放），所以屏幕上永远是这么粗，不跟画布缩放走。 */
 .canvas-sel-box {
   position: absolute;
   z-index: 1;
-  border: calc(1px * var(--canvas-inv, 1)) solid var(--accent);
-  box-shadow: 0 0 0 calc(1px * var(--canvas-inv, 1))
-    color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: inherit;
+  outline: calc(1.5px * var(--canvas-inv, 1)) solid var(--accent);
+  outline-offset: calc(2px * var(--canvas-inv, 1));
   pointer-events: none;
+}
+
+/* 柔光环：内沿正好贴在实线外沿上（2 + 1.5），再往粗 3px，所以那道缝不会被染色 */
+.canvas-sel-box::before {
+  content: "";
+  position: absolute;
+  inset: calc(-3.5px * var(--canvas-inv, 1));
+  border: calc(3px * var(--canvas-inv, 1)) solid
+    color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: inherit;
+}
+
+/* 光着身子的选中框：单选用的。四角把手 + 四个端口圈已经说清了这块被选中，
+   描边和柔光都收掉，只剩装把手的那层壳（多选时没有这个标记，照旧描边） */
+.canvas-sel-box[data-bare] {
+  outline: none;
+}
+
+.canvas-sel-box[data-bare]::before {
+  display: none;
+}
+
+/* 按下挪块的这一会儿，单选一律不描边——手里拽着的那块本来就跟着手走，一圈线是多余的回声。
+   播放器、附件条那类没把手的块靠这条也一起安静下来；多选留着框，整组拖动时得看出范围。 */
+.canvas-stage.is-moving .canvas-sel-box:not([data-group]) {
+  outline: none;
+}
+
+.canvas-stage.is-moving .canvas-sel-box:not([data-group])::before {
+  display: none;
 }
 
 /* 挪块途中只留选中框：角上四个缩放手柄、边上四个端口圈都是停下来才用的东西，
@@ -3579,6 +3699,14 @@ body.is-resizing {
   background: var(--surface);
   box-shadow: 0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
   pointer-events: auto;
+}
+
+/* 四个角的把手：看不见但摸得着。方框、底、投影都不画，元素还在原地占着那 10px 热区，
+   所以鼠标挪到块角上照样变斜箭头，照样能拖角改大小——单选的记号只留端口圈，画面干净些。 */
+.canvas-handle[data-handle="corner"] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .canvas-handle-nw {

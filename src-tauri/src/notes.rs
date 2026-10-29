@@ -519,6 +519,38 @@ pub fn notes_save_image(
     save_image_at(&root, &note_rel, &data, &ext)
 }
 
+#[derive(Serialize)]
+pub struct LocalImage {
+    pub data: String,
+    pub ext: String,
+}
+
+/// agent 要往笔记里贴一张本机图片时，前端先把文件读成 base64。
+/// 只认图片扩展名，和编辑器粘贴走同一条保存路径，大小上限也一致。
+#[tauri::command]
+pub fn image_read_base64(path: String) -> Result<LocalImage, String> {
+    let file = PathBuf::from(&path);
+    if !file.is_file() {
+        return Err("图片文件不在了".to_string());
+    }
+    let ext = file
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg") {
+        return Err("只认 png / jpg / gif / webp / bmp / svg 这几种图片".to_string());
+    }
+    let meta = fs::metadata(&file).map_err(|e| format!("读取图片信息失败：{e}"))?;
+    if meta.len() > MAX_IMAGE_BYTES as u64 {
+        return Err("图片太大了（超过 20MB）".to_string());
+    }
+    let bytes = fs::read(&file).map_err(|e| format!("读取图片失败：{e}"))?;
+    Ok(LocalImage {
+        data: BASE64.encode(bytes),
+        ext,
+    })
+}
+
 /// 阅读态渲染本地图片：读成 data URL 交给 <img>，避免额外开放文件协议。
 #[tauri::command]
 pub fn notes_read_image(

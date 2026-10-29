@@ -670,3 +670,194 @@ async function flushSave() {
 export function openNote(path) {
   if (path) openFile(path);
 }
+
+/* ---------- MCP / agent 动作层 ----------
+   笔记页这些动作和菜单、拖拽共用同一套读写；给 agent 的返回只带路径和体量，
+   正文走 read/write 两个专用口。 */
+
+function publicTree(nodes) {
+  return nodes.map((node) =>
+    node.kind === "dir"
+      ? { path: node.path, name: node.name, kind: "dir", children: publicTree(node.children) }
+      : { path: node.path, name: node.name, kind: "file" },
+  );
+}
+
+function flashPath(rel) {
+  if (!rel) return;
+  for (const row of ui.tree.querySelectorAll(".tree-row")) {
+    if (row.dataset.path !== rel) continue;
+    row.scrollIntoView({ block: "nearest" });
+    row.classList.add("is-agent-target");
+    clearTimeout(row.__agentGlow);
+    row.__agentGlow = setTimeout(() => row.classList.remove("is-agent-target"), 1300);
+  }
+}
+
+function swapPathPrefix(path, from, to) {
+  if (!path) return path;
+  if (path === from) return to;
+  return path.startsWith(`${from}/`) ? to + path.slice(from.length) : path;
+}
+
+async function agentEnsureRoot() {
+  if (!rootPath) await refreshNotes();
+  if (!rootPath) throw new Error("笔记目录还没准备好");
+  return rootPath;
+}
+
+export const notesAgent = {
+  async tree() {
+    await agentEnsureRoot();
+    await reloadTree(true);
+    return { root: rootPath, path: currentPath || "", tree: publicTree(tree) };
+  },
+
+  async read(rel) {
+    const path = String(rel || "");
+    if (!path) throw new Error("需要笔记路径 rel");
+    if (path === currentPath && editing) await flushSave();
+    const text = path === currentPath ? currentSource : await invoke("notes_read", { rel: path });
+    flashPath(path);
+    return { path, text: String(text ?? ""), chars: String(text ?? "").length };
+  },
+
+  async write(rel, text) {
+    const path = String(rel || "");
+    if (!path) throw new Error("需要笔记路径 rel");
+    const body = String(text ?? "");
+    if (path === currentPath) {
+      currentSource = body;
+      clearTimeout(saveTimer);
+      await queueSave();
+      if (editing) editor.setValue(body);
+      else renderDocument();
+    } else {
+      await invoke("notes_write", { rel: path, content: body });
+    }
+    await reloadTree(true);
+    flashPath(path);
+    setStatus("已由 agent 写入");
+    return { path, chars: body.length };
+  },
+
+  /* agent 贴图：本机图片读成 base64 → 走和编辑器粘贴同一条保存路径，
+     正文里用同样的 <相对路径> 写法插进去 */
+  async attachImage(path, notePath, append) {
+    const file = String(path || "");
+    if (!file) throw new Error("需要本机图片路径 path");
+    const rel = String(notePath || currentPath || "");
+    if (!rel) throw new Error("先指定要贴图的笔记 notePath");
+    const image = await invoke("image_read_base64", { path: file });
+    const asset = await invoke("notes_save_image", { noteRel: rel, data: image.data, ext: image.ext });
+    const snippet = `![图片](<${asset}>)`;
+    if (append !== false) {
+      const before = rel === currentPath ? currentSource : String(await invoke("notes_read", { rel }));
+      const clean = before.replace(/\s+$/, "");
+      await notesAgent.write(rel, clean ? `${clean}\n\n${snippet}\n` : `${snippet}\n`);
+    } else if (rel === currentPath && !editing) {
+      renderDocument();
+    }
+    flashPath(rel);
+    setStatus("已由 agent 贴图");
+    return { path: rel, asset, markdown: snippet, appended: append !== false };
+  },
+
+  async create(name, dir, text) {
+    await agentEnsureRoot();
+    const parent = String(dir || "");
+    const rel = await invoke("notes_create", { parent, name: String(name || "新笔记") });
+    if (text !== undefined && text !== null && String(text).length) {
+      await invoke("notes_write", { rel, content: String(text) });
+    }
+    if (parent) expanded.add(parent);
+    await reloadTree(true);
+    flashPath(rel);
+    setStatus("已新建笔记");
+    return { path: rel, name: basename(rel) };
+  },
+
+  async createFolder(name, dir) {
+    await agentEnsureRoot();
+    const parent = String(dir || "");
+    await invoke("notes_create_dir", { parent, name: String(name || "新建文件夹") });
+    if (parent) expanded.add(parent);
+    await reloadTree(true);
+    setStatus("已新建文件夹");
+    return { dir: parent, name: String(name || "新建文件夹") };
+  },
+
+  async rename(rel, name) {
+    const path = String(rel || "");
+    const next = String(name || "").trim();
+    if (!path) throw new Error("需要笔记路径 rel");
+    if (!next) throw new Error("新名字不能为空");
+    const renamed = await invoke("notes_rename", { rel: path, name: next });
+    currentPath = swapPathPrefix(currentPath, path, renamed);
+    updateCrumb();
+    await reloadTree(true);
+    flashPath(renamed);
+    return { path: renamed, name: basename(renamed) };
+  },
+
+  async move(rel, dir) {
+    const path = String(rel || "");
+    const target = String(dir || "");
+    if (!path) throw new Error("需要笔记路径 rel");
+    if (target && (path === target || target.startsWith(`${path}/`))) {
+      throw new Error("不能把文件夹移动到它自己里面");
+    }
+    const next = await invoke("notes_move", { rel: path, targetDir: target });
+    currentPath = swapPathPrefix(currentPath, path, next);
+    updateCrumb();
+    if (target) expanded.add(target);
+    await reloadTree(true);
+    flashPath(next);
+    setStatus("已移动");
+    return { from: path, to: next };
+  },
+
+  async remove(rel) {
+    const path = String(rel || "");
+    if (!path) throw new Error("需要笔记路径 rel");
+    await invoke("notes_delete", { rel: path });
+    if (currentPath === path || currentPath?.startsWith(`${path}/`)) closeDocument();
+    await reloadTree(true);
+    setStatus("已删除");
+    return { removed: path };
+  },
+
+  async open(rel) {
+    const path = String(rel || "");
+    if (!path) throw new Error("需要笔记路径 rel");
+    await agentEnsureRoot();
+    if (!findNode(path)) await reloadTree(true);
+    if (!findNode(path)) throw new Error(`笔记树里找不到「${path}」`);
+    await openFile(path);
+    flashPath(path);
+    return { path: currentPath, chars: currentSource.length };
+  },
+
+  current() {
+    return {
+      root: rootPath || "",
+      path: currentPath || "",
+      editing,
+      chars: currentSource.length,
+    };
+  },
+
+  async edit(on) {
+    if (!currentPath) throw new Error("还没有打开任何笔记");
+    const want = Boolean(on);
+    if (want && !editing) enterEdit();
+    if (!want && editing) await exitEdit();
+    return { path: currentPath, editing };
+  },
+
+  async reveal(rel) {
+    await invoke("notes_reveal", { rel: String(rel || "") });
+    flashPath(rel);
+    return { revealed: String(rel || "") };
+  },
+};

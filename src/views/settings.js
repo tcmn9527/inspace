@@ -7,13 +7,15 @@
    和「放完了点一下重新检测」，整张卡就是为这两步存在的。认到了就一行都不显示，
    因为这时候他没有任何事可干——音轨转 AAC 是空间里点播放时顺手做的。 */
 
-import { choiceDialog, progressDialog } from "./dialog.js";
+import { choiceDialog, confirmDialog, progressDialog } from "./dialog.js";
 
 const { invoke } = window.__TAURI__.core;
 
 const ui = {};
 let statusTimer = 0;
 let currentRoot = "";
+let mcpInfo = null;
+let mcpStatusTimer = 0;
 
 /* 搬运在后台线程跑，进度走 data-root-move 事件。命令一返回，线程就可能已经发过
    好几条了，所以监听器常驻、事件先按任务号攒着，等进度弹层挂上再补画。 */
@@ -55,12 +57,19 @@ export function initSettings() {
   ui.ffmpegReveal = document.querySelector("#settings-ffmpeg-reveal");
   ui.ffmpegRecheck = document.querySelector("#settings-ffmpeg-recheck");
   ui.ffmpegError = document.querySelector("#settings-ffmpeg-error");
+  ui.mcpUrl = document.querySelector("#settings-mcp-url");
+  ui.mcpCopy = document.querySelector("#settings-mcp-copy");
+  ui.mcpReset = document.querySelector("#settings-mcp-reset");
+  ui.mcpStatus = document.querySelector("#settings-mcp-status");
+  ui.mcpError = document.querySelector("#settings-mcp-error");
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
   ui.reset.addEventListener("click", reset);
   ui.ffmpegReveal.addEventListener("click", revealFfmpegDir);
   ui.ffmpegRecheck.addEventListener("click", refreshFfmpeg);
+  ui.mcpCopy.addEventListener("click", copyMcpConfig);
+  ui.mcpReset.addEventListener("click", resetMcpToken);
   setupMoveEvents();
 }
 
@@ -85,6 +94,7 @@ export async function refreshSettings() {
     showError(String(error));
   }
   refreshFfmpeg();
+  refreshMcp();
 }
 
 function sameDir(a, b) {
@@ -295,5 +305,91 @@ async function reset() {
     showError(String(error));
   } finally {
     setBusy(false);
+  }
+}
+
+/* ---------- Agent 连接（MCP） ---------- */
+
+function showMcpError(message) {
+  ui.mcpError.textContent = message || "";
+  ui.mcpError.hidden = !message;
+}
+
+function showMcpStatus(message) {
+  clearTimeout(mcpStatusTimer);
+  ui.mcpStatus.textContent = message;
+  ui.mcpStatus.hidden = false;
+  mcpStatusTimer = setTimeout(() => {
+    ui.mcpStatus.hidden = true;
+  }, 3000);
+}
+
+function mcpConfigText() {
+  if (!mcpInfo?.running) return "";
+  return JSON.stringify(
+    {
+      mcpServers: {
+        inspace: {
+          type: "http",
+          url: mcpInfo.url,
+          headers: { Authorization: `Bearer ${mcpInfo.token}` },
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
+async function refreshMcp() {
+  showMcpError("");
+  try {
+    mcpInfo = await invoke("mcp_info");
+  } catch (error) {
+    mcpInfo = null;
+    ui.mcpUrl.textContent = "状态读取失败";
+    ui.mcpCopy.disabled = true;
+    showMcpError(String(error));
+    return;
+  }
+  if (!mcpInfo?.running) {
+    ui.mcpUrl.textContent = "本地服务没有启动";
+    ui.mcpCopy.disabled = true;
+    showMcpError(mcpInfo?.error || "本地 MCP 服务没有启动");
+    return;
+  }
+  ui.mcpUrl.textContent = mcpInfo.url;
+  ui.mcpCopy.disabled = false;
+}
+
+async function copyMcpConfig() {
+  const text = mcpConfigText();
+  if (!text) {
+    showMcpError("连接配置还没准备好");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showMcpError("");
+    showMcpStatus("已复制连接配置");
+  } catch (error) {
+    showMcpError(`复制失败：${error}`);
+  }
+}
+
+async function resetMcpToken() {
+  const ok = await confirmDialog({
+    title: "重置 MCP token",
+    message: "已经连上的 agent 会断开，需要重新复制新的连接配置给它们。",
+    okText: "重置",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await invoke("mcp_reset_token");
+    await refreshMcp();
+    showMcpStatus("token 已重置，请重新复制连接配置");
+  } catch (error) {
+    showMcpError(String(error));
   }
 }

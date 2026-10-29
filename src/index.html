@@ -598,6 +598,20 @@
           </div>
           <p class="settings-error" id="settings-ffmpeg-error" hidden></p>
         </div>
+        <div class="settings-card" id="settings-mcp-card">
+          <p class="settings-title">Agent 连接（MCP）</p>
+          <p class="settings-hint">
+            别的 agent 可以通过本机 MCP 操作空间和笔记。复制连接配置贴到它那边即可；
+            服务只监听 127.0.0.1，token 只存在本机配置里。
+          </p>
+          <code class="settings-path" id="settings-mcp-url"></code>
+          <div class="settings-actions">
+            <button class="notes-btn" id="settings-mcp-copy" type="button">复制连接配置</button>
+            <button class="notes-btn" id="settings-mcp-reset" type="button">重置 token</button>
+          </div>
+          <p class="settings-status" id="settings-mcp-status" hidden></p>
+          <p class="settings-error" id="settings-mcp-error" hidden></p>
+        </div>
       </section>
     </div>
 

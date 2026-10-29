@@ -2,6 +2,7 @@ mod canvas;
 mod db;
 mod ebook;
 mod ffmpeg;
+mod mcp;
 mod notes;
 mod store;
 
@@ -11,6 +12,12 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -35,6 +42,12 @@ pub fn run() {
             app.manage(Arc::new(store::RootMoveJobs::default()));
             app.manage(db_state);
             app.manage(store_state);
+            /* MCP 服务跟着应用一起起：端口占不上不影响窗口，错误留给设置页说 */
+            let config_dir = app
+                .path()
+                .app_config_dir()
+                .map_err(|e| format!("无法解析应用配置目录：{e}"))?;
+            app.manage(mcp::start(app.handle().clone(), config_dir));
             match app.get_webview_window("main") {
                 Some(w) => {
                     /* 仅开发时把窗口钉在屏幕左上角（用户预留的可见区域）。
@@ -80,6 +93,7 @@ pub fn run() {
             notes::notes_delete,
             notes::notes_save_image,
             notes::notes_read_image,
+            notes::image_read_base64,
             notes::notes_reveal,
             canvas::canvas_list,
             canvas::canvas_create,
@@ -137,7 +151,11 @@ pub fn run() {
             canvas::canvas_note_write_back,
             ffmpeg::ffmpeg_status,
             ffmpeg::ffmpeg_reveal,
-            canvas::canvas_reveal
+            canvas::canvas_reveal,
+            mcp::mcp_register_tools,
+            mcp::mcp_reply,
+            mcp::mcp_info,
+            mcp::mcp_reset_token
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

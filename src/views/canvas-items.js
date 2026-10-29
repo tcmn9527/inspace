@@ -390,6 +390,22 @@ export function makeVideo(x, y, name, src, linked) {
   };
 }
 
+/* 便签：正文和颜色自成一件事，存在空间自己的 stickies/<id>.json 里 */
+export function makeSticky(x, y, text = "") {
+  return {
+    id: newId(),
+    type: "sticky",
+    x,
+    y,
+    w: STICKY_DEFAULT_WIDTH,
+    h: STICKY_DEFAULT_HEIGHT,
+    text,
+    color: STICKY_DEFAULT_COLOR,
+    textColor: STICKY_DEFAULT_TEXT,
+    borderColor: "",
+  };
+}
+
 /* 笔记块默认存 Markdown 快照和一份「原图路径 → 空间副本」映射，编辑不动原 .md。
    引用态（link.linked）多带写回要用的编码和换行，path 是原 .md 的绝对路径。 */
 export function makeNote(x, y, path, name, source, link = {}) {
@@ -1227,6 +1243,25 @@ function createPdfBody(item, options) {
     }
   })();
 
+  /* agent 通过这个控制器读页码、跳页：和底栏那两颗箭头走的是同一条恢复路径 */
+  wrap.__agent = {
+    get state() {
+      if (!total) {
+        return { ready: false, total: 0, page: Math.trunc(item.page) || 1, frac: item.pageFrac || 0 };
+      }
+      const a = anchor();
+      return { ready: true, total, page: a.page, frac: a.frac };
+    },
+    goto(page) {
+      if (!total) throw new Error("PDF 还没读完，稍后再试");
+      const at = Math.min(Math.max(1, Math.trunc(Number(page)) || 1), total);
+      restore(at, 0);
+      notifyPosition();
+      const a = anchor();
+      return { ready: true, total, page: a.page, frac: a.frac };
+    },
+  };
+
   return wrap;
 }
 
@@ -1461,6 +1496,29 @@ function createEbookCard(item, options) {
     paintChrome();
     await showChapter(item.chapter, false);
   })();
+
+  /* agent 控制器：目录、当前章、跳章，跟工具栏那三件套共用 showChapter */
+  const agentState = () => {
+    const total = book?.chapters?.length || 0;
+    return {
+      ready: Boolean(book),
+      total,
+      chapter: total ? Math.min(item.chapter, total - 1) : item.chapter || 0,
+      title: book?.title || title.textContent,
+      chapters: book?.chapters || [],
+    };
+  };
+  card.__agent = {
+    get state() {
+      return agentState();
+    },
+    async goto(index) {
+      if (!book) throw new Error("这本书还没读进来，稍后再试");
+      const at = Math.min(Math.max(0, Math.trunc(Number(index)) || 0), book.chapters.length - 1);
+      await showChapter(at, true);
+      return agentState();
+    },
+  };
 
   return card;
 }

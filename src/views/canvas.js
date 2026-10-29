@@ -58,6 +58,7 @@ import {
   makeImage,
   makeLine,
   makeNote,
+  makeSticky,
   makeText,
   makeVideo,
   newId,
@@ -4608,3 +4609,1038 @@ function showError(error) {
     ui.error.hidden = true;
   }, 4200);
 }
+
+/* ---------- MCP / agent 动作层 ----------
+   菜单、工具栏、拖拽里的动作在这里收成一组不带界面的函数：参数是普通对象，
+   返回块摘要或状态。MCP 工具从这里走，和用户点菜单共用同一套落盘与校验。 */
+
+let cameraAnim = null;
+const numOr = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+const agentSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function agentRequireSpace() {
+  if (!current) throw new Error("当前没有打开的空间");
+  return current;
+}
+
+function agentRequireItem(id) {
+  const item = findItem(String(id));
+  if (!item) throw new Error(`找不到块 ${id}`);
+  return item;
+}
+
+function agentBounds(item) {
+  const bounds = itemBounds(item, itemEls.get(item.id));
+  return {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    w: Math.round(bounds.w),
+    h: Math.round(bounds.h),
+  };
+}
+
+/* 给 agent 看的块摘要：几何、样式和内容规模都带上，正文另用专用工具取 */
+function agentSummary(item) {
+  /* 连线自己没有坐标，包围盒只对块算 */
+  const base = { id: item.id, type: item.type, z: Number.isFinite(item.z) ? item.z : null };
+  if (item.type !== "connector") Object.assign(base, agentBounds(item));
+  if (item.type === "connector") {
+    return {
+      ...base,
+      from: item.from,
+      to: item.to,
+      shape: item.shape,
+      arrow: item.arrow,
+      color: item.color,
+      label: item.label || "",
+    };
+  }
+  if (item.type === "text") {
+    return {
+      ...base,
+      text: item.text,
+      color: item.color,
+      fontSize: item.fontSize,
+      fillColor: item.fillColor,
+      borderColor: item.borderColor,
+      bordered: item.bordered,
+      radius: item.radius,
+    };
+  }
+  if (item.type === "rect" || item.type === "ellipse") {
+    return { ...base, borderColor: item.borderColor, fillColor: item.fillColor, radius: item.radius };
+  }
+  if (item.type === "line" || item.type === "arrow") {
+    return { ...base, x2: item.x2, y2: item.y2, borderColor: item.borderColor };
+  }
+  if (item.type === "sticky") {
+    return { ...base, text: item.text, color: item.color, textColor: item.textColor, borderColor: item.borderColor };
+  }
+  if (item.type === "note") {
+    return {
+      ...base,
+      name: item.name,
+      linked: item.linked,
+      path: item.path || "",
+      chars: (item.source || "").length,
+      borderColor: item.borderColor,
+      fillColor: item.fillColor,
+    };
+  }
+  if (item.type === "file") {
+    return {
+      ...base,
+      name: item.name,
+      ext: item.ext,
+      linked: item.linked,
+      src: item.src,
+      page: item.page || 1,
+      pageFrac: item.pageFrac || 0,
+      borderColor: item.borderColor,
+      fillColor: item.fillColor,
+    };
+  }
+  if (item.type === "ebook") {
+    return { ...base, name: item.name, linked: item.linked, chapter: item.chapter };
+  }
+  if (item.type === "image") {
+    return { ...base, src: item.src, linked: item.linked, borderColor: item.borderColor };
+  }
+  if (item.type === "audio" || item.type === "video") {
+    return { ...base, name: item.name, src: item.src, linked: item.linked };
+  }
+  return base;
+}
+
+/* 演示用的光带：只加一圈外发光，不动块自己的颜色和尺寸 */
+function agentHighlight(ids, ms = 900) {
+  for (const raw of ids) {
+    const id = String(raw);
+    const el = itemEls.get(id);
+    if (!el) continue;
+    el.classList.add("is-agent-target");
+    clearTimeout(el.__agentGlow);
+    el.__agentGlow = setTimeout(() => el.classList.remove("is-agent-target"), ms);
+  }
+}
+
+function agentStopCameraAnim() {
+  if (!cameraAnim) return;
+  cancelAnimationFrame(cameraAnim.raf);
+  cameraAnim.cleanup();
+  cameraAnim = null;
+}
+
+/* 相机移动给用户看：用户自己一碰鼠标或键盘就把镜头还给他，不硬拽 */
+function agentAnimateCamera(target, duration = 420) {
+  if (!current) return;
+  agentStopCameraAnim();
+  const start = { ...current.camera };
+  const began = performance.now();
+  const onUser = () => agentStopCameraAnim();
+  window.addEventListener("pointerdown", onUser, true);
+  window.addEventListener("keydown", onUser, true);
+  const cleanup = () => {
+    window.removeEventListener("pointerdown", onUser, true);
+    window.removeEventListener("keydown", onUser, true);
+  };
+  const step = (now) => {
+    const t = Math.min(1, (now - began) / duration);
+    const k = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    current.camera.x = start.x + (target.x - start.x) * k;
+    current.camera.y = start.y + (target.y - start.y) * k;
+    current.camera.scale = start.scale + (target.scale - start.scale) * k;
+    applyCamera();
+    if (t < 1) {
+      cameraAnim = { raf: requestAnimationFrame(step), cleanup };
+    } else {
+      cleanup();
+      cameraAnim = null;
+      scheduleCameraSave();
+    }
+  };
+  cameraAnim = { raf: requestAnimationFrame(step), cleanup };
+}
+
+function agentCameraState() {
+  return current
+    ? { x: Math.round(current.camera.x), y: Math.round(current.camera.y), scale: Number(current.camera.scale.toFixed(3)) }
+    : null;
+}
+
+function agentFocusBlock(id, patch = {}) {
+  agentRequireSpace();
+  const item = agentRequireItem(id);
+  const bounds = agentBounds(item);
+  const vw = ui.stage.clientWidth;
+  const vh = ui.stage.clientHeight;
+  const zoom = patch.zoom == null ? current.camera.scale : clamp(Number(patch.zoom), MIN_SCALE, MAX_SCALE);
+  const target = {
+    scale: zoom,
+    x: vw / 2 - (bounds.x + bounds.w / 2) * zoom,
+    y: vh / 2 - (bounds.y + bounds.h / 2) * zoom,
+  };
+  agentAnimateCamera(target, 360);
+  return { camera: agentCameraState() };
+}
+
+/* 新块落在视野外时把镜头带过去；本来就在眼前就不动，免得用户明明看得见还给他跳一下 */
+function agentRevealBlock(id) {
+  const item = findItem(String(id));
+  if (!item || item.type === "connector") return false;
+  const bounds = agentBounds(item);
+  const scale = current.camera.scale;
+  const vw = ui.stage.clientWidth;
+  const vh = ui.stage.clientHeight;
+  const left = bounds.x * scale + current.camera.x;
+  const top = bounds.y * scale + current.camera.y;
+  const margin = 40;
+  const inView =
+    left >= margin &&
+    top >= margin &&
+    left + bounds.w * scale <= vw - margin &&
+    top + bounds.h * scale <= vh - margin;
+  if (inView) return false;
+  agentAnimateCamera(
+    {
+      scale,
+      x: vw / 2 - (bounds.x + bounds.w / 2) * scale,
+      y: vh / 2 - (bounds.y + bounds.h / 2) * scale,
+    },
+    360,
+  );
+  return true;
+}
+
+function agentFitView() {
+  agentRequireSpace();
+  const blocks = current.items.filter((item) => item.type !== "connector");
+  if (!blocks.length) return { camera: agentCameraState() };
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const item of blocks) {
+    const bounds = agentBounds(item);
+    left = Math.min(left, bounds.x);
+    top = Math.min(top, bounds.y);
+    right = Math.max(right, bounds.x + bounds.w);
+    bottom = Math.max(bottom, bounds.y + bounds.h);
+  }
+  const w = Math.max(1, right - left);
+  const h = Math.max(1, bottom - top);
+  const vw = ui.stage.clientWidth;
+  const vh = ui.stage.clientHeight;
+  const pad = 80;
+  const scale = clamp(Math.min((vw - pad * 2) / w, (vh - pad * 2) / h), MIN_SCALE, MAX_SCALE);
+  const target = {
+    scale,
+    x: vw / 2 - (left + w / 2) * scale,
+    y: vh / 2 - (top + h / 2) * scale,
+  };
+  agentAnimateCamera(target, 480);
+  return { camera: { x: Math.round(target.x), y: Math.round(target.y), scale: Number(scale.toFixed(3)) }, bounds: { x: Math.round(left), y: Math.round(top), w: Math.round(w), h: Math.round(h) } };
+}
+
+async function agentFindSpace(ref) {
+  await loadList();
+  const key = String(ref ?? "").trim();
+  const target = canvases.find((meta) => meta.id === key || meta.name === key);
+  if (!target) throw new Error(`找不到空间「${key}」`);
+  return target;
+}
+
+async function agentSpaceList() {
+  await loadList();
+  return {
+    current: current ? { id: current.meta.id, name: current.meta.name } : null,
+    spaces: canvases.map((meta) => ({ id: meta.id, name: meta.name, path: meta.path || "" })),
+  };
+}
+
+async function agentOpenSpace(ref) {
+  const target = await agentFindSpace(ref);
+  if (!active) {
+    window.dispatchEvent(new CustomEvent("inspace:route", { detail: "canvas" }));
+    await agentSleep(250);
+  }
+  await switchTo(target.id);
+  if (!current || current.meta.id !== target.id) throw new Error(`打开空间「${target.name}」失败`);
+  return { space: { id: current.meta.id, name: current.meta.name }, blocks: current.items.length };
+}
+
+async function agentCreateSpace(name) {
+  const clean = String(name ?? "").trim();
+  if (!clean) throw new Error("空间名不能为空");
+  const data = await store.createCanvas(clean);
+  const meta = data?.meta;
+  if (!meta) throw new Error("空间建好了，但没拿到它的信息");
+  await loadList();
+  if (active) await switchTo(meta.id);
+  return { id: meta.id, name: meta.name, opened: Boolean(current && current.meta.id === meta.id) };
+}
+
+async function agentRenameSpace(ref, newName) {
+  const target = await agentFindSpace(ref);
+  const clean = String(newName ?? "").trim();
+  if (!clean) throw new Error("新名字不能为空");
+  const mine = current && current.meta.id === target.id;
+  if (mine) {
+    if (editingId || edgeLabelEditor) commitEditing();
+    await flushBlockContents();
+    await flushItems();
+    await flushCamera();
+    current = null;
+  }
+  let meta;
+  try {
+    meta = await store.renameCanvas(target.id, clean);
+  } catch (error) {
+    /* 改名没成：把刚才放下的空间重新打开，别让界面停在无空间的样子 */
+    if (mine) {
+      await loadList();
+      if (canvases.some((entry) => entry.id === target.id)) await switchTo(target.id);
+    }
+    throw error;
+  }
+  await loadList();
+  if (mine && meta) await switchTo(meta.id);
+  return { id: meta?.id || "", name: meta?.name || clean };
+}
+
+async function agentDeleteSpace(ref) {
+  const target = await agentFindSpace(ref);
+  const mine = current && current.meta.id === target.id;
+  if (mine) {
+    if (editingId || edgeLabelEditor) commitEditing();
+    /* 删除前把防抖里的改动落盘；否则删除之后那些迟到的保存会把旧文件夹又写回来 */
+    await flushBlockContents();
+    await flushItems();
+    await flushCamera();
+  }
+  await store.deleteCanvas(target.id);
+  await loadList();
+  if (mine) {
+    localStorage.removeItem(STORAGE_KEY);
+    current = null;
+    selectedIds = new Set();
+    renderAll();
+    if (canvases[0]) await switchTo(canvases[0].id);
+    else showEmpty();
+  }
+  return { deleted: { id: target.id, name: target.name } };
+}
+
+function agentScene(patch = {}) {
+  agentRequireSpace();
+  const type = patch.type ? String(patch.type) : "";
+  const items = current.items.filter((item) => !type || item.type === type);
+  return {
+    space: { id: current.meta.id, name: current.meta.name },
+    camera: agentCameraState(),
+    selected: [...selectedIds],
+    blocks: items.map(agentSummary),
+  };
+}
+
+function agentBlock(id) {
+  return agentSummary(agentRequireItem(id));
+}
+
+/* 不给坐标就落在视野里，连着建会一格格错开（insertPoint 负责） */
+function agentPlacePoint(w, h, spec) {
+  if (Number.isFinite(Number(spec.x)) && Number.isFinite(Number(spec.y))) {
+    return { x: Number(spec.x), y: Number(spec.y) };
+  }
+  return insertPoint(w, h);
+}
+
+async function agentCreateBlock(spec = {}) {
+  agentRequireSpace();
+  if (editingId || edgeLabelEditor) commitEditing();
+  const type = String(spec.type || "").trim();
+  const canvasId = current.meta.id;
+
+  if (type === "text") {
+    const w = Math.max(40, numOr(spec.w, TEXT_DEFAULT_WIDTH));
+    const at = agentPlacePoint(w, 24, spec);
+    const item = makeText(at.x, at.y, w);
+    item.text = String(spec.text ?? "");
+    item.fontSize = clamp(Math.round(numOr(spec.fontSize, item.fontSize)), 8, 200);
+    if (spec.borderColor !== undefined) {
+      item.borderColor = String(spec.borderColor || "");
+      item.bordered = Boolean(item.borderColor);
+    }
+    if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
+    if (spec.color !== undefined) item.color = String(spec.color || "");
+    if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
+    const placed = placeBlock(item);
+    if (!placed) throw new Error("这块没落进空间");
+    return agentSummary(placed);
+  }
+
+  if (type === "rect" || type === "ellipse") {
+    const w = Math.max(8, numOr(spec.w, 240));
+    const h = Math.max(8, numOr(spec.h, 120));
+    const at = agentPlacePoint(w, h, spec);
+    const item = makeBox(type, at.x, at.y, at.x + w, at.y + h);
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
+    if (type === "rect" && spec.radius !== undefined) {
+      item.radius = Math.max(0, Math.round(numOr(spec.radius, 0)));
+    }
+    const placed = placeBlock(item);
+    return agentSummary(placed);
+  }
+
+  if (type === "line" || type === "arrow") {
+    const hasEnds = spec.x2 !== undefined && spec.y2 !== undefined && spec.x !== undefined && spec.y !== undefined;
+    const at = agentPlacePoint(200, 1, spec);
+    const x1 = hasEnds ? Number(spec.x) : at.x - 100;
+    const y1 = hasEnds ? Number(spec.y) : at.y;
+    const x2 = hasEnds ? Number(spec.x2) : x1 + 200;
+    const y2 = hasEnds ? Number(spec.y2) : y1;
+    const item = makeLine(type, x1, y1, x2, y2);
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    const placed = placeBlock(item);
+    return agentSummary(placed);
+  }
+
+  if (type === "sticky") {
+    const w = Math.max(STICKY_MIN_WIDTH, numOr(spec.w, 280));
+    const h = Math.max(STICKY_MIN_HEIGHT, numOr(spec.h, 280));
+    const at = agentPlacePoint(w, h, spec);
+    const item = makeSticky(at.x, at.y, String(spec.text ?? ""));
+    item.w = w;
+    item.h = h;
+    if (spec.color) item.color = String(spec.color);
+    if (spec.textColor) item.textColor = String(spec.textColor);
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    const placed = placeBlock(item);
+    return agentSummary(placed);
+  }
+
+  if (type === "note") {
+    const w = Math.max(NOTE_MIN_WIDTH, numOr(spec.w, NOTE_DEFAULT_WIDTH));
+    const h = Math.max(NOTE_MIN_HEIGHT, numOr(spec.h, NOTE_DEFAULT_HEIGHT));
+    const at = agentPlacePoint(w, h, spec);
+    let markdown = String(spec.markdown ?? "");
+    let name = String(spec.name ?? "未命名笔记");
+    if (spec.notePath) {
+      markdown = await store.readNote(String(spec.notePath));
+      if (!current || current.meta.id !== canvasId) throw new Error("读笔记时空间被切走了");
+      name = spec.name ? name : String(spec.notePath).split("/").pop().replace(/\.md$/i, "");
+    }
+    const item = makeNote(at.x, at.y, "", name, markdown);
+    item.w = w;
+    item.h = h;
+    if (spec.notePath) item.assets = await snapshotNoteImages(canvasId, item);
+    if (!current || current.meta.id !== canvasId) throw new Error("插笔记时空间被切走了");
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
+    const placed = placeBlock(item);
+    return agentSummary(placed);
+  }
+
+  if (type === "image" || type === "audio" || type === "video" || type === "file" || type === "ebook") {
+    if (!spec.path) throw new Error(`${type} 块需要本机文件路径 path`);
+    const placed = await agentImportFile({
+      path: String(spec.path),
+      mode: spec.mode === "link" ? "link" : "copy",
+      as: type,
+      x: spec.x,
+      y: spec.y,
+      fillColor: spec.fillColor,
+      borderColor: spec.borderColor,
+    });
+    return placed;
+  }
+
+  if (type === "connector") {
+    return agentCreateConnector(spec);
+  }
+
+  throw new Error(`不认识的块类型：${type || "(空)"}`);
+}
+
+function agentCreateConnector(spec = {}) {
+  agentRequireSpace();
+  if (editingId || edgeLabelEditor) commitEditing();
+  const from = agentRequireItem(spec.from);
+  const to = agentRequireItem(spec.to);
+  if (from.type === "connector" || to.type === "connector") throw new Error("连线不能接另一条线");
+  if (from.id === to.id) throw new Error("连线不能自己连自己");
+  const item = makeConnector(from.id, spec.fromSide, to.id);
+  if (spec.shape === "curve" || spec.shape === "elbow") item.shape = spec.shape;
+  if (spec.arrow === "none" || spec.arrow === "both" || spec.arrow === "end") item.arrow = spec.arrow;
+  if (spec.color) item.color = String(spec.color);
+  if (spec.label !== undefined) item.label = String(spec.label);
+  current.items.push(item);
+  /* 和拖线一样，接上那一刻就把两条边定死 */
+  pinConnectorSides(item, boundsOfItem);
+  addItemElement(item);
+  refreshConnectors();
+  select(item.id);
+  scheduleItemsSave();
+  return agentSummary(item);
+}
+
+function agentUpdateConnector(item, patch) {
+  let touched = false;
+  if (patch.shape === "curve" || patch.shape === "elbow") {
+    item.shape = patch.shape;
+    touched = true;
+  }
+  if (patch.arrow === "none" || patch.arrow === "both" || patch.arrow === "end") {
+    item.arrow = patch.arrow;
+    touched = true;
+  }
+  if (patch.color !== undefined) {
+    item.color = String(patch.color || "");
+    const group = itemEls.get(item.id);
+    if (group) syncConnectorElement(group, item, connectorGeometry(item, boundsOfItem));
+    touched = true;
+  }
+  if (patch.label !== undefined) {
+    item.label = String(patch.label || "");
+    touched = true;
+  }
+  if (patch.from !== undefined || patch.to !== undefined || patch.fromSide !== undefined) {
+    const from = agentRequireItem(patch.from ?? item.from.item);
+    const to = agentRequireItem(patch.to ?? item.to.item);
+    if (from.type === "connector" || to.type === "connector" || from.id === to.id) {
+      throw new Error("连线端点只能是两个不同的块");
+    }
+    item.from = { item: from.id, side: patch.fromSide || "auto" };
+    item.to = { item: to.id, side: "auto" };
+    touched = true;
+  }
+  if (!touched) return agentSummary(item);
+  refreshConnectors();
+  scheduleItemsSave();
+  return agentSummary(item);
+}
+
+function agentDeleteBlock(id) {
+  const item = agentRequireItem(id);
+  const summary = agentSummary(item);
+  deleteItems([item.id]);
+  return summary;
+}
+
+async function agentDuplicateBlock(id, patch = {}) {
+  agentRequireSpace();
+  const source = agentRequireItem(id);
+  if (source.type === "connector") throw new Error("连线不复制，直接重新连一条");
+  if (editingId || edgeLabelEditor) commitEditing();
+  if (source.type === "note" && !source.linked) await flushBlockContents();
+  const raw = JSON.parse(JSON.stringify(source));
+  const item = normalizeItem({ ...raw, id: newId(), z: null });
+  if (!item) throw new Error("这块没法复制");
+  const dx = numOr(patch.dx, 24);
+  const dy = numOr(patch.dy, 24);
+  item.x += dx;
+  item.y += dy;
+  if (item.type === "line" || item.type === "arrow") {
+    item.x2 += dx;
+    item.y2 += dy;
+  }
+  const ok = await landBlock(item, current.meta.id, source.id);
+  if (!ok) throw new Error("复制失败：源文件已经不在了");
+  const placed = placeBlock(item);
+  return agentSummary(placed);
+}
+
+function agentSelectBlocks(ids, additive = false) {
+  const list = (Array.isArray(ids) ? ids : [ids]).map(String).filter(Boolean);
+  for (const id of list) agentRequireItem(id);
+  if (additive) {
+    for (const id of list) select(id, true);
+  } else {
+    const onlyConnector = list.length === 1 && findItem(list[0])?.type === "connector";
+    selectedIds = new Set(onlyConnector ? list : list.filter((id) => findItem(id)?.type !== "connector"));
+    syncSelectedClasses();
+    updateSelection();
+  }
+  return { selected: [...selectedIds] };
+}
+
+function agentSetLayer(id, direction) {
+  const item = agentRequireItem(id);
+  if (item.type === "connector") throw new Error("连线固定在块下面，不参与层级");
+  const map = { up: 1, down: -1, top: "top", bottom: "bottom" };
+  const dir = map[String(direction)];
+  if (dir === undefined) throw new Error("direction 只能是 up / down / top / bottom");
+  moveLayer(item, dir);
+  return agentSummary(item);
+}
+
+function agentUpdateBlock(id, patch = {}) {
+  const item = agentRequireItem(id);
+  if (item.type === "connector") return agentUpdateConnector(item, patch);
+  const el = itemEls.get(item.id);
+  let geometry = false;
+
+  if (Number.isFinite(Number(patch.x))) {
+    item.x = Number(patch.x);
+    geometry = true;
+  }
+  if (Number.isFinite(Number(patch.y))) {
+    item.y = Number(patch.y);
+    geometry = true;
+  }
+  if (item.type !== "text" && patch.w !== undefined) {
+    item.w = Math.max(8, numOr(patch.w, item.w));
+    geometry = true;
+  }
+  if (item.type !== "text" && patch.h !== undefined) {
+    item.h = Math.max(8, numOr(patch.h, item.h));
+    geometry = true;
+  }
+  if (patch.fontSize !== undefined && item.type === "text") {
+    setFontSize(item, clamp(Math.round(numOr(patch.fontSize, item.fontSize)), 8, 200));
+  }
+  if ((item.type === "line" || item.type === "arrow") && patch.x2 !== undefined && patch.y2 !== undefined) {
+    item.x2 = numOr(patch.x2, item.x2);
+    item.y2 = numOr(patch.y2, item.y2);
+    geometry = true;
+  }
+  if (patch.radius !== undefined && (item.type === "rect" || item.type === "text")) {
+    item.radius = Math.max(0, Math.round(numOr(patch.radius, item.radius)));
+  }
+  if (patch.borderColor !== undefined) {
+    applyColor(item, "borderColor", String(patch.borderColor || ""));
+  }
+  if (patch.fillColor !== undefined) {
+    applyColor(item, "fillColor", String(patch.fillColor || ""));
+  }
+  if (patch.color !== undefined) {
+    applyColor(item, "color", String(patch.color || ""));
+  }
+  if (patch.textColor !== undefined && item.type === "sticky") {
+    item.textColor = String(patch.textColor || STICKY_DEFAULT_TEXT);
+    if (el) syncItemElement(el, item);
+  }
+  if (patch.text !== undefined && item.type === "text") {
+    item.text = String(patch.text);
+    const body = el?.querySelector(".canvas-text-body");
+    if (body) body.textContent = item.text;
+    if (el) item.h = el.offsetHeight;
+  }
+  if (patch.text !== undefined && item.type === "sticky") {
+    item.text = String(patch.text);
+    const body = el?.querySelector(".canvas-sticky-body");
+    if (body) body.textContent = item.text;
+  }
+  if (patch.markdown !== undefined && item.type === "note") {
+    if (item.linked) throw new Error("这是引用外部 .md 的笔记块，写正文请用 note_write_back");
+    item.source = String(patch.markdown);
+    const body = el?.querySelector(".canvas-note-body");
+    if (body) {
+      body.innerHTML = renderMarkdown(item.source);
+      void hydrateNoteImages(item, el);
+    }
+    persistNote(item);
+  }
+  if (el) syncItemElement(el, item);
+  if (geometry) {
+    updateSelection();
+    refreshConnectors();
+  }
+  scheduleItemsSave();
+  if (item.type === "sticky") persistSticky(item);
+  if (item.type === "note" && patch.borderColor !== undefined) void persistNote(item);
+  return agentSummary(item);
+}
+
+/* ---------- 文件 / 便签 / 笔记内容 ---------- */
+
+/* agent 插文件不走弹窗：拷进空间还是引用原文件由调用方直接给 mode。 */
+async function agentImportFile(spec = {}) {
+  agentRequireSpace();
+  if (editingId || edgeLabelEditor) commitEditing();
+  const canvasId = current.meta.id;
+  const path = String(spec.path || "").trim();
+  if (!path) throw new Error("需要文件在本机的路径 path");
+  const mode = spec.mode === "link" ? "link" : "copy";
+  const point =
+    Number.isFinite(Number(spec.x)) && Number.isFinite(Number(spec.y))
+      ? { x: Number(spec.x), y: Number(spec.y) }
+      : null;
+  const ext = fileExt(path);
+  const force = String(spec.as || "");
+  let placed = null;
+  try {
+    if (force === "image" || (!force && IMAGE_EXTS.has(ext))) {
+      placed = await addImageBlock(path, point, mode);
+    } else if (force === "audio" || (!force && AUDIO_EXTS.has(ext))) {
+      placed = await addAudioBlock(path, point, mode);
+    } else if (force === "video" || (!force && VIDEO_EXTS.has(ext))) {
+      placed = await addVideoBlock(path, point, mode);
+    } else if (force === "ebook" || (!force && EBOOK_EXTS.has(ext))) {
+      placed = await addEbookBlock(path, point, mode);
+    } else {
+      const info = await store.fileInfo(path);
+      if (!current || current.meta.id !== canvasId) throw new Error("导入时空间被切走了");
+      if (force === "file") {
+        const size = fileBlockSize(info);
+        placed = await addFileBlock(info, point || insertPoint(size.w, size.h), mode);
+      } else {
+        placed = await addDroppedFile(info, point, mode);
+      }
+    }
+  } catch (error) {
+    throw new Error(`没能把这份文件放进空间：${error?.message || error}`);
+  }
+  if (!current || current.meta.id !== canvasId) throw new Error("导入时空间被切走了");
+  if (!placed) throw new Error("没能把这份文件放进空间");
+  if (spec.borderColor !== undefined) applyColor(placed, "borderColor", String(spec.borderColor || ""));
+  if (spec.fillColor !== undefined) applyColor(placed, "fillColor", String(spec.fillColor || ""));
+  if (spec.borderColor !== undefined || spec.fillColor !== undefined) scheduleItemsSave();
+  agentRevealBlock(placed.id);
+  agentHighlight([placed.id], 1400);
+  return agentSummary(placed);
+}
+
+function agentStickyOf(id) {
+  const item = agentRequireItem(id);
+  if (item.type !== "sticky") throw new Error("这不是便签块");
+  return item;
+}
+
+function agentStickyRead(id) {
+  const item = agentStickyOf(id);
+  return { ...agentSummary(item), text: item.text || "" };
+}
+
+function agentStickyWrite(id, patch = {}) {
+  const item = agentStickyOf(id);
+  agentHighlight([item.id]);
+  return agentUpdateBlock(item.id, patch);
+}
+
+function agentNoteOf(id) {
+  const item = agentRequireItem(id);
+  if (item.type !== "note") throw new Error("这不是笔记块");
+  return item;
+}
+
+function agentNoteRead(id) {
+  const item = agentNoteOf(id);
+  return { ...agentSummary(item), markdown: item.source || "" };
+}
+
+async function agentNoteWrite(id, text) {
+  const item = agentNoteOf(id);
+  if (editingId === item.id) commitEditing();
+  const body = String(text ?? "");
+  const canvasId = current.meta.id;
+  if (item.linked) {
+    await store.writeBackNote(canvasId, item.id, body);
+    if (!current || current.meta.id !== canvasId) throw new Error("写回时空间被切走了");
+  } else {
+    item.source = body;
+    persistNote(item);
+  }
+  item.source = body;
+  const el = itemEls.get(item.id);
+  if (el) renderNoteBody(item, el);
+  agentHighlight([item.id]);
+  return { ...agentSummary(item), markdown: body };
+}
+
+async function agentFileOf(id) {
+  const item = agentRequireItem(id);
+  if (!isFileEditable(item)) throw new Error("这块不是可直接读写正文的文本文件");
+  return item;
+}
+
+async function agentFileRead(id, maxChars) {
+  const item = await agentFileOf(id);
+  const canvasId = current.meta.id;
+  const body = await store.readFileBody(canvasId, item.id);
+  if (!current || current.meta.id !== canvasId) throw new Error("读文件时空间被切走了");
+  agentHighlight([item.id]);
+  const limit = Math.max(0, Math.trunc(numOr(maxChars, 20000)));
+  const full = body.text || "";
+  const text = limit && full.length > limit ? full.slice(0, limit) : full;
+  return {
+    ...agentSummary(item),
+    text,
+    chars: full.length,
+    truncated: text.length < full.length,
+    encoding: body.encoding,
+  };
+}
+
+async function agentFileWrite(id, text, force = false) {
+  const item = await agentFileOf(id);
+  const canvasId = current.meta.id;
+  /* 块里的编辑框开着就先收掉，不然它手上的旧正文会把这次写回盖掉 */
+  if (!(await closeFileEdit())) throw new Error("块里的编辑框还开着，先处理那边的保存");
+  if (!current || current.meta.id !== canvasId) throw new Error("写文件时空间被切走了");
+  const body = await store.readFileBody(canvasId, item.id);
+  const next = String(text ?? "");
+  const result = await store.writeBackCanvasFile(canvasId, item.id, next, body, Boolean(force));
+  if (!current || current.meta.id !== canvasId) throw new Error("写文件时空间被切走了");
+  if (result?.conflict) {
+    throw new Error("原文件在读取之后被别的程序改过；确认用这份覆盖请再带 force: true 调一次");
+  }
+  item.size = Number(result?.size) || item.size;
+  filePreviewCache.delete(previewKey(item));
+  refreshFileBlock(item);
+  scheduleItemsSave();
+  agentHighlight([item.id]);
+  return { ...agentSummary(item), chars: next.length, encoding: body.encoding };
+}
+
+function agentRevealFile(id) {
+  const item = agentRequireItem(id);
+  const target = revealTarget(item);
+  if (!target) throw new Error("这块没有对应的磁盘文件");
+  const call = target.block
+    ? store.revealBlock(current.meta.id, item.id)
+    : store.revealCanvasFile(current.meta.id, target.rel, target.linked);
+  call.catch(showError);
+  agentHighlight([item.id]);
+  return agentSummary(item);
+}
+
+/* ---------- PDF / 电子书 / 媒体 ---------- */
+
+function agentPdfController(item) {
+  return itemEls.get(item.id)?.querySelector(".canvas-file-pdf")?.__agent || null;
+}
+
+function agentPdfOf(id) {
+  const item = agentRequireItem(id);
+  if (item.type !== "file" || String(item.ext || "").toLowerCase() !== "pdf") {
+    throw new Error("这不是 PDF 块");
+  }
+  return item;
+}
+
+function agentPdfState(id) {
+  const item = agentPdfOf(id);
+  const ctl = agentPdfController(item);
+  const fallback = {
+    ready: false,
+    total: 0,
+    page: Math.trunc(item.page) || 1,
+    frac: item.pageFrac || 0,
+  };
+  const state = ctl ? ctl.state : fallback;
+  return { ...agentSummary(item), ...state };
+}
+
+function agentPdfGoto(id, page) {
+  const item = agentPdfOf(id);
+  const ctl = agentPdfController(item);
+  if (!ctl) throw new Error("PDF 还没读进来，稍后再试");
+  const state = ctl.goto(page);
+  agentHighlight([item.id]);
+  return { ...agentSummary(item), ...state };
+}
+
+function agentEbookController(item) {
+  return itemEls.get(item.id)?.querySelector(".canvas-ebook-card")?.__agent || null;
+}
+
+function agentEbookOf(id) {
+  const item = agentRequireItem(id);
+  if (item.type !== "ebook") throw new Error("这不是电子书块");
+  return item;
+}
+
+async function agentEbookToc(id) {
+  const item = agentEbookOf(id);
+  const ctl = agentEbookController(item);
+  if (ctl?.state?.ready) {
+    agentHighlight([item.id]);
+    return { ...agentSummary(item), ...ctl.state };
+  }
+  const canvasId = current.meta.id;
+  const info = await store.ebookToc(canvasId, item.src, item.linked);
+  if (!current || current.meta.id !== canvasId) throw new Error("读目录时空间被切走了");
+  agentHighlight([item.id]);
+  const chapters = Array.isArray(info?.chapters) ? info.chapters : [];
+  return {
+    ...agentSummary(item),
+    ready: true,
+    title: info?.title || item.name,
+    total: chapters.length,
+    chapter: Math.min(item.chapter || 0, Math.max(0, chapters.length - 1)),
+    chapters,
+  };
+}
+
+async function agentEbookGoto(id, chapter) {
+  const item = agentEbookOf(id);
+  const ctl = agentEbookController(item);
+  if (!ctl) throw new Error("这本书还没读进来，稍后再试");
+  const state = await ctl.goto(chapter);
+  agentHighlight([item.id]);
+  return { ...agentSummary(item), ...state };
+}
+
+function agentMediaElement(item) {
+  return itemEls.get(item.id)?.querySelector("audio.canvas-audio-element, video.canvas-video-element") || null;
+}
+
+function agentMediaOf(id) {
+  const item = agentRequireItem(id);
+  if (item.type !== "audio" && item.type !== "video") throw new Error("这不是音频或视频块");
+  return item;
+}
+
+function agentMediaState(id) {
+  const item = agentMediaOf(id);
+  const media = agentMediaElement(item);
+  return {
+    ...agentSummary(item),
+    ready: Boolean(media),
+    playing: media ? !media.paused && !media.ended : false,
+    time: media ? Number(media.currentTime.toFixed(2)) : 0,
+    duration: media && Number.isFinite(media.duration) ? Number(media.duration.toFixed(2)) : 0,
+    volume: media ? Number(media.volume.toFixed(2)) : 1,
+  };
+}
+
+async function agentMediaControl(id, action, value) {
+  const item = agentMediaOf(id);
+  const media = agentMediaElement(item);
+  if (!media) throw new Error("这块媒体还没准备好，稍后再试");
+  const act = String(action || "");
+  if (act === "play" || act === "toggle") {
+    if (act === "play" || media.paused) {
+      try {
+        await media.play();
+      } catch (error) {
+        throw new Error(`播放失败：${error?.message || error}`);
+      }
+    } else {
+      media.pause();
+    }
+  } else if (act === "pause") {
+    media.pause();
+  } else if (act === "seek") {
+    const duration = Number.isFinite(media.duration) ? media.duration : 0;
+    media.currentTime = clamp(numOr(value, 0), 0, Math.max(0, duration));
+  } else if (act === "volume") {
+    media.volume = clamp(numOr(value, 1), 0, 1);
+  } else {
+    throw new Error("action 只能是 play / pause / toggle / seek / volume");
+  }
+  agentHighlight([item.id]);
+  return agentMediaState(item.id);
+}
+
+/* ---------- 相机 ---------- */
+
+function agentSetCamera(patch = {}) {
+  agentRequireSpace();
+  const target = {
+    x: numOr(patch.x, current.camera.x),
+    y: numOr(patch.y, current.camera.y),
+    scale:
+      patch.scale == null ? current.camera.scale : clamp(numOr(patch.scale, current.camera.scale), MIN_SCALE, MAX_SCALE),
+  };
+  if (patch.instant) {
+    agentStopCameraAnim();
+    current.camera.x = target.x;
+    current.camera.y = target.y;
+    current.camera.scale = target.scale;
+    applyCamera();
+    scheduleCameraSave();
+  } else {
+    agentAnimateCamera(target, 320);
+  }
+  return { camera: { x: Math.round(target.x), y: Math.round(target.y), scale: Number(target.scale.toFixed(3)) } };
+}
+
+/* 回到 100%，视野中心对着原来看着的那一点——和 Ctrl+0 一个意思 */
+function agentResetZoom() {
+  agentRequireSpace();
+  const center = stageCenterWorld();
+  const vw = ui.stage.clientWidth;
+  const vh = ui.stage.clientHeight;
+  const target = { scale: 1, x: vw / 2 - center.x, y: vh / 2 - center.y };
+  agentAnimateCamera(target, 320);
+  return { camera: { x: Math.round(target.x), y: Math.round(target.y), scale: 1 } };
+}
+
+/* ---------- 汇总出口 ---------- */
+
+export const canvasAgent = {
+  cameraFit: agentFitView,
+  cameraFocus: (id, patch) => {
+    const result = agentFocusBlock(id, patch);
+    agentHighlight([id]);
+    return result;
+  },
+  cameraGet: () => {
+    agentRequireSpace();
+    return { camera: agentCameraState() };
+  },
+  cameraResetZoom: agentResetZoom,
+  cameraSet: agentSetCamera,
+  scene: agentScene,
+  spaceList: agentSpaceList,
+  spaceOpen: agentOpenSpace,
+  spaceCreate: agentCreateSpace,
+  spaceRename: agentRenameSpace,
+  spaceDelete: agentDeleteSpace,
+  blockGet: agentBlock,
+  blockCreate: async (spec) => {
+    const placed = await agentCreateBlock(spec);
+    agentRevealBlock(placed.id);
+    agentHighlight([placed.id], 1200);
+    return placed;
+  },
+  blockUpdate: (id, patch) => {
+    const result = agentUpdateBlock(id, patch);
+    agentHighlight([id]);
+    return result;
+  },
+  blockDelete: agentDeleteBlock,
+  blockDuplicate: async (id, patch) => {
+    const placed = await agentDuplicateBlock(id, patch);
+    agentRevealBlock(placed.id);
+    agentHighlight([placed.id], 1200);
+    return placed;
+  },
+  blockSelect: agentSelectBlocks,
+  blockLayer: (id, direction) => {
+    const result = agentSetLayer(id, direction);
+    agentHighlight([id]);
+    return result;
+  },
+  blockReveal: (id) => {
+    const item = agentRequireItem(id);
+    const moved = agentRevealBlock(item.id);
+    agentHighlight([item.id]);
+    return { ...agentSummary(item), moved };
+  },
+  blockHighlight: (ids) => {
+    const list = (Array.isArray(ids) ? ids : [ids]).map(String);
+    for (const id of list) agentRequireItem(id);
+    agentHighlight(list, 1600);
+    return { highlighted: list };
+  },
+  connectorCreate: agentCreateConnector,
+  connectorUpdate: (id, patch) => agentUpdateBlock(id, patch),
+  importFile: agentImportFile,
+  stickyRead: agentStickyRead,
+  stickyWrite: agentStickyWrite,
+  noteRead: agentNoteRead,
+  noteWrite: agentNoteWrite,
+  fileRead: agentFileRead,
+  fileWrite: agentFileWrite,
+  fileReveal: agentRevealFile,
+  pdfState: agentPdfState,
+  pdfGoto: agentPdfGoto,
+  ebookToc: agentEbookToc,
+  ebookGoto: agentEbookGoto,
+  mediaState: agentMediaState,
+  mediaControl: agentMediaControl,
+};

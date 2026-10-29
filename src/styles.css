@@ -3660,3 +3660,21 @@ body.is-resizing {
   border-color: var(--fg);
   color: var(--fg);
 }
+
+/* ---------- Agent 演示光带 ---------- */
+
+/* 只加一圈外发光，不改块自己的颜色、边框和尺寸 */
+.canvas-item.is-agent-target,
+.tree-row.is-agent-target {
+  outline: 2px solid color-mix(in srgb, var(--accent) 82%, transparent);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 0 26px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+/* 连线是 SVG，box-shadow 不生效，用 drop-shadow 沿线条发光 */
+.canvas-connector.is-agent-target {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 85%, transparent))
+    drop-shadow(0 0 9px color-mix(in srgb, var(--accent) 55%, transparent));
+}

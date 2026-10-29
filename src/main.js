@@ -2,6 +2,7 @@ import { initNotes, refreshNotes } from "./views/notes.js";
 import { enterCanvas, initCanvas, leaveCanvas } from "./views/canvas.js";
 import { initSettings, refreshSettings } from "./views/settings.js";
 import { initTheme } from "./views/theme.js";
+import { initAgent } from "./views/agent.js";
 
 const { getCurrentWindow } = window.__TAURI__.window;
 
@@ -17,11 +18,17 @@ function showRoute(route) {
   document.querySelector("#canvas-view").hidden = !isCanvas;
   document.querySelector("#settings-view").hidden = !isSettings;
 
-  /* 进出页面时刷新数据：笔记树每次进页重读磁盘，空间进出要先把防抖里的改动落盘 */
-  if (isNotes) refreshNotes();
-  if (isSettings) refreshSettings();
-  if (isCanvas) enterCanvas();
+  /* 进出页面时刷新数据：笔记树每次进页重读磁盘，空间进出要先把防抖里的改动落盘。
+     agent 也靠 routeReady 等这一轮读完再动手，不然会在半空的空间上做操作。 */
+  let work = Promise.resolve();
+  if (isNotes) work = Promise.resolve(refreshNotes());
+  if (isSettings) work = Promise.resolve(refreshSettings());
+  if (isCanvas) work = Promise.resolve(enterCanvas());
   else leaveCanvas();
+  const ready = work.catch((error) => {
+    console.error(`切到 ${route} 失败：${error}`);
+  });
+  window.__inspace = { route, ready };
 
   for (const item of document.querySelectorAll(".rail-item")) {
     const active = item.dataset.route === route;
@@ -47,6 +54,12 @@ window.addEventListener("DOMContentLoaded", () => {
     item.addEventListener("click", () => showRoute(item.dataset.route));
   }
 
+  /* MCP 工具要切页时派发这个事件，和点侧栏走同一条路 */
+  window.addEventListener("inspace:route", (event) => {
+    const route = event.detail;
+    if (route === "canvas" || route === "notes" || route === "settings") showRoute(route);
+  });
+
   /* 换过数据目录，空间和笔记都得整组重读一遍。只换个指针的话，页面上还挂着
      旧目录那些内容，看着就像「新文件夹里也有数据」。 */
   window.addEventListener("data-root-changed", () => {
@@ -67,4 +80,5 @@ window.addEventListener("DOMContentLoaded", () => {
   initCanvas();
   initSettings();
   showRoute("canvas");
+  initAgent();
 });

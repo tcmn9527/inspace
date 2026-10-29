@@ -1,8 +1,8 @@
 /* 视频播不出来时的说明弹层。
 
  * 两件事分开看：
- *   画面黑 —— 多半是 H.265/HEVC，Windows 要单独装解码器，工作台替不了，只能给步骤。
- *   没声音 —— 音轨是 AC3/DTS 这类看系统脸色的编码，工作台能自己解决：借 ffmpeg 把音轨转成 AAC。
+ *   画面黑 —— 多半是 H.265/HEVC，Windows 要单独装解码器，无限空间替不了，只能给步骤。
+ *   没声音 —— 音轨是 AC3/DTS 这类看系统脸色的编码，无限空间能自己解决：借 ffmpeg 把音轨转成 AAC。
  *
  * 不假设用户装过 ffmpeg，也不替他猜能不能播：弹层只讲这台机器现在的实情，
  * 装完点「重新检测」就地换成分支，不用关掉重开。 */
@@ -57,7 +57,7 @@ function audioSteps(status) {
 const VIDEO_STEPS = [
   "打开 Microsoft Store，搜「HEVC 视频扩展」，开发商是 Microsoft Corporation，装上（约 6 元）。",
   "不想为解码器花钱，也可以先把片子压成 H.264 再拖进来 —— 那是另一条路，这里不拦你。",
-  "装完回到画布再播一次；解码器是系统级的，不用重启工作台。",
+  "装完回到画布再播一次；解码器是系统级的，不用重启无限空间。",
 ];
 
 const VIDEO_NOTE =
@@ -122,10 +122,10 @@ export function openVideoHelp({ reason, probe } = {}) {
         stepList(reason === "audio" ? audioSteps(status) : VIDEO_STEPS),
       );
       if (reason === "audio") {
-        const who = status?.source === "bundled" ? "工作台自带的 ffmpeg" : "ffmpeg";
+        const who = status?.source === "bundled" ? "无限空间自带的 ffmpeg" : "ffmpeg";
         messageEl.textContent = status?.found
-          ? `工作台用 ${who} 把音轨转成 AAC 就能响。这台机器已经认到（${status.version}），直接转就行。`
-          : "这条音轨要靠系统解码器，这台机器没给它出声。装一个 ffmpeg，工作台就能自己把音轨转成 AAC。";
+          ? `无限空间用 ${who} 把音轨转成 AAC 就能响。这台机器已经认到（${status.version}），直接转就行。`
+          : "这条音轨要靠系统解码器，这台机器没给它出声。装一个 ffmpeg，无限空间就能自己把音轨转成 AAC。";
         okBtn.textContent = status?.found ? "转换音轨" : "重新检测";
         okBtn.dataset.action = status?.found ? "convert" : "recheck";
         extraBtn.hidden = !status || status.found;
@@ -134,7 +134,7 @@ export function openVideoHelp({ reason, probe } = {}) {
         pathEl.hidden = !pathEl.textContent;
       } else {
         messageEl.textContent =
-          "画面一帧都没解出来。最常见的原因是片子压成了 H.265/HEVC，而 Windows 没装对应的解码器 —— 这一步得系统自己装，工作台替不了。";
+          "画面一帧都没解出来。最常见的原因是片子压成了 H.265/HEVC，而 Windows 没装对应的解码器 —— 这一步得系统自己装，无限空间替不了。";
         okBtn.textContent = "知道了";
         okBtn.dataset.action = "close";
         extraBtn.hidden = true;

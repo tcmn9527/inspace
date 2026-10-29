@@ -1,6 +1,6 @@
 //! 无限画布 = 一个画布一个文件夹，全部落在本地文件里（不进数据库）。
 //!
-//! 目录结构（根目录 = 工作台数据文件夹/canvases，跟着设置页那个目录一起搬）：
+//! 目录结构（根目录 = 数据文件夹/canvases，跟着设置页那个目录一起搬）：
 //!   <画布名>/
 //!     canvas.json   画布信息与相机（缩放/平移）
 //!     items.json    所有图元
@@ -42,7 +42,7 @@ const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 const BAD_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
-/// 画布不自己记根目录，只在工作台数据根目录下面挂一层 canvases/；
+/// 画布不自己记根目录，只在数据根目录下面挂一层 canvases/；
 /// 用户在设置页换了数据文件夹，画布列表立刻跟着变。
 pub struct CanvasState {
     data: DataRoot,
@@ -636,7 +636,7 @@ pub fn canvas_list(state: tauri::State<'_, CanvasState>) -> Result<Vec<CanvasMet
     Ok(list)
 }
 
-/// 新建画布：一律落在工作台数据文件夹的 canvases 下，文件夹名就是画布名。
+/// 新建画布：一律落在数据文件夹的 canvases 下，文件夹名就是画布名。
 #[tauri::command]
 pub fn canvas_create(
     name: String,
@@ -967,10 +967,10 @@ pub fn canvas_read_note_image(
 
 // ---------- 便签块与笔记块：一块一份文件 ----------
 //
-// 画布上的便签和笔记各有一份自己的文件，住在画布目录里，和工作台首页的
-// `stickies/`、`notes/` 毫无瓜葛：画布上改这张便签，首页那张不动，反之也一样。
-// 字段口径跟首页便签同构（title/body/color/textColor/width/height），
-// 所以「一个便签就是一个 json 文件」这句话在两个地方字面一致。
+// 画布上的便签和笔记各有一份自己的文件，住在画布自己的目录里。
+// 数据根顶层那个 `stickies/` 是已下线的首页便签墙留下的，跟这里同名不同物，互不相干。
+// 字段口径沿用当年的便签卡（title/body/color/textColor/width/height），
+// 「一个便签就是一个 json 文件」这句话在两边字面一致。
 
 const MAX_STICKY_CHARS: usize = 200_000;
 const MAX_STICKY_HEAD_CHARS: usize = 200;
@@ -1944,9 +1944,10 @@ pub fn canvas_copy_file(
     Ok(job)
 }
 
-/// 复制一块的时候，把源块自己拥有的那份副本原样再拷一份，落进目标画布的同一个子目录，
-/// 返回新的相对路径。路径不从嘴里信：只认源画布 items.json 里那条记录，
-/// 引用态那块本来就没有副本可拷（前端直接克隆 JSON，还是指着同一份原文件）。
+/// 复制一块的时候，把源块那份文件原样再拷一份，落进目标画布的同一个子目录，
+/// 返回新的相对路径。路径不从嘴里信：只认源画布 items.json 里那条记录。
+/// 引用态那块也一样收：src 是用户原文件的绝对路径，从那儿拷进画布，
+/// 粘出来的新块从此自己带一份副本，删它不会碰到用户那份原文件。
 /// 命令放在 async 上，视频几十 GB 也只是占住一个工作线程，不堵命令线程。
 #[tauri::command]
 pub async fn canvas_duplicate_media(
@@ -1965,9 +1966,6 @@ pub async fn canvas_duplicate_media(
                 .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id.as_str()))
         })
         .ok_or_else(|| "这块已经不在画布上了".to_string())?;
-    if item.get("linked").and_then(Value::as_bool) == Some(true) {
-        return Err("这块没有副本可拷".to_string());
-    }
     let (sub, missing) = match item.get("type").and_then(Value::as_str).unwrap_or_default() {
         "image" => (IMAGE_DIR, "图片"),
         "audio" => (AUDIO_DIR, "音频"),
@@ -1980,7 +1978,8 @@ pub async fn canvas_duplicate_media(
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "这块没记文件在哪".to_string())?;
-    let src = media_path(&from_dir, src_rel, sub, missing)?;
+    let linked = item.get("linked").and_then(Value::as_bool) == Some(true);
+    let src = media_source_path(&state, &id, src_rel, linked, sub, missing)?;
     let rel = store_copy(&to_dir, &src, sub)?;
 
     let mut out = json!({ "rel": rel });

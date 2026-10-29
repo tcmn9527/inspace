@@ -59,20 +59,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            store::list_sticky_notes,
-            store::create_sticky_note,
-            store::update_sticky_note,
-            store::delete_sticky_note,
-            store::list_todos,
-            store::create_todo,
-            store::set_todo_done,
-            store::update_todo,
-            store::delete_todo,
             store::data_root,
             store::data_pick_root,
             store::data_default_root,
             store::data_stats,
-            store::data_broken_files,
             store::data_set_root,
             store::data_root_cancel,
             store::data_reveal,

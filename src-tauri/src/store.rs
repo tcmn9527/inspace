@@ -1,21 +1,18 @@
-//! 工作台的数据根目录 + 便签与待办的文件存储：一条数据一个 JSON 文件。
+//! 无限空间的数据根目录：用户内容全在它下面，一条路径由 SQLite 的 setting 记住。
 //!
-//! 根目录默认 app_data_dir/data，在设置页更换；四类用户内容全在它下面：
-//!   stickies/<id>.json   文件名就是数据 id
-//!   todos/<id>.json
 //!   notes/               笔记页那棵 Markdown 树（notes.rs）
 //!   canvases/<画布名>/   无限画布，一个画布一个文件夹（canvas.rs）
 //!
-//! 换根目录时这四块一起走（用户当场选拷贝、剪贴还是新建）；`components/ffmpeg` 和
+//! 换根目录时这两块一起走（用户当场选拷贝、剪贴还是新建）；`components/ffmpeg` 和
 //! SQLite 留在 app_data_dir，那是程序自己的东西，不算用户内容。
 //!
-//! 根目录路径存在 SQLite 的 setting 表里；旧版便签/待办在 SQLite 表里，
-//! 首次启动时导出成文件并清空旧表（setting.data_files_migrated 作标记）。
+//! 旧版的便签墙和待办栏已经在界面上线，它们留下的 `stickies/`、`todos/` 两个目录
+//! 归启动时的 `migrate` 送进系统回收站——原地留着只会让人以为功能还在。
+//! 画布上的便签块另有一套，住在各画布自己的目录里，跟这两个目录无关。
 //!
-//! 写入一律先写 .tmp 再替换，避免写到一半留下半个 JSON。
+//! 根目录路径存在 SQLite 的 setting 表里，启动时同步进下面的 `DataRoot` 镜像。
 
 use rusqlite::Connection;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -31,15 +28,12 @@ use tauri_plugin_dialog::DialogExt;
 use crate::db::{self, DbState};
 
 const ROOT_KEY: &str = "data_root";
-const MIGRATED_KEY: &str = "data_files_migrated";
+/// 已下线的便签墙、待办栏留在数据根里的那两个目录，启动时清掉
 pub const STICKY_DIR: &str = "stickies";
 pub const TODO_DIR: &str = "todos";
 /// 笔记树和画布各自的子目录名，notes.rs / canvas.rs 认这两个
 pub const NOTE_DIR: &str = "notes";
 pub const CANVAS_DIR: &str = "canvases";
-/// 便签默认颜色，取自 UX 设计稿第一张卡
-const DEFAULT_COLOR: &str = "#bfa648";
-const DEFAULT_TEXT_COLOR: &str = "#000000";
 
 /// 当前数据根目录。SQLite 里那条 setting 是持久化，这份镜像是给
 /// 画布、笔记的命令读的：它们只想知道「现在该往哪儿放」，不该各自再存一份对不上的路径。
@@ -65,7 +59,7 @@ impl DataRoot {
             .unwrap_or_else(|_| self.default.clone())
     }
 
-    /// 根目录下的某个子目录（stickies / todos / notes / canvases）。
+    /// 根目录下的某个子目录（notes / canvases）。
     pub fn dir(&self, sub: &str) -> PathBuf {
         self.get().join(sub)
     }
@@ -108,84 +102,6 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct StickyNote {
-    pub id: i64,
-    #[serde(default)]
-    pub title: String,
-    #[serde(default)]
-    pub body: String,
-    #[serde(default = "default_color")]
-    pub color: String,
-    #[serde(default = "default_text_color")]
-    pub text_color: String,
-    #[serde(default)]
-    pub width: Option<i64>,
-    #[serde(default)]
-    pub height: Option<i64>,
-    #[serde(default)]
-    pub created_at: i64,
-    #[serde(default)]
-    pub updated_at: i64,
-}
-
-fn default_color() -> String {
-    DEFAULT_COLOR.to_string()
-}
-
-fn default_text_color() -> String {
-    DEFAULT_TEXT_COLOR.to_string()
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StickyNoteInput {
-    pub title: String,
-    pub body: String,
-    pub color: String,
-    /// 不传表示保持原值
-    #[serde(default)]
-    pub text_color: Option<String>,
-    #[serde(default)]
-    pub width: Option<i64>,
-    #[serde(default)]
-    pub height: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Todo {
-    pub id: i64,
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
-    pub done: bool,
-    #[serde(default)]
-    pub created_at: i64,
-    #[serde(default)]
-    pub completed_at: Option<i64>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TodoInput {
-    pub text: String,
-}
-
-/// 用户可控的颜色是唯一需要校验的字段：只接受 `#rrggbb`，否则回退默认色。
-fn normalize_color(raw: &str, fallback: &str) -> String {
-    let value = raw.trim().to_ascii_lowercase();
-    let bytes = value.as_bytes();
-    let valid =
-        bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|c| c.is_ascii_hexdigit());
-    if valid {
-        value
-    } else {
-        fallback.to_string()
-    }
-}
-
 fn conn(db: &DbState) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
     db.0.lock()
         .map_err(|_| "数据库连接状态异常（前一次访问发生 panic）".to_string())
@@ -215,291 +131,11 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 }
 
 fn ensure_dirs(root: &Path) -> Result<(), String> {
-    for sub in [STICKY_DIR, TODO_DIR, NOTE_DIR, CANVAS_DIR] {
+    for sub in [NOTE_DIR, CANVAS_DIR] {
         let dir = root.join(sub);
         fs::create_dir_all(&dir).map_err(|e| format!("无法创建目录 {}：{e}", dir.display()))?;
     }
     Ok(())
-}
-
-fn file_of(dir: &Path, id: i64) -> PathBuf {
-    dir.join(format!("{id}.json"))
-}
-
-fn next_id(dir: &Path) -> i64 {
-    let mut max = 0;
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let stem = entry.path().file_stem().and_then(|s| s.to_str()).map(str::to_string);
-            if let Some(id) = stem.and_then(|s| s.parse::<i64>().ok()) {
-                max = max.max(id);
-            }
-        }
-    }
-    max + 1
-}
-
-/// 先写临时文件再替换，避免写到一半断电留下半个 JSON。
-fn write_file<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(value).map_err(|e| format!("数据序列化失败：{e}"))?;
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "data.json".to_string());
-    let tmp = path.with_file_name(format!("{name}.tmp"));
-    fs::write(&tmp, text).map_err(|e| format!("写入失败：{e}"))?;
-    if path.exists() {
-        let bak = path.with_file_name(format!("{name}.bak"));
-        let _ = fs::remove_file(&bak);
-        fs::rename(path, &bak).map_err(|e| format!("替换文件失败：{e}"))?;
-        fs::rename(&tmp, path).map_err(|e| format!("替换文件失败：{e}"))?;
-        let _ = fs::remove_file(&bak);
-    } else {
-        fs::rename(&tmp, path).map_err(|e| format!("写入失败：{e}"))?;
-    }
-    Ok(())
-}
-
-fn read_file<T: DeserializeOwned>(path: &Path, what: &str) -> Result<T, String> {
-    let text = fs::read_to_string(path).map_err(|_| format!("{what}已不存在"))?;
-    serde_json::from_str(&text).map_err(|e| format!("{what}文件内容损坏：{e}"))
-}
-
-/// 读取目录下所有合法数据文件；文件名不是数字 id 的（备份、手放的其它 json）跳过。
-///
-/// 内容读不出的同样跳过，但把文件名攒下来交给调用方点名：手改错一个字段就整页空白，
-/// 用户看到的一定是「便签全没了」，而实际上文件好好躺在磁盘上。跳过 + 点名，
-/// 东西还在、其余照常显示，他也知道该去修哪一个。
-fn list_files<T: DeserializeOwned>(dir: &Path) -> (Vec<T>, Vec<String>) {
-    let mut out = Vec::new();
-    let mut broken = Vec::new();
-    if !dir.is_dir() {
-        return (out, broken);
-    }
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(e) => {
-            eprintln!("读取目录失败：{}：{e}", dir.display());
-            return (out, broken);
-        }
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let is_data = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.parse::<i64>().is_ok())
-            .unwrap_or(false)
-            && path.extension().map(|e| e == "json").unwrap_or(false);
-        if !is_data {
-            continue;
-        }
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let Ok(text) = fs::read_to_string(&path) else {
-            broken.push(name);
-            continue;
-        };
-        match serde_json::from_str::<T>(&text) {
-            Ok(value) => out.push(value),
-            Err(e) => {
-                eprintln!("跳过读不出的数据文件 {name}：{e}");
-                broken.push(name);
-            }
-        }
-    }
-    broken.sort();
-    (out, broken)
-}
-
-// ---------- 便签 ----------
-
-#[tauri::command]
-pub fn list_sticky_notes(
-    state: tauri::State<'_, StoreState>,
-) -> Result<Vec<StickyNote>, String> {
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let dir = read_root(&state).join(STICKY_DIR);
-    let (mut notes, _) = list_files::<StickyNote>(&dir);
-    notes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(b.id.cmp(&a.id)));
-    Ok(notes)
-}
-
-#[tauri::command]
-pub fn create_sticky_note(
-    input: StickyNoteInput,
-    state: tauri::State<'_, StoreState>,
-) -> Result<StickyNote, String> {
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let root = read_root(&state);
-    ensure_dirs(&root)?;
-    let dir = root.join(STICKY_DIR);
-    let ts = now_ms();
-    let note = StickyNote {
-        id: next_id(&dir),
-        title: input.title,
-        body: input.body,
-        color: normalize_color(&input.color, DEFAULT_COLOR),
-        text_color: match input.text_color.as_deref() {
-            Some(v) => normalize_color(v, DEFAULT_TEXT_COLOR),
-            None => DEFAULT_TEXT_COLOR.to_string(),
-        },
-        width: input.width.map(|v| v.clamp(40, 8000)),
-        height: input.height.map(|v| v.clamp(40, 8000)),
-        created_at: ts,
-        updated_at: ts,
-    };
-    write_file(&file_of(&dir, note.id), &note)?;
-    Ok(note)
-}
-
-#[tauri::command]
-pub fn update_sticky_note(
-    id: i64,
-    input: StickyNoteInput,
-    state: tauri::State<'_, StoreState>,
-) -> Result<StickyNote, String> {
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let dir = read_root(&state).join(STICKY_DIR);
-    let mut note: StickyNote = read_file(&file_of(&dir, id), &format!("便签 #{id} "))?;
-    note.title = input.title;
-    note.body = input.body;
-    note.color = normalize_color(&input.color, DEFAULT_COLOR);
-    if let Some(v) = input.text_color.as_deref() {
-        note.text_color = normalize_color(v, DEFAULT_TEXT_COLOR);
-    }
-    if let Some(v) = input.width {
-        note.width = Some(v.clamp(40, 8000));
-    }
-    if let Some(v) = input.height {
-        note.height = Some(v.clamp(40, 8000));
-    }
-    note.updated_at = now_ms();
-    write_file(&file_of(&dir, id), &note)?;
-    Ok(note)
-}
-
-#[tauri::command]
-pub fn delete_sticky_note(
-    id: i64,
-    state: tauri::State<'_, StoreState>,
-) -> Result<(), String> {
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let dir = read_root(&state).join(STICKY_DIR);
-    match fs::remove_file(&file_of(&dir, id)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("删除便签失败：{e}")),
-    }
-}
-
-// ---------- 待办 ----------
-
-#[tauri::command]
-pub fn list_todos(
-    state: tauri::State<'_, StoreState>,
-) -> Result<Vec<Todo>, String> {
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let dir = read_root(&state).join(TODO_DIR);
-    let (mut todos, _) = list_files::<Todo>(&dir);
-    todos.sort_by(|a, b| a.done.cmp(&b.done).then(b.created_at.cmp(&a.created_at)));
-    Ok(todos)
-}
-
-#[tauri::command]
-pub fn create_todo(
-    input: TodoInput,
-    state: tauri::State<'_, StoreState>,
-) -> Result<Todo, String> {
-    let text = input.text.trim().to_string();
-    if text.is_empty() {
-        return Err("待办内容不能为空".to_string());
-    }
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let root = read_root(&state);
-    ensure_dirs(&root)?;
-    let dir = root.join(TODO_DIR);
-    let todo = Todo {
-        id: next_id(&dir),
-        text,
-        done: false,
-        created_at: now_ms(),
-        completed_at: None,
-    };
-    write_file(&file_of(&dir, todo.id), &todo)?;
-    Ok(todo)
-}
-
-#[tauri::command]
-pub fn set_todo_done(
-    id: i64,
-    done: bool,
-    state: tauri::State<'_, StoreState>,
-) -> Result<Todo, String> {
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let dir = read_root(&state).join(TODO_DIR);
-    let mut todo: Todo = read_file(&file_of(&dir, id), &format!("待办 #{id} "))?;
-    todo.done = done;
-    todo.completed_at = if done { Some(now_ms()) } else { None };
-    write_file(&file_of(&dir, id), &todo)?;
-    Ok(todo)
-}
-
-#[tauri::command]
-pub fn update_todo(
-    id: i64,
-    input: TodoInput,
-    state: tauri::State<'_, StoreState>,
-) -> Result<Todo, String> {
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let dir = read_root(&state).join(TODO_DIR);
-    let mut todo: Todo = read_file(&file_of(&dir, id), &format!("待办 #{id} "))?;
-    todo.text = input.text;
-    write_file(&file_of(&dir, id), &todo)?;
-    Ok(todo)
-}
-
-#[tauri::command]
-pub fn delete_todo(
-    id: i64,
-    state: tauri::State<'_, StoreState>,
-) -> Result<(), String> {
-    let _guard = state
-        .lock
-        .lock()
-        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-    let dir = read_root(&state).join(TODO_DIR);
-    match fs::remove_file(&file_of(&dir, id)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("删除待办失败：{e}")),
-    }
 }
 
 // ---------- 数据目录 ----------
@@ -531,7 +167,7 @@ pub fn data_pick_root(app: tauri::AppHandle) -> Option<String> {
     /* 系统对话框会阻塞，别在锁里等它，不然其它命令陪着一块儿卡 */
     app.dialog()
         .file()
-        .set_title("选择工作台数据文件夹")
+        .set_title("选择数据文件夹")
         .blocking_pick_folder()
         .and_then(|picked| picked.into_path().ok())
         .map(|path| path.to_string_lossy().to_string())
@@ -549,25 +185,6 @@ pub fn data_stats(root: String) -> DataCounts {
     count_data(Path::new(&root))
 }
 
-/// 读不出内容的文件名，前端拿去点名。
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrokenFiles {
-    pub stickies: Vec<String>,
-    pub todos: Vec<String>,
-}
-
-/// 便签/待办里读不出的那几个文件。列表命令已经把它们跳过了，这条只是补一句
-/// 「少掉的是哪几个、文件还在原地」，免得用户以为东西丢了。
-#[tauri::command]
-pub fn data_broken_files(state: tauri::State<'_, StoreState>) -> BrokenFiles {
-    let root = state.root.get();
-    BrokenFiles {
-        stickies: list_files::<StickyNote>(&root.join(STICKY_DIR)).1,
-        todos: list_files::<Todo>(&root.join(TODO_DIR)).1,
-    }
-}
-
 /// 换目录时用户对旧文件夹的三种处置，前端传 "copy" / "move" / "fresh"。
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -581,7 +198,7 @@ pub enum RootMode {
 }
 
 /// 换数据目录。`mode` 决定旧文件夹怎么处置：拷贝留两份、剪贴清旧的、新建谁也不动。
-/// 前两种目标里必须没有工作台数据，免得两份混在一起。
+/// 前两种目标里必须没有无限空间的数据，免得两份混在一起。
 ///
 /// 东西多的时候这一步要跑很久，所以校验全在命令里当场做完（能立刻拒绝的绝不拖到
 /// 弹层后面），真正的搬运丢给后台线程，进度走 `data-root-move` 事件。
@@ -621,7 +238,7 @@ pub fn data_set_root(
         });
     }
     if count_data(&target).total() > 0 {
-        return Err("目标文件夹里已经有工作台数据，请换一个空文件夹".to_string());
+        return Err("目标文件夹里已经有无限空间的数据，请换一个空文件夹".to_string());
     }
 
     /* 剪贴要过两遍手（复制 + 清旧文件），账按两步算，进度条才不会中途爆表 */
@@ -710,8 +327,6 @@ struct MoveProgress {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DataCounts {
-    pub stickies: usize,
-    pub todos: usize,
     /// 笔记树里的 .md，含子文件夹
     pub notes: usize,
     /// 画布个数
@@ -720,23 +335,8 @@ pub struct DataCounts {
 
 impl DataCounts {
     fn total(&self) -> usize {
-        self.stickies + self.todos + self.notes + self.canvases
+        self.notes + self.canvases
     }
-}
-
-fn is_data_file(path: &Path) -> bool {
-    path.extension().map(|e| e == "json").unwrap_or(false)
-        && path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.parse::<i64>().is_ok())
-            .unwrap_or(false)
-}
-
-fn count_dir(dir: &Path) -> usize {
-    fs::read_dir(dir)
-        .map(|entries| entries.flatten().filter(|e| is_data_file(&e.path())).count())
-        .unwrap_or(0)
 }
 
 fn count_markdown(dir: &Path) -> usize {
@@ -779,19 +379,18 @@ fn count_canvases(dir: &Path) -> usize {
 
 fn count_data(root: &Path) -> DataCounts {
     DataCounts {
-        stickies: count_dir(&root.join(STICKY_DIR)),
-        todos: count_dir(&root.join(TODO_DIR)),
         notes: count_markdown(&root.join(NOTE_DIR)),
         canvases: count_canvases(&root.join(CANVAS_DIR)),
     }
 }
 
 /// 新旧目录套在一起等于让自己搬到自己家里，切之前先拦掉。
-/// 目标目录不能和当前根互相套娃，也不能落进默认根那四个类别目录。
+/// 目标目录不能和当前根互相套娃，也不能落进默认根那些类别目录里。
 ///
 /// 后者是真会踩的坑：把根指到 `<默认根>/notes`，`ensure_dirs` 就在笔记树里
-/// 长出 `stickies/ todos/ notes/ canvases/` 四个壳，用户的数据被埋进别人的目录，
+/// 长出 `notes/ canvases/` 两个壳，用户的数据被埋进别人的目录，
 /// 指针再指回来都看不见。默认根本身例外——「恢复默认位置」要用的。
+/// `stickies/`、`todos/` 虽然已经下线，旧目录可能还在原地，一并拦掉。
 fn check_nesting(from: &Path, to: &Path, default_root: &Path) -> Result<(), String> {
     let nested = |child: &Path, parent: &Path| match (fs::canonicalize(child), fs::canonicalize(parent)) {
         (Ok(child), Ok(parent)) => child != parent && child.starts_with(parent),
@@ -940,21 +539,12 @@ fn label_of(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// 一共要过手多少个文件：便签/待办只算数据文件，笔记和画布是整棵树。
+/// 一共要过手多少个文件：笔记和画布各是一棵树，整棵数进去。
 fn count_files(root: &Path) -> u64 {
-    let mut n = 0;
-    for sub in [STICKY_DIR, TODO_DIR] {
-        let dir = root.join(sub);
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
-        n += entries
-            .flatten()
-            .filter(|e| is_data_file(&e.path()))
-            .count() as u64;
-    }
-    for sub in [NOTE_DIR, CANVAS_DIR] {
-        n += walk_files(&root.join(sub));
-    }
-    n
+    [NOTE_DIR, CANVAS_DIR]
+        .iter()
+        .map(|sub| walk_files(&root.join(sub)))
+        .sum()
 }
 
 fn walk_files(dir: &Path) -> u64 {
@@ -1020,53 +610,15 @@ fn is_empty_dir(dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// 便签/待办：一条一个文件，复制成功才考虑旧文件；中途出错或按停止就把已复制的清掉。
-/// `keep_source` 为真（拷贝）就旧文件一个都不动。
-fn transfer_flat(
-    root: &Path,
-    from_dir: &Path,
-    to_dir: &Path,
-    keep_source: bool,
-    prog: &Progress,
-) -> Result<(), Halted> {
-    if !from_dir.is_dir() {
-        return Ok(());
-    }
-    let mut copied: Vec<PathBuf> = Vec::new();
-    let mut sources: Vec<PathBuf> = Vec::new();
-    let result = (|| -> Result<(), Halted> {
-        for entry in fs::read_dir(from_dir).map_err(|e| format!("读取旧数据失败：{e}"))? {
-            let src = entry.map_err(|e| format!("读取旧数据失败：{e}"))?.path();
-            if !is_data_file(&src) {
-                continue;
-            }
-            let dst = to_dir.join(src.file_name().unwrap_or_default());
-            let label = label_of(root, &src);
-            copy_file(&src, &dst, &label, prog)?;
-            copied.push(dst);
-            sources.push(src);
-            prog.file("copy", &label);
+/// 已下线的便签墙、待办栏留下的目录：整只送系统回收站，本来不存在就什么都不做。
+/// 里面装的是 `<id>.json` 那种老格式，留着也没人再读它。
+fn recycle_legacy_dirs(root: &Path) {
+    for sub in [STICKY_DIR, TODO_DIR] {
+        let dir = root.join(sub);
+        if dir.exists() {
+            let _ = crate::canvas::recycle_path(&dir);
         }
-        Ok(())
-    })();
-
-    if let Err(halt) = result {
-        for path in copied {
-            let _ = fs::remove_file(path);
-        }
-        return Err(halt);
     }
-    if keep_source {
-        return Ok(());
-    }
-    for path in sources {
-        /* 新目录里已经有同一份了，旧文件只是多余的副本，回收站放一手是为了
-           万一半路出错还能捞回来 */
-        let label = label_of(root, &path);
-        let _ = crate::canvas::recycle_path(&path);
-        prog.file("recycle", &label);
-    }
-    Ok(())
 }
 
 fn copy_tree(from: &Path, to: &Path, root: &Path, prog: &Progress) -> Result<(), Halted> {
@@ -1131,14 +683,15 @@ fn transfer_tree(
     Ok(())
 }
 
-/// 把四类内容弄到新目录，全程报进度；`root` 是旧根，报路径拿它当基准。
+/// 把笔记树和画布弄到新目录，全程报进度；`from` 是旧根，报路径拿它当基准。
+/// 旧版便签/待办那两个目录不跟着搬：剪贴时顺手收进回收站，拷贝一律不碰旧文件夹。
 fn transfer_data(from: &Path, to: &Path, keep_source: bool, prog: &Progress) -> Result<(), Halted> {
     ensure_dirs(to)?;
-    for sub in [STICKY_DIR, TODO_DIR] {
-        transfer_flat(from, &from.join(sub), &to.join(sub), keep_source, prog)?;
-    }
     for sub in [NOTE_DIR, CANVAS_DIR] {
         transfer_tree(from, &from.join(sub), &to.join(sub), keep_source, prog)?;
+    }
+    if !keep_source {
+        recycle_legacy_dirs(from);
     }
     Ok(())
 }
@@ -1215,154 +768,40 @@ fn reveal_path(path: &Path) {
     }
 }
 
-// ---------- 一次性迁移 ----------
+// ---------- 启动时的收尾 ----------
 
-fn table_exists(conn: &Connection, name: &str) -> bool {
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-            [name],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-    count > 0
-}
-
-fn load_legacy_stickies(conn: &Connection) -> Result<Vec<StickyNote>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, title, body, color, text_color, width, height, created_at, updated_at
-               FROM sticky_note",
-        )
-        .map_err(|e| format!("读取旧便签失败：{e}"))?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(StickyNote {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                body: row.get(2)?,
-                color: row.get(3)?,
-                text_color: row.get(4)?,
-                width: row.get(5)?,
-                height: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
-            })
-        })
-        .map_err(|e| format!("读取旧便签失败：{e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("读取旧便签失败：{e}"))
-}
-
-fn load_legacy_todos(conn: &Connection) -> Result<Vec<Todo>, String> {
-    let mut stmt = conn
-        .prepare("SELECT id, text, done, created_at, completed_at FROM todo")
-        .map_err(|e| format!("读取旧待办失败：{e}"))?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(Todo {
-                id: row.get(0)?,
-                text: row.get(1)?,
-                done: row.get(2)?,
-                created_at: row.get(3)?,
-                completed_at: row.get(4)?,
-            })
-        })
-        .map_err(|e| format!("读取旧待办失败：{e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("读取旧待办失败：{e}"))
-}
-
-/// 启动时先做两件事：把 SQLite 里记的根目录同步进 DataRoot 镜像（画布、笔记读的就是它），
-/// 再把旧 SQLite 表里的便签/待办导出为 JSON，成功后清空旧表；失败则保留旧表下次重试。
+/// 启动时做两件事：把 SQLite 里记的根目录同步进 DataRoot 镜像（画布、笔记、
+/// 便签块读的都是这一个路径），再把旧版便签墙、待办栏留下的 `stickies/`、`todos/`
+/// 送进系统回收站。
+///
+/// 清目录不设标记、每次启动都试一遍：目录本来就不存在时什么都不做，用户手动删掉
+/// 或换过一个带旧数据的文件夹，下次启动照样收干净；进回收站的东西随时能捞回来。
 pub fn migrate(db: &DbState, state: &StoreState) -> Result<(), String> {
-    let (root, stickies, todos, has_sticky, has_todo) = {
+    let root = {
         let conn = conn(db)?;
-        let root = db::read_setting(&conn, ROOT_KEY)
+        db::read_setting(&conn, ROOT_KEY)
             .map(PathBuf::from)
-            .unwrap_or_else(|| state.default_root.clone());
-        state.root.set(&root);
-        if db::read_setting(&conn, MIGRATED_KEY).as_deref() == Some("1") {
-            return Ok(());
-        }
-        let has_sticky = table_exists(&conn, "sticky_note");
-        let has_todo = table_exists(&conn, "todo");
-        let stickies = if has_sticky {
-            load_legacy_stickies(&conn)?
-        } else {
-            Vec::new()
-        };
-        let todos = if has_todo {
-            load_legacy_todos(&conn)?
-        } else {
-            Vec::new()
-        };
-        (root, stickies, todos, has_sticky, has_todo)
+            .unwrap_or_else(|| state.default_root.clone())
     };
-
-    {
-        let _guard = state
-            .lock
-            .lock()
-            .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
-        ensure_dirs(&root)?;
-        let sticky_dir = root.join(STICKY_DIR);
-        let todo_dir = root.join(TODO_DIR);
-        for note in &stickies {
-            write_file(&file_of(&sticky_dir, note.id), note)?;
-        }
-        for todo in &todos {
-            write_file(&file_of(&todo_dir, todo.id), todo)?;
-        }
-    }
-
-    let conn = conn(db)?;
-    let mut sql = String::from("BEGIN;");
-    if has_sticky {
-        sql.push_str(" DELETE FROM sticky_note;");
-    }
-    if has_todo {
-        sql.push_str(" DELETE FROM todo;");
-    }
-    sql.push_str(" COMMIT;");
-    conn.execute_batch(&sql)
-        .map_err(|e| format!("清空旧数据表失败：{e}"))?;
-    db::write_setting(&conn, MIGRATED_KEY, "1")?;
-    Ok(())
+    state.root.set(&root);
+    let _guard = state
+        .lock
+        .lock()
+        .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
+    recycle_legacy_dirs(&root);
+    ensure_dirs(&root)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 一个用例一个临时目录，名字带 zz- 好认，跑完就删，绝不碰工作台真实数据。
+    /// 一个用例一个临时目录，名字带 zz- 好认，跑完就删，绝不碰真实数据。
     fn sandbox(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("zz-store-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("建临时目录失败");
         dir
-    }
-
-    fn sticky(id: i64) -> String {
-        format!(r##"{{"id":{id},"title":"t","body":"b","color":"#ffffff","textColor":"#000000"}}"##)
-    }
-
-    #[test]
-    fn broken_json_is_skipped_and_named() {
-        let dir = sandbox("broken");
-        fs::write(dir.join("1.json"), sticky(1)).unwrap();
-        // 手改字段最容易坏成的样子：少了 id、以及干脆不是 JSON
-        fs::write(dir.join("2.json"), "{}").unwrap();
-        fs::write(dir.join("3.json"), "not json at all").unwrap();
-        fs::write(dir.join("notes.txt"), "不归我管").unwrap();
-        fs::write(dir.join("1.json.bak"), "stale").unwrap();
-
-        let (notes, broken) = list_files::<StickyNote>(&dir);
-        assert_eq!(notes.len(), 1, "一个坏文件不该让整张表陪葬");
-        assert_eq!(broken, vec!["2.json".to_string(), "3.json".to_string()]);
-        // 点名的同时一个字都不动：用户修好了它得能自己回来
-        assert_eq!(fs::read_to_string(dir.join("2.json")).unwrap(), "{}");
-        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// 攒进度的假上报口：命令里换成事件。`stop_after` 用来演"跑到第几个文件时按了停止"。
@@ -1383,32 +822,36 @@ mod tests {
         }
     }
 
+    /// 笔记两篇（其中一篇在子文件夹里）+ 两张画布，全是要跟着搬的真东西
     fn seed_root(root: &Path) {
-        fs::create_dir_all(root.join(STICKY_DIR)).unwrap();
         fs::create_dir_all(root.join(NOTE_DIR).join("子目录")).unwrap();
-        for id in 1..=3 {
-            fs::write(root.join(STICKY_DIR).join(format!("{id}.json")), sticky(id)).unwrap();
-        }
-        fs::write(root.join(STICKY_DIR).join("readme.txt"), "不是数据文件").unwrap();
+        fs::create_dir_all(root.join(CANVAS_DIR).join("一").join("images")).unwrap();
+        fs::create_dir_all(root.join(CANVAS_DIR).join("二")).unwrap();
         fs::write(root.join(NOTE_DIR).join("a.md"), "# a").unwrap();
         fs::write(root.join(NOTE_DIR).join("子目录").join("b.md"), "# b").unwrap();
+        fs::write(root.join(CANVAS_DIR).join("一").join("canvas.json"), "{}").unwrap();
+        fs::write(root.join(CANVAS_DIR).join("一").join("images").join("x.png"), "png").unwrap();
+        fs::write(root.join(CANVAS_DIR).join("二").join("canvas.json"), "{}").unwrap();
     }
 
     #[test]
-    fn copy_transfer_counts_every_file_and_keeps_source() {
+    fn copy_transfer_moves_both_trees_and_keeps_source() {
         let base = sandbox("copy");
         let from = base.join("from");
         let to = base.join("to");
         seed_root(&from);
-        assert_eq!(count_files(&from), 5, "3 条便签 + 2 篇笔记，非数据文件不数");
+        assert_eq!(count_files(&from), 5, "两篇笔记 + 两张画布的文件全数进去");
 
         let sink = Collect::default();
         let prog = Progress::new(&sink, "job", count_files(&from), Arc::new(AtomicBool::new(false)));
         transfer_data(&from, &to, true, &prog).unwrap();
 
-        assert_eq!(count_data(&to).stickies, 3);
-        assert!(to.join(NOTE_DIR).join("子目录").join("b.md").is_file(), "笔记树整棵都要过去");
-        assert!(!to.join(STICKY_DIR).join("readme.txt").exists(), "非数据文件不该跟过去");
+        assert_eq!(count_data(&to).notes, 2, "笔记树整棵都要过去");
+        assert_eq!(count_data(&to).canvases, 2, "画布按装着 canvas.json 的子目录数");
+        assert!(
+            to.join(CANVAS_DIR).join("一").join("images").join("x.png").is_file(),
+            "画布文件夹里的副本目录不能漏"
+        );
         assert_eq!(count_files(&from), 5, "拷贝不动旧目录");
         let items = sink.items.lock().unwrap();
         assert_eq!(items.last().unwrap().1, 5, "最后一条进度要数满");
@@ -1431,7 +874,7 @@ mod tests {
 
         let halt = transfer_data(&from, &to, true, &prog).unwrap_err();
         assert!(halt.cancelled, "停止不该被当成出错");
-        assert_eq!(count_data(&to).stickies, 0, "已经复制过去的那两条要清掉");
+        assert_eq!(count_data(&to).notes, 0, "已经复制过去的那一篇要清掉");
         assert_eq!(count_files(&from), 5, "旧目录一个字节没动");
         fs::remove_dir_all(&base).unwrap();
     }

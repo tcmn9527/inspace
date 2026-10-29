@@ -50,7 +50,7 @@ function download(url, file, depth = 0) {
   if (depth > 5) return Promise.reject(new Error(`重定向太多：${url}`));
   return new Promise((resolve, reject) => {
     https
-      .get(url, { headers: { "user-agent": "rustwindow-demo-build" } }, (response) => {
+      .get(url, { headers: { "user-agent": "inspace-build" } }, (response) => {
         const status = response.statusCode ?? 0;
         if (status >= 300 && status < 400 && response.headers.location) {
           response.resume();

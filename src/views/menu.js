@@ -1,9 +1,9 @@
-/* 通用右键菜单：沿用 #ctx-menu 那个浮层，和便签/待办菜单同一套外观。
+/* 通用右键菜单：沿用 #ctx-menu 那个浮层，画布块、连线、笔记树都从这里弹。
  * 用法：openMenu(x, y, [{ label, onClick, danger, swatch, icon, trailing, color, keepOpen }])
  *   icon —— 行首图标的 SVG 字符串（画布「快速设置」用它表示属性长什么样），color 给圆点当填充色；
  *   trailing —— 行尾的当前值指示，纯展示、不响应指针；
  *   keepOpen —— 点了不关菜单，用于「一个菜单里连着刷多项」。
- * 菜单项点击后自己 stopPropagation —— home.js 在 document 上挂了「点外部关菜单」，
+ * 菜单项点击后自己 stopPropagation —— 下面挂在 document 上的「点外部关菜单」，
  * 不挡住的话刚弹出的东西会被误当成「点到了外面」。 */
 
 import { closeColorPicker } from "./color-picker.js";
@@ -69,3 +69,13 @@ export function openMenu(x, y, items, options = {}) {
   menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
   menu.style.right = "auto";
 }
+
+/* 点菜单外部、按 Esc 都收起。用 composedPath 而不是 contains(e.target)：菜单项点击时
+   可能已经重建/摘掉了被点的那颗按钮，contains 会误判成「外部点击」。 */
+document.addEventListener("click", (e) => {
+  const menu = document.getElementById("ctx-menu");
+  if (menu && !menu.hidden && !e.composedPath().includes(menu)) closeMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeMenu();
+});

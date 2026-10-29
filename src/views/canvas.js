@@ -57,7 +57,6 @@ import {
   makeImage,
   makeLine,
   makeNote,
-  makeSticky,
   makeText,
   makeVideo,
   newId,
@@ -200,7 +199,6 @@ export function initCanvas() {
     insertAudio: document.querySelector("#canvas-insert-audio"),
     insertVideo: document.querySelector("#canvas-insert-video"),
     insertFile: document.querySelector("#canvas-insert-file"),
-    insertSticky: document.querySelector("#canvas-insert-sticky"),
     insertNote: document.querySelector("#canvas-insert-note"),
     zoomValue: document.querySelector("#canvas-zoom-value"),
     zoomIn: document.querySelector("#canvas-zoom-in"),
@@ -229,10 +227,9 @@ export function initCanvas() {
     ui.copyCancel.textContent = "停止中…";
     store.cancelVideoCopy(job).catch(() => {});
   });
-  ui.insertSticky.addEventListener("click", insertStickyFromPicker);
   ui.insertNote.addEventListener("click", insertNoteFromPicker);
 
-  /* home.js 在 document 上挂了「点菜单外部就收起」，点击冒泡到那里会把刚弹出的
+  /* 菜单在 document 上挂了「点外部就收起」（见 menu.js），点击冒泡到那里会把刚弹出的
      切换器当成外部点击立刻关掉，所以这里要挡住 */
   ui.name.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -553,6 +550,7 @@ function updateChrome() {
     ui.stage.style.backgroundSize = `${GRID_UNIT}px ${GRID_UNIT}px`;
     ui.stage.style.backgroundPosition = "0 0";
     ui.zoomValue.value = "100%";
+    refreshMinimap();
   }
 }
 
@@ -2482,7 +2480,7 @@ function commitEditing() {
 
 /* ---------- 便签块 / 笔记块的内容文件 ----------
    一块一份，住在画布自己目录里：便签 stickies/<块id>.json，笔记 notes/<块id>.md。
-   items.json 只留位置和层级，正文不再内嵌。跟工作台首页的便签页、笔记页完全脱钩——
+   items.json 只留位置和层级，正文不再内嵌。跟数据根顶层那两个旧目录、跟笔记页都脱钩——
    画布上改这张便签，首页那张不动，反过来也一样。 */
 
 const CONTENT_WRITE_DELAY = 400;
@@ -3237,9 +3235,10 @@ function selectionBox(items) {
   return { x: Number.isFinite(left) ? left : 0, y: Number.isFinite(top) ? top : 0 };
 }
 
-/* 粘出去的块不能跟原块共用同一份文件——删一块会把另一块的副本一起带走。
-   所以拷贝态的媒体、笔记的图片都得真再拷一份；引用态指着用户自己的原文件，克隆记录就够。
-   返回 false 表示这块落不了地（原块都删了，副本没处找），只报错，不摆一块假的上画布。 */
+/* 粘出去的块不能跟原块共用同一份文件——删一块会把另一块的副本一起带走，
+   指着用户自己原文件的引用块还会让人以为动的是两份东西。
+   所以媒体一律真再拷一份，引用态那块粘过来就地转成画布自己的副本。
+   返回 false 表示这块落不了地（原文件都找不着），只报错，不摆一块假的上画布。 */
 async function landBlock(item, fromId, sourceId) {
   const canvasId = current.meta.id;
   /* 便签的正文由 placeBlock 写成新块自己的 json，这里什么都不用做 */
@@ -3264,10 +3263,11 @@ async function landBlock(item, fromId, sourceId) {
     return true;
   }
 
-  if (!MEDIA_TYPES.has(item.type) || item.linked || !item.src) return true;
+  if (!MEDIA_TYPES.has(item.type) || !item.src) return true;
   const copied = await store.duplicateMedia(fromId, sourceId, canvasId).catch(showError);
   if (!copied?.rel) return false;
   item.src = copied.rel;
+  item.linked = false;
   if (item.type === "video") item.audioRel = copied.audioRel || "";
   if (item.type === "image") {
     /* 图片是建块时直接从缓存取的，不先取一次地址会当场画成丢文件卡 */
@@ -4151,37 +4151,6 @@ function createEntry({ cardClass, lines }) {
   };
 }
 
-function showStickyPicker(notes) {
-  return openPickerShell({
-    title: "选择便签",
-    hint: "第一项新建一张空白便签；选已有便签会复制到画布，之后编辑不影响原便签。",
-    placeholder: "搜索便签内容…",
-    container: "canvas-picker-grid",
-    emptyText: "还没有便签，直接新建一张就行。",
-    create: createEntry({
-      cardClass: "canvas-picker-sticky",
-      lines: ["新建空白便签", "不进首页便签墙"],
-    }),
-    entries: notes.map((note) => ({
-      search: `${note.title || ""}\n${note.body || ""}`,
-      value: note,
-      card: (query) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "canvas-picker-sticky";
-        button.style.background = note.color || STICKY_DEFAULT_COLOR;
-        button.style.color = note.textColor || STICKY_DEFAULT_TEXT;
-        const body = document.createElement("span");
-        body.className = "canvas-picker-sticky-body";
-        if (!note.body) body.classList.add("is-empty");
-        appendHighlighted(body, note.body || "空白便签", query);
-        button.append(body);
-        return button;
-      },
-    })),
-  });
-}
-
 function showNotePicker(files) {
   return openPickerShell({
     title: "选择笔记",
@@ -4215,30 +4184,6 @@ function showNotePicker(files) {
       };
     }),
   });
-}
-
-async function insertStickyFromPicker() {
-  if (!active || !current) return;
-  if (editingId) commitEditing();
-  let notes;
-  try {
-    notes = await store.listStickyNotes();
-  } catch (error) {
-    showError(error);
-    return;
-  }
-  if (!current) return;
-  modalOpen = true;
-  const note = await showStickyPicker(notes);
-  modalOpen = false;
-  if (!note || !current) return;
-  const item = makeSticky(0, 0, note.fresh ? {} : note);
-  const at = insertPoint(item.w, item.h);
-  item.x = at.x;
-  item.y = at.y;
-  placeBlock(item);
-  /* 新建的那张当场就能打字，省一次双击 */
-  if (note.fresh) startStickyEdit(item.id);
 }
 
 async function insertNoteFromPicker() {

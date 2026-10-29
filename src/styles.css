@@ -20,11 +20,8 @@
   --titlebar-h: 45px;
   --rail-w: 48px; /* 左栏宽：原设计 132 设计 px，按需求调小至 96 设计 px（含 1px 右边界） */
   --rail-item: 30px; /* 图标块：与搜索/＋工具条控件同尺寸 30px */
-  --todo-w: 328px; /* 待办栏宽 656 设计 px（含 1px 左边界） */
   --label-h: 36px; /* 标签行高 72 设计 px */
-  --card-size: 280px; /* 便签卡 560 设计 px 正方 */
-  --card-gap: 10px; /* 卡间距 20 设计 px */
-  --pad-x: 9px; /* 内容左边距：随左栏收窄（48）后卡片整体左移，与栏右边界仍保持 9px 间距 */
+  --pad-x: 9px; /* 内容左边距：随左栏收窄（48）后与栏右边界仍保持 9px 间距 */
 
   color: var(--fg);
   background: var(--bg);
@@ -172,8 +169,8 @@ button {
   height: 20px;
 }
 
-/* 首页图标视觉偏大，单独缩小一档；笔记/齿轮保持 20px */
-.rail-item[data-route="home"] svg {
+/* 房子图标视觉偏大，单独缩小一档；笔记/齿轮保持 20px */
+.rail-item[data-route="canvas"] svg {
   width: 16px;
   height: 16px;
 }
@@ -199,16 +196,6 @@ button {
   flex: 1 1 auto;
 }
 
-/* ---------- 首页主列（便签库） ---------- */
-.sticky-main {
-  position: relative; /* 空状态提示在此定位并居中 */
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
 /* ---------- 可拖动分隔条 ---------- */
 .splitter {
   position: absolute;
@@ -221,9 +208,9 @@ button {
   background: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-/* 待办栏左边界：左右拖，改待办栏 / 便签区宽度 */
+/* 笔记文件树右边界：左右拖，改文件树宽度（骑在树的右边框上，热区才不会跑到左栏图标下） */
 .splitter-v {
-  left: -4px;
+  right: -4px;
   top: 0;
   bottom: 0;
   width: 8px;
@@ -240,7 +227,7 @@ body.is-resizing {
   font-size: 13px;
   letter-spacing: 0.2px;
   color: var(--fg);
-  /* 标题永不被挤：窄的时候只压缩右边的搜索框，别让「待办」折成两行 */
+  /* 标题永不被挤：窄的时候只压缩右边的控件，别让标题折成两行 */
   flex: 0 0 auto;
   white-space: nowrap;
 }
@@ -259,426 +246,6 @@ body.is-resizing {
 .link-btn:hover {
   color: var(--fg);
   background: color-mix(in srgb, var(--fg) 10%, transparent);
-}
-
-/* ---------- 便签卡 ---------- */
-.sticky-card {
-  position: relative;
-  width: var(--card-size);
-  height: var(--card-size);
-  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
-  border-radius: 10px; /* 和画布上的面板同一套外壳：首页区、便签墙、画布便签块三处一致 */
-  padding: 16px 12px; /* 上下留白比左右大一点，正文不贴卡片上下边 */
-  color: #000000;
-  overflow: hidden;
-  cursor: default;
-}
-
-.sticky-card .sticky-body {
-  margin: 0;
-  font-size: 13px;
-  line-height: 19px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: hidden;
-  height: 100%; /* 卡片不再有标题行，正文吃满整卡 */
-}
-
-/* 双击进入就地编辑 */
-.sticky-card.is-editing {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px 10px;
-}
-
-.sticky-card .edit-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  border: none;
-  background: transparent;
-  padding: 0;
-  resize: none;
-  outline: none;
-}
-
-.sticky-card .edit-body {
-  color: #000000;
-}
-
-.swatch-row {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 6px;
-}
-
-.swatch {
-  width: 18px;
-  height: 18px;
-  border: 1px solid rgba(0, 0, 0, 0.4);
-  border-radius: 2px;
-  padding: 0;
-  cursor: pointer;
-}
-
-.swatch.is-active {
-  outline: 1px solid #000000;
-  outline-offset: 1px;
-}
-
-/* 与待办列同款：空状态从 36px 高的标题行下方算起 */
-.sticky-main .empty {
-  inset: var(--label-h) var(--pad-x) 0;
-}
-
-/* 便签标题行和搜索框用与待办栏同一套几何（行高 --label-h、左右内边距 --pad-x） */
-.sticky-main .todo-head {
-  flex: 0 0 var(--label-h);
-  padding: 0 var(--pad-x);
-}
-
-/* 搜索胶囊固定宽度，右端贴着 ＋ 按钮 */
-.sticky-main .todo-search-wrap {
-  flex: 0 0 220px;
-  margin-left: auto;
-}
-
-.sticky-wall {
-  flex: 1 1 auto;
-  min-height: 0;
-  /* scroll 常开：滚动条轨道常占位，窗口拉窄时列数换算不会被滚动条闪现干扰 */
-  overflow-y: scroll;
-  overflow-x: hidden;
-  padding: 0 var(--pad-x) 16px; /* 顶部不留白：便签卡片直接贴着标题栏下方 */
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
-}
-
-/* 画布宽高由前端瀑布流算法算好，窗口过宽时整墙居中 */
-.sticky-canvas {
-  position: relative;
-  margin: 0 auto;
-}
-
-.sticky-wall .sticky-card {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: auto;
-  height: auto;
-  /* overflow 只管正文超长时的滚动；拉伸由右/下两条边缘热区负责（.sticky-edge-*） */
-  overflow: auto;
-  min-width: var(--card-size);
-  min-height: 60px;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
-}
-
-.sticky-wall .sticky-card .sticky-body {
-  height: auto;
-}
-
-/* 下边缘拉高：贴在卡片底边缘内侧的隐形热区（高 12px，正好盖住正文那圈 padding，
-   吃不到文字），pointerdown 上拖拽改高度。宽度不许拖：恒吸附整列，由布局摆放。
-   卡片 overflow:auto 会裁掉 padding 边缘以外的部分，所以热区收在卡片内侧。 */
-.sticky-wall .sticky-edge-v {
-  position: absolute;
-  z-index: 2;
-  touch-action: none;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 12px;
-  cursor: row-resize;
-}
-
-/* 编辑时卡片不收尺寸，把手让位给选字光标 */
-.sticky-wall .sticky-card.is-editing .sticky-edge-v {
-  display: none;
-}
-
-/* 墙里进编辑：压掉通用编辑样式的 flex 排版，几何与浏览态完全一致，
-   只多一个光标（用户要求「什么都不变」） */
-.sticky-wall .sticky-card.is-editing {
-  display: block;
-  gap: 0;
-  padding: 16px 12px;
-}
-
-/* 就地编辑：只是把标题/正文换成 contenteditable，其余一个元素都不动、
-   不出现任何按钮，只多一个光标——和首页双击编辑待办一个手感 */
-.sticky-card.is-editing [contenteditable] {
-  cursor: text;
-  outline: none;
-}
-
-/* 空内容只在编辑态显灰占位文字；空便签本身是彻底空白的框 */
-.sticky-card.is-editing [contenteditable]:empty::before {
-  content: attr(data-placeholder);
-  color: currentColor;
-  opacity: 0.45;
-  pointer-events: none;
-}
-
-
-/* 右键「设置文字颜色 / 设置背景颜色」子菜单里的方形色块 */
-.menu-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 8px;
-  vertical-align: -2px;
-  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
-  border-radius: 2px;
-}
-
-/* ---------- 待办 ---------- */
-.todo-col {
-  position: relative; /* 空状态提示在此定位并居中 */
-  flex: 0 0 var(--todo-w);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  /* 宽度只听 --todo-w 的：不加这条，flex 项的 min-width:auto 会被内容撑住，
-     拖窄时鼠标还在动、栏宽却卡住不动 */
-  min-width: 0;
-  border-left: 1px solid var(--line);
-}
-
-.todo-head {
-  flex: 0 0 40px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 6px 0 12px;
-}
-
-/* 搜索胶囊：30px 高淡填充，左放大镜图标，右端叠清空按钮。
-   宽度只在「标签和 ＋ 之间」伸缩：到了 220px 就不再变宽，靠右紧贴 ＋ 按钮，
-   栏再宽也是贴着右边，不会跟着左边的标题一起跑。 */
-.todo-search-wrap {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 220px;
-  margin-left: auto;
-  display: flex;
-}
-
-.todo-search-icon {
-  position: absolute;
-  left: 9px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 14px;
-  height: 14px;
-  color: var(--muted);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  pointer-events: none; /* 点击穿透到输入框 */
-}
-
-.todo-search-wrap:focus-within .todo-search-icon {
-  color: var(--fg);
-}
-
-.todo-search {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 30px;
-  border: 1.5px solid color-mix(in srgb, var(--fg) 10%, transparent);
-  border-radius: 15px;
-  padding: 0 28px 0 30px; /* 左让放大镜、右让清空按钮 */
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-  color: var(--fg);
-  outline: none;
-  font-size: 13px;
-  transition: background 0.12s, border-color 0.12s;
-}
-
-.todo-search:hover {
-  background: color-mix(in srgb, var(--fg) 9%, transparent);
-}
-
-.todo-search:focus {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-  border-color: color-mix(in srgb, var(--fg) 28%, transparent);
-}
-
-.todo-search::placeholder {
-  color: var(--muted);
-}
-
-.todo-search-clear {
-  display: none; /* JS 置 hidden 属性控制显隐 */
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  border: none;
-  border-radius: 50%;
-  padding: 0;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.todo-search-clear:not([hidden]) {
-  display: flex;
-}
-
-.todo-search-clear:hover {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 18%, transparent);
-}
-
-.todo-search::-webkit-search-cancel-button {
-  -webkit-appearance: none;
-}
-
-/* 「+」圆：30px，与搜索胶囊同高同底色；SVG 加号精确居中 */
-.todo-add {
-  flex: 0 0 30px;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1.5px solid color-mix(in srgb, var(--fg) 10%, transparent);
-  border-radius: 50%;
-  padding: 0;
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
-
-.todo-add svg {
-  width: 14px;
-  height: 14px;
-}
-
-.todo-add:hover {
-  background: color-mix(in srgb, var(--fg) 14%, transparent);
-  border-color: color-mix(in srgb, var(--fg) 22%, transparent);
-}
-
-.todo-list {
-  flex: 1 1 auto;
-  margin: 0;
-  padding: 2px 0;
-  list-style: none;
-  overflow-y: auto;
-}
-
-.todo-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  cursor: default;
-}
-
-.todo-row:hover {
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-}
-
-.todo-check {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--fg);
-  cursor: pointer;
-}
-
-.todo-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: pre-wrap; /* 多行待办按换行显示 */
-  word-break: break-word;
-  cursor: text;
-}
-
-/* 就地编辑态：外观与显示态完全一致，只多一个文本光标 */
-.todo-text[contenteditable="true"] {
-  outline: none;
-}
-
-/* 完成的待办只置灰，不加删除线 */
-.todo-row.is-done .todo-text {
-  color: var(--muted);
-}
-
-.todo-group {
-  padding: 4px 12px 2px;
-  font-size: 12px;
-  color: var(--muted);
-  list-style: none;
-}
-
-.todo-composer {
-  padding: 6px 12px;
-}
-
-/* 新建输入的多行文本框（行内编辑已就地改文字，不再换出独立文本框） */
-.todo-composer textarea {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 3px 8px;
-  background: transparent;
-  color: inherit;
-  outline: none;
-  font: inherit;
-  line-height: 20px;
-  resize: none;
-  overflow: hidden;
-  word-break: break-word;
-  min-height: 20px;
-  max-height: 120px;
-}
-
-/* ---------- 空状态 / 占位页 ---------- */
-/* 空状态提示绝对定位在各自内容区内，上下左右居中 */
-.empty {
-  position: absolute;
-  inset: var(--label-h) var(--pad-x) 0;
-  margin: 0;
-  padding: 0 var(--pad-x);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  pointer-events: none;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-/* 待办区从 40px 高的标题行下方算起 */
-.todo-col .empty {
-  inset: 40px var(--pad-x) 0;
-}
-
-/* 读不出的数据文件名：平时不存在，只有目录里确实有坏文件才占一行，
-   点名到具体文件，用户才知道该去修哪一个 */
-.data-warning {
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 6px var(--pad-x);
-  border-bottom: 1px solid var(--line);
-  color: var(--danger);
-  font-size: 12px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
 }
 
 /* ---------- 设置页 ---------- */
@@ -1234,7 +801,7 @@ body.is-resizing {
   user-select: text;
 }
 
-/* ---------- 画布便签 / 笔记选择框 ---------- */
+/* ---------- 画布笔记选择框 ---------- */
 .canvas-picker {
   display: flex;
   flex-direction: column;
@@ -1295,47 +862,6 @@ body.is-resizing {
   text-align: center;
 }
 
-.canvas-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.canvas-picker-sticky {
-  /* 浏览器给 button 的默认布局会把内容垂直居中，便签正文要贴左上角，所以显式改成 flex */
-  display: flex;
-  align-items: flex-start;
-  min-height: 104px;
-  max-height: 132px;
-  padding: 12px 10px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
-  border-radius: 10px;
-  font-size: 13px;
-  line-height: 19px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.canvas-picker-sticky:hover {
-  border-color: var(--accent);
-}
-
-.canvas-picker-sticky-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: -webkit-box;
-  overflow: hidden;
-  white-space: pre-wrap;
-  word-break: break-word;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
-}
-
-.canvas-picker-sticky-body.is-empty {
-  opacity: 0.55;
-}
-
 .canvas-picker-notes {
   display: flex;
   flex-direction: column;
@@ -1373,19 +899,11 @@ body.is-resizing {
   font-size: 11px;
 }
 
-/* 置顶的「新建」那一项：便签是虚线空卡，笔记是一行虚线条目 */
+/* 置顶的「新建」那一项：一行虚线条目 */
 .canvas-picker-create {
   border-style: dashed;
   background: transparent;
   color: var(--muted);
-}
-
-.canvas-picker-sticky.canvas-picker-create {
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  text-align: center;
 }
 
 .canvas-picker-note.canvas-picker-create {
@@ -1407,19 +925,9 @@ body.is-resizing {
   font-size: 11px;
 }
 
-.canvas-picker-sticky .canvas-picker-create-note {
-  margin-left: 0;
-}
-
 .canvas-picker-search {
   height: 32px;
   margin-bottom: 10px;
-}
-
-/* 键盘选中的那一项：便签卡有自己的底色，用描边才看得清 */
-.canvas-picker-sticky.is-active {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 .canvas-picker-note.is-active {
@@ -2193,12 +1701,6 @@ body.is-resizing {
 .md-tool-color:hover .md-tool-swatch {
   border-color: color-mix(in srgb, var(--fg) 55%, transparent);
 }
-/* 笔记页：文件树的分隔条要骑在它的「右」边框上（通用 .splitter-v 是贴左边，
-   那是给待办栏用的），否则热区跑到了左栏图标下面，拖不动 */
-#notes-split-v {
-  left: auto;
-  right: -4px;
-}
 
 /* 隐藏文件树：左侧整块（含分隔条）一起收起来，内容区铺满 */
 .notes-page.is-tree-hidden .notes-tree-pane {
@@ -2477,7 +1979,7 @@ body.is-resizing {
   cursor: text;
 }
 
-/* 便签块：外观和便签墙上的卡片一致（底色、文字色、内边距、字号都照抄） */
+/* 画布上的便签块：底色、文字色、内边距、字号都照卡片那套走 */
 .canvas-item-sticky {
   cursor: move;
 }

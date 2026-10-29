@@ -1,4 +1,4 @@
-/* 画布后端调用：每块画布都是工作台数据文件夹下 canvases/ 里的一个文件夹。 */
+/* 画布后端调用：每块画布都是数据文件夹下 canvases/ 里的一个文件夹。 */
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 
@@ -90,8 +90,7 @@ export const saveCanvasNoteImage = (id, itemId, data, ext) =>
   invoke("canvas_save_note_image", { id, itemId, data, ext });
 export const readCanvasNoteImage = (id, itemId, rel) =>
   invoke("canvas_read_note_image", { id, itemId, rel });
-/* 画布自己的便签/笔记：一块一份文件，住在 <画布>/stickies、<画布>/notes 里，
-   跟工作台首页那两处毫无关系——改画布这张便签，首页那张不动。 */
+/* 画布自己的便签/笔记：一块一份文件，住在 <画布>/stickies、<画布>/notes 里。 */
 export const readSticky = (id, itemId) => invoke("canvas_read_sticky", { id, itemId });
 export const writeSticky = (id, itemId, sticky) => invoke("canvas_write_sticky", { id, itemId, sticky });
 export const duplicateSticky = (id, itemId, toId, toItem) =>
@@ -102,10 +101,10 @@ export const writeNoteText = (id, itemId, text) => invoke("canvas_write_note", {
 export const duplicateNote = (id, itemId, toId, toItem) =>
   invoke("canvas_duplicate_note", { id, itemId, toId, toItem });
 export const deleteNote = (id, itemId) => invoke("canvas_delete_note", { id, itemId });
-/* 复制块时把那份副本再拷进目标画布，返回新的相对路径（引用态那块没副本可拷） */
+/* 复制块时把源块那份文件再拷一份进目标画布，返回新的相对路径；
+   引用态那块也照样收：从它记的原文件路径拷，粘出来的块从此自己带一份 */
 export const duplicateMedia = (id, itemId, toId) =>
   invoke("canvas_duplicate_media", { id, itemId, toId });
-export const listStickyNotes = () => invoke("list_sticky_notes");
 export const readNote = (rel) => invoke("notes_read", { rel });
 export const readNoteImage = (noteRel, rel) => invoke("notes_read_image", { noteRel, rel });
 export const listNotes = () => invoke("notes_tree");

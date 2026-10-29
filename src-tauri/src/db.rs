@@ -1,8 +1,8 @@
-//! SQLite 只存应用配置：笔记根目录、数据目录、迁移标记。
+//! SQLite 只存应用配置：数据根目录一条 key/value。
 //!
-//! 便签/待办是文件（见 store.rs），笔记是磁盘上的 .md，画布是 items.json；
-//! 旧版本把便签/待办放在这张库的 sticky_note / todo 表里，store::migrate
-//! 会在首次启动时把它们导出成 JSON 并清空，表结构只为兼容旧库保留升级语句。
+//! 用户内容全在磁盘上：笔记是 .md 树，画布是一块画布一个文件夹；
+//! 旧版本把便签/待办放在这张库的表里，那张表和它的升级语句一并下线了，
+//! 留下的 `stickies/`、`todos/` 目录由 `store::migrate` 送进系统回收站。
 
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
@@ -50,14 +50,5 @@ pub fn init_state(dir: PathBuf) -> Result<DbState, String> {
         .map_err(|e| format!("无法打开数据库 {}：{e}", dir.display()))?;
     conn.execute_batch(SCHEMA)
         .map_err(|e| format!("初始化表结构失败：{e}"))?;
-    /* 旧库的便签表是逐版加列的，迁移读整行前先补齐；新库没有这张表，
-       「表不存在」的报错直接吞掉即可。 */
-    for sql in [
-        "ALTER TABLE sticky_note ADD COLUMN text_color TEXT NOT NULL DEFAULT '#000000';",
-        "ALTER TABLE sticky_note ADD COLUMN width INTEGER;",
-        "ALTER TABLE sticky_note ADD COLUMN height INTEGER;",
-    ] {
-        let _ = conn.execute_batch(sql);
-    }
     Ok(DbState(Mutex::new(conn)))
 }

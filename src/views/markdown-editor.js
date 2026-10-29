@@ -200,7 +200,7 @@ export function createMarkdownEditor({
     ta.focus();
     pushHistory(true);
     if (action === "color") {
-      /* 这个 click 会冒泡到 document，被 home.js 的「点外部关菜单」当场把
+      /* 这个 click 会冒泡到 document，被 menu.js 的「点外部关菜单」当场把
          刚弹出来的菜单关掉（右键菜单是从 contextmenu 打开的，所以没这问题）。 */
       event?.stopPropagation();
       openColorMenu(button);

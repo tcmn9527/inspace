@@ -17,5 +17,5 @@
 | `npm run build` | 2.35 MB |
 | `npm run build:full` | 43.21 MB（129 MB 的 ffmpeg.exe 压进来了） |
 
-两个包都叫 `rust-window-demo_0.1.0_x64-setup.exe`，后跑的覆盖先跑的，要留就自己改个名。
+两个包都叫 `inspace_0.1.0_x64-setup.exe`，后跑的覆盖先跑的，要留就自己改个名。
 

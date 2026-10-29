@@ -378,21 +378,6 @@ export function makeVideo(x, y, name, src, linked) {
   };
 }
 
-/* 便签是快照副本：颜色、文字、尺寸都从原便签抄过来，之后互不影响。 */
-export function makeSticky(x, y, note) {
-  return {
-    id: newId(),
-    type: "sticky",
-    x,
-    y,
-    w: Math.max(120, num(note.width, STICKY_DEFAULT_WIDTH)),
-    h: Math.max(60, num(note.height, STICKY_DEFAULT_HEIGHT)),
-    text: typeof note.body === "string" ? note.body : "",
-    color: note.color || STICKY_DEFAULT_COLOR,
-    textColor: note.textColor || STICKY_DEFAULT_TEXT,
-  };
-}
-
 /* 笔记块默认存 Markdown 快照和一份「原图路径 → 画布副本」映射，编辑不动原 .md。
    引用态（link.linked）多带写回要用的编码和换行，path 是原 .md 的绝对路径。 */
 export function makeNote(x, y, path, name, source, link = {}) {

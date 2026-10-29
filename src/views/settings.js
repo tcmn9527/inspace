@@ -1,6 +1,6 @@
-/* 设置页：工作台数据文件夹 + 视频组件状态。
+/* 设置页：数据文件夹 + 视频组件状态。
 
-   便签、待办、笔记、画布四类数据都存在这一个文件夹里；这里负责「选目录 → 问旧文件夹怎么处置 → 落地」
+   笔记、画布两类数据都存在这一个文件夹里；这里负责「选目录 → 问旧文件夹怎么处置 → 落地」
    这三步。拷贝 / 剪贴 / 新建由用户当场决定，后端只在最后一步动手，中途失败原数据保持不动。
 
    视频组件只在没认到的时候才出现：那种情况下用户需要「把 ffmpeg.exe 放进哪个文件夹」
@@ -94,14 +94,12 @@ function sameDir(a, b) {
 
 function countText(counts) {
   const bits = [];
-  if (counts.stickies) bits.push(`${counts.stickies} 条便签`);
-  if (counts.todos) bits.push(`${counts.todos} 条待办`);
   if (counts.notes) bits.push(`${counts.notes} 篇笔记`);
   if (counts.canvases) bits.push(`${counts.canvases} 张画布`);
   return bits.join("、");
 }
 
-const hasAny = (counts) => counts.stickies + counts.todos + counts.notes + counts.canvases > 0;
+const hasAny = (counts) => counts.notes + counts.canvases > 0;
 
 const STATUS_TEXT = {
   copy: "已复制一份到新文件夹，旧文件夹原样留着",

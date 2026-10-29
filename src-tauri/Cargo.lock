@@ -1718,6 +1718,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "inspace"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "open",
+ "quick-xml",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2855,23 +2872,6 @@ dependencies = [
  "fallible-streaming-iterator",
  "libsqlite3-sys",
  "smallvec",
-]
-
-[[package]]
-name = "rust-window-demo"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "flate2",
- "open",
- "quick-xml",
- "rusqlite",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
 ]
 
 [[package]]

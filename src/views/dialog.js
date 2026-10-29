@@ -1,5 +1,5 @@
 /* 自定义确认框：替代 window.confirm()，外观跟右键菜单、取色盘一套（同样的
- * 浮层底色/描边/圆角/阴影，按钮也用同一套排版），保证整个工作台的弹框风格统一。
+ * 浮层底色/描边/圆角/阴影，按钮也用同一套排版），保证整个应用的弹框风格统一。
  *
  * 用法：
  *   if (!(await confirmDialog({ message: "删除这张便签？", danger: true }))) return;
@@ -9,7 +9,7 @@
 
 let openDialog = null;
 
-/* 关闭用的 ×：跟工作台标题栏那颗同一个字形，别自己拿字符凑（文字 × 基线偏下、粗细也不对） */
+/* 关闭用的 ×：跟标题栏那颗同一个字形，别自己拿字符凑（文字 × 基线偏下、粗细也不对） */
 export const CLOSE_X_SVG = `
   <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
     <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1" fill="none"/>

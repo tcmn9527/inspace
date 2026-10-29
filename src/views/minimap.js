@@ -245,7 +245,7 @@ function shade(color, amount) {
 }
 
 function redraw() {
-  if (!ui || !ctx || !hooks.getCamera()) return;
+  if (!ui || !ctx) return;
   const rect = ui.canvas.getBoundingClientRect();
   const w = Math.max(1, Math.round(rect.width));
   const h = Math.max(1, Math.round(rect.height));
@@ -258,6 +258,14 @@ function redraw() {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
+  /* 没有画布可看时（删到最后一个、停在空白页），上面那次擦除就是全部工作：
+     早退要退在擦除之后，否则上一张画布的块、框、数字会一直留在玻璃上。
+     view 一并清空，面板从此不再吃鼠标。 */
+  if (!hooks.getCamera()) {
+    view = null;
+    if (ui.count) ui.count.textContent = "0";
+    return;
+  }
 
   const camera = hooks.getCamera();
   const size = hooks.getStageSize();

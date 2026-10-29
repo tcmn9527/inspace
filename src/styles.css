@@ -355,33 +355,28 @@ body.is-resizing {
   color: var(--danger);
 }
 
-/* 行首图标槽（空间「快速设置」用）：宽度固定，三行的文字才能左对齐；
-   颜色比正文淡一档，只做说明，不抢菜单文字。 */
+/* 行尾的当前值指示：宽度固定，几行的指示才会右对齐；
+   颜色比正文淡一档，只做说明，且不吃指针——可点的一直是整行。 */
 .menu-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 24px;
-  margin-right: 6px;
   vertical-align: middle;
   color: color-mix(in srgb, var(--fg) 62%, transparent);
+  pointer-events: none;
 }
 
 .menu-icon svg {
   display: block;
 }
 
-/* 行尾的当前值指示：文字靠左、指示靠右，且不吃指针——可点的一直是整行 */
+/* 文字靠左、指示靠右 */
 .ctx-menu button.has-trailing {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-}
-
-.ctx-menu button.has-trailing .menu-icon {
-  margin-right: 0;
-  pointer-events: none;
 }
 
 .menu-icon-dot {
@@ -3328,6 +3323,23 @@ body.is-resizing {
 
 .canvas-handle-point[data-inert] {
   pointer-events: none;
+}
+
+/* 连线折点：比两端圆圈小一号、空心，和「接在哪条边」的实心端点在视觉上分开。
+   外面一圈透明伪元素把可抓范围放大到 19px，细看是空心的，手感不至于太抠。 */
+.canvas-handle-bend {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--accent);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  cursor: move;
+}
+
+.canvas-handle-bend::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }
 
 /* 顶部栏 */

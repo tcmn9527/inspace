@@ -23,6 +23,20 @@ const PACE = {
 const ID = { type: "string", description: "块的 id（从 space_scene / block_create 的返回里拿）" };
 const IDS = { type: "array", items: { type: "string" }, description: "一组块的 id" };
 const COLOR = { type: "string", description: "颜色，CSS 色值如 #ff8800；空字符串表示无" };
+const POINTS = {
+  type: "array",
+  description:
+    "手动折点：世界坐标 {x,y} 数组，线按 from → 折点依次 → to 走；最多 40 个，传 [] 清空回到自动走线",
+  items: {
+    type: "object",
+    properties: { x: { type: "number" }, y: { type: "number" } },
+    required: ["x", "y"],
+  },
+};
+const BEND = {
+  type: "boolean",
+  description: "折点模式：true 打开，之后可以拖线身加折点；false 关闭并清除所有折点。连线默认关闭",
+};
 const X = { type: "number", description: "块左上角的世界坐标 x（空间坐标，原点在空间左上角）" };
 const Y = { type: "number", description: "块左上角的世界坐标 y" };
 const W = { type: "number", description: "宽度（像素）" };
@@ -82,6 +96,8 @@ const TOOL_DEFS = [
     shape: { type: "string", enum: ["curve", "elbow"], description: "连线的走线方式" },
     arrow: { type: "string", enum: ["none", "end", "both"], description: "连线的箭头" },
     label: { type: "string", description: "连线中点的文字" },
+    points: POINTS,
+    bend: BEND,
     from: { type: "string", description: "连线的起点块 id" },
     to: { type: "string", description: "连线的终点块 id" },
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"], description: "连线从起点的哪条边出去" },
@@ -101,6 +117,8 @@ const TOOL_DEFS = [
     shape: { type: "string", enum: ["curve", "elbow"], description: "连线走线" },
     arrow: { type: "string", enum: ["none", "end", "both"], description: "连线箭头" },
     label: { type: "string", description: "连线文字" },
+    points: POINTS,
+    bend: BEND,
     from: { type: "string", description: "连线改起点块" },
     to: { type: "string", description: "连线改终点块" },
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"] },
@@ -121,7 +139,7 @@ const TOOL_DEFS = [
   }, ["id", "direction"]),
   def("block_reveal", "把镜头带到某一块；本来就在眼前就不动。", { id: ID }, ["id"]),
   def("block_highlight", "只给块加一圈演示光带，不改任何数据。", { ids: IDS }, ["ids"]),
-  def("connector_create", "连两块：从 from 块的某条边接到 to 块。", {
+  def("connector_create", "连两块：从 from 块的某条边接到 to 块，可以给手动折点。", {
     from: ID,
     to: ID,
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"] },
@@ -129,8 +147,10 @@ const TOOL_DEFS = [
     arrow: { type: "string", enum: ["none", "end", "both"] },
     color: COLOR,
     label: { type: "string" },
+    points: POINTS,
+    bend: BEND,
   }, ["from", "to"]),
-  def("connector_update", "改一条连线的走线、箭头、颜色、文字或两端。", {
+  def("connector_update", "改一条连线的走线、箭头、颜色、文字、折点或两端。", {
     id: ID,
     from: { type: "string" },
     to: { type: "string" },
@@ -139,6 +159,8 @@ const TOOL_DEFS = [
     arrow: { type: "string", enum: ["none", "end", "both"] },
     color: COLOR,
     label: { type: "string" },
+    points: POINTS,
+    bend: BEND,
   }, ["id"]),
   def("camera_get", "看当前相机位置和缩放。"),
   def("camera_set", "把相机移到指定位置/缩放。", {
@@ -291,7 +313,7 @@ function pick(args, keys) {
 const BLOCK_FIELDS = [
   "x", "y", "w", "h", "x2", "y2", "fontSize", "radius",
   "borderColor", "fillColor", "color", "textColor", "text", "markdown",
-  "shape", "arrow", "label", "from", "to", "fromSide",
+  "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
 ];
 
 async function appState() {
@@ -347,7 +369,7 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.blockGet(args.id));
     case "block_create":
       return onCanvas(args, () =>
-        canvasAgent.blockCreate(pick(args, ["type", "x", "y", "w", "h", "text", "markdown", "name", "notePath", "path", "mode", "as", "fontSize", "radius", "color", "textColor", "borderColor", "fillColor", "x2", "y2", "shape", "arrow", "label", "from", "to", "fromSide"])),
+        canvasAgent.blockCreate(pick(args, ["type", "x", "y", "w", "h", "text", "markdown", "name", "notePath", "path", "mode", "as", "fontSize", "radius", "color", "textColor", "borderColor", "fillColor", "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide"])),
       );
     case "block_update":
       return onCanvas(args, () => canvasAgent.blockUpdate(args.id, pick(args, BLOCK_FIELDS)));
@@ -365,9 +387,9 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.blockHighlight(args.ids));
 
     case "connector_create":
-      return onCanvas(args, () => canvasAgent.connectorCreate(pick(args, ["from", "to", "fromSide", "shape", "arrow", "color", "label"])));
+      return onCanvas(args, () => canvasAgent.connectorCreate(pick(args, ["from", "to", "fromSide", "shape", "arrow", "color", "label", "bend", "points"])));
     case "connector_update":
-      return onCanvas(args, () => canvasAgent.connectorUpdate(args.id, pick(args, ["from", "to", "fromSide", "shape", "arrow", "color", "label"])));
+      return onCanvas(args, () => canvasAgent.connectorUpdate(args.id, pick(args, ["from", "to", "fromSide", "shape", "arrow", "color", "label", "bend", "points"])));
 
     case "camera_get":
       return onCanvas(args, () => canvasAgent.cameraGet());

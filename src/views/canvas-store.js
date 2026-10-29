@@ -7,9 +7,6 @@ export const createCanvas = (name) => invoke("canvas_create", { name });
 export const openCanvas = (id) => invoke("canvas_open", { id });
 export const saveCanvasItems = (id, items) => invoke("canvas_save_items", { id, items });
 export const saveCanvasCamera = (id, camera) => invoke("canvas_save_camera", { id, camera });
-/* 这个空间「复制的连接线属性」，跟着 space.json 走；没复制过时传 null */
-export const saveConnectorPreset = (id, preset) =>
-  invoke("canvas_save_connector", { id, connector: preset });
 export const renameCanvas = (id, name) => invoke("canvas_rename", { id, name });
 export const deleteCanvas = (id) => invoke("canvas_delete", { id });
 export const saveCanvasImage = (id, data, ext) => invoke("canvas_save_image", { id, data, ext });

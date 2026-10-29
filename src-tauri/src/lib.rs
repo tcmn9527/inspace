@@ -100,7 +100,6 @@ pub fn run() {
             canvas::canvas_open,
             canvas::canvas_save_items,
             canvas::canvas_save_camera,
-            canvas::canvas_save_connector,
             canvas::canvas_rename,
             canvas::canvas_delete,
             canvas::canvas_save_image,

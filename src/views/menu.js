@@ -1,8 +1,6 @@
 /* 通用右键菜单：沿用 #ctx-menu 那个浮层，空间块、连线、笔记树都从这里弹。
- * 用法：openMenu(x, y, [{ label, onClick, danger, swatch, icon, trailing, color, keepOpen }])
- *   icon —— 行首图标的 SVG 字符串（空间「快速设置」用它表示属性长什么样），color 给圆点当填充色；
- *   trailing —— 行尾的当前值指示，纯展示、不响应指针；
- *   keepOpen —— 点了不关菜单，用于「一个菜单里连着刷多项」。
+ * 用法：openMenu(x, y, [{ label, onClick, danger, swatch, trailing, color }])
+ *   trailing —— 行尾的当前值指示，纯展示、不响应指针，color 给圆点当填充色。
  * 菜单项点击后自己 stopPropagation —— 下面挂在 document 上的「点外部关菜单」，
  * 不挡住的话刚弹出的东西会被误当成「点到了外面」。 */
 
@@ -39,13 +37,6 @@ export function openMenu(x, y, items, options = {}) {
       swatch.style.background = item.swatch;
       button.append(swatch);
     }
-    if (item.icon) {
-      const icon = document.createElement("span");
-      icon.className = "menu-icon";
-      icon.innerHTML = item.icon;
-      if (item.color) icon.style.setProperty("--menu-icon-color", item.color);
-      button.append(icon);
-    }
     button.append(item.label);
     if (item.trailing) {
       /* 行尾的当前值指示：只说明这一行现在是什么，不吃指针，所以不跟「整行可点」抢反馈 */
@@ -58,7 +49,7 @@ export function openMenu(x, y, items, options = {}) {
     }
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      if (!item.keepOpen) closeMenu();
+      closeMenu();
       item.onClick();
     });
     menu.append(button);

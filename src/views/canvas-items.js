@@ -94,6 +94,22 @@ const SIDE_NORMALS = {
   left: { x: -1, y: 0 },
 };
 
+/* 手动折点上限：够摆出复杂的绕行，又不至于让 items.json 和手柄糊成一片 */
+export const CONNECTOR_MAX_POINTS = 40;
+
+export function normalizeConnectorPoints(raw) {
+  if (!Array.isArray(raw)) return [];
+  const points = [];
+  for (const entry of raw) {
+    const x = Number(entry?.x);
+    const y = Number(entry?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    points.push({ x, y });
+    if (points.length >= CONNECTOR_MAX_POINTS) break;
+  }
+  return points;
+}
+
 function normalizeEnd(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.item !== "string") return null;
   return {
@@ -113,6 +129,9 @@ export function normalizeItem(raw) {
     const from = normalizeEnd(raw.from);
     const to = normalizeEnd(raw.to);
     if (!from || !to) return null;
+    const points = normalizeConnectorPoints(raw.points);
+    /* 默认不开折点；老数据里有折点就自动算打开 */
+    const bend = raw.bend === true || points.length > 0;
     return {
       ...base,
       from,
@@ -121,6 +140,8 @@ export function normalizeItem(raw) {
       arrow: raw.arrow === "none" ? "none" : raw.arrow === "both" ? "both" : "end",
       color: typeof raw.color === "string" && raw.color ? raw.color : accentStroke(),
       label: typeof raw.label === "string" ? raw.label : "",
+      ...(bend ? { bend: true } : {}),
+      ...(points.length ? { points } : {}),
     };
   }
   if (type === "rect" || type === "ellipse") {
@@ -619,7 +640,7 @@ function polylinePath(points, radius) {
 }
 
 /* 折线：先沿边的法线出 24px，再按两端的相对方向走 L 形或 Z 形 */
-function elbowPath(a, na, b, nb) {
+function elbowVertices(a, na, b, nb) {
   const stub = 24;
   const p1 = { x: a.x + na.x * stub, y: a.y + na.y * stub };
   const p2 = { x: b.x + nb.x * stub, y: b.y + nb.y * stub };
@@ -662,10 +683,39 @@ function elbowPath(a, na, b, nb) {
   }
 
   points.push(p2, b);
-  return polylinePath(points, 8);
+  return points;
 }
 
-export function routeConnector(shape, fromSide, toSide, aBounds, bBounds) {
+/* 曲线过折点：中间按 Catmull-Rom 平滑，两头各自沿端口法线出线，接块处不歪 */
+function smoothPathThrough(a, na, b, nb, points) {
+  const verts = [a, ...points, b];
+  const last = verts.length - 1;
+  let d = `M ${round2(a.x)} ${round2(a.y)}`;
+  for (let i = 0; i < last; i++) {
+    const p0 = i > 0 ? verts[i - 1] : a;
+    const p1 = verts[i];
+    const p2 = verts[i + 1];
+    const p3 = i + 2 < verts.length ? verts[i + 2] : b;
+    const pull = Math.max(
+      24,
+      Math.min(200, Math.hypot(p2.x - p1.x, p2.y - p1.y) * 0.4),
+    );
+    const c1 =
+      i === 0
+        ? { x: p1.x + na.x * pull, y: p1.y + na.y * pull }
+        : { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+    const c2 =
+      i === last - 1
+        ? { x: p2.x + nb.x * pull, y: p2.y + nb.y * pull }
+        : { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+    d +=
+      ` C ${round2(c1.x)} ${round2(c1.y)} ${round2(c2.x)} ${round2(c2.y)}` +
+      ` ${round2(p2.x)} ${round2(p2.y)}`;
+  }
+  return d;
+}
+
+export function routeConnector(shape, fromSide, toSide, aBounds, bBounds, points) {
   /* 边在连线建立那一刻就定死了：移动块只改线的走法，不改它接在哪条边上。
      走到兜底说明这条线没被 pinConnectorSides 固化过（老数据在首次渲染时会补上）。 */
   const sideA = SIDES.includes(fromSide) ? fromSide : "right";
@@ -674,14 +724,31 @@ export function routeConnector(shape, fromSide, toSide, aBounds, bBounds) {
   const b = sideAnchor(bBounds, sideB);
   const na = SIDE_NORMALS[sideA];
   const nb = SIDE_NORMALS[sideB];
-  const d = shape === "curve" ? curvePath(a, na, b, nb) : elbowPath(a, na, b, nb);
-  return { a, b, sideA, sideB, d };
+  const manual = normalizeConnectorPoints(points);
+  let vertices;
+  let d;
+  if (manual.length) {
+    /* 手动折点：线按 a → 折点 → b 依次穿过，折线只把每个转角磨圆 */
+    vertices = [a, ...manual, b];
+    d =
+      shape === "curve"
+        ? smoothPathThrough(a, na, b, nb, manual)
+        : polylinePath(vertices, 8);
+  } else if (shape === "curve") {
+    /* 曲线没有现成拐点，插折点时只能从头排 */
+    vertices = [a, b];
+    d = curvePath(a, na, b, nb);
+  } else {
+    vertices = elbowVertices(a, na, b, nb);
+    d = polylinePath(vertices, 8);
+  }
+  return { a, b, sideA, sideB, points: manual, vertices, d };
 }
 
 /* 拖端点过程中的预览线：落点还没定，按当前几何临时挑边 */
-export function routeConnectorPreview(shape, fromSide, toSide, aBounds, bBounds) {
+export function routeConnectorPreview(shape, fromSide, toSide, aBounds, bBounds, points) {
   const { sideA, sideB } = pickSides(fromSide, toSide, aBounds, bBounds);
-  return routeConnector(shape, sideA, sideB, aBounds, bBounds);
+  return routeConnector(shape, sideA, sideB, aBounds, bBounds, points);
 }
 
 /* 把 auto 端就地钉成当时那条边；返回是否真的改了数据 */
@@ -700,7 +767,14 @@ export function connectorGeometry(item, getBounds) {
   const aBounds = getBounds(item.from.item);
   const bBounds = getBounds(item.to.item);
   if (!aBounds || !bBounds) return null;
-  return routeConnector(item.shape, item.from.side, item.to.side, aBounds, bBounds);
+  return routeConnector(
+    item.shape,
+    item.from.side,
+    item.to.side,
+    aBounds,
+    bBounds,
+    item.points,
+  );
 }
 
 /* 引用块的原文件找不到了说人话；拷贝块的副本没了才是「丢了」 */

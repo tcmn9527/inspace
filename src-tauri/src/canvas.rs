@@ -72,8 +72,6 @@ pub struct CanvasData {
     pub meta: CanvasMeta,
     pub camera: Value,
     pub items: Value,
-    /// 这个空间「复制的连接线属性」（颜色/线型/箭头），没复制过就是 null
-    pub connector: Value,
 }
 
 fn now_ms() -> i64 {
@@ -562,15 +560,6 @@ fn read_meta(dir: &Path, fallback: &str) -> (String, Value) {
     (name, camera)
 }
 
-/// 复制下来的连接线属性；没复制过（或老空间）就是 null，由前端用各自的默认值。
-fn read_connector(dir: &Path) -> Value {
-    read_json(&meta_path(dir))
-        .ok()
-        .flatten()
-        .and_then(|m| m.get("connector").cloned())
-        .unwrap_or(Value::Null)
-}
-
 fn read_items(dir: &Path) -> Result<Value, String> {
     let items = read_json(&dir.join(ITEMS_FILE))?.unwrap_or_else(|| json!([]));
     if !items.is_array() {
@@ -609,7 +598,6 @@ fn open_dir(dir: &Path, id: &str) -> Result<CanvasData, String> {
         },
         camera,
         items,
-        connector: read_connector(dir),
     })
 }
 
@@ -732,27 +720,6 @@ pub fn canvas_save_camera(
     let (name, _) = read_meta(&dir, &id);
     meta["name"] = json!(name);
     meta["camera"] = camera;
-    if meta.get("createdAt").is_none() {
-        meta["createdAt"] = json!(now_ms());
-    }
-    write_json(&meta_path(&dir), &meta)
-}
-
-/// 存这个空间复制的连接线属性；传 null 表示没复制过。
-#[tauri::command]
-pub fn canvas_save_connector(
-    id: String,
-    connector: Value,
-    state: tauri::State<'_, CanvasState>,
-) -> Result<(), String> {
-    if !connector.is_null() && !connector.is_object() {
-        return Err("连接线属性格式不对".to_string());
-    }
-    let dir = resolve_dir(&state, &id)?;
-    let mut meta = read_json(&meta_path(&dir))?.unwrap_or_else(|| json!({}));
-    let (name, _) = read_meta(&dir, &id);
-    meta["name"] = json!(name);
-    meta["connector"] = connector;
     if meta.get("createdAt").is_none() {
         meta["createdAt"] = json!(now_ms());
     }

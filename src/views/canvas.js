@@ -25,6 +25,7 @@ import {
   AUDIO_DEFAULT_WIDTH,
   AUDIO_MIN_HEIGHT,
   AUDIO_MIN_WIDTH,
+  CONNECTOR_MAX_POINTS,
   DEFAULT_BORDER,
   EBOOK_DEFAULT_HEIGHT,
   EBOOK_DEFAULT_WIDTH,
@@ -62,6 +63,7 @@ import {
   makeText,
   makeVideo,
   newId,
+  normalizeConnectorPoints,
   normalizeItem,
   pinConnectorSides,
   pinEbookPage,
@@ -318,6 +320,7 @@ export function initCanvas() {
   };
   ui.world.addEventListener("pointerdown", onHandleDown);
   ui.endpointLayer.addEventListener("pointerdown", onHandleDown);
+  ui.endpointLayer.addEventListener("dblclick", onBendHandleDoubleClick);
 
   window.addEventListener("pointermove", onWindowPointerMove);
   window.addEventListener("pointerup", onWindowPointerUp);
@@ -413,7 +416,6 @@ async function switchTo(id) {
       meta: data.meta,
       camera: sanitizeCamera(data.camera),
       items: sanitizeItems(data.items),
-      connectorPreset: normalizeConnectorPreset(data.connector),
     };
     selectedIds = new Set();
     editingId = null;
@@ -488,15 +490,6 @@ function sanitizeCamera(raw) {
       ? clamp(camera.scale, MIN_SCALE, MAX_SCALE)
       : 1,
   };
-}
-
-/* 这个空间复制的连接线属性；三项齐全才算「复制过」，缺一项就当没复制过 */
-function normalizeConnectorPreset(raw) {
-  if (!raw || typeof raw !== "object") return null;
-  const color = typeof raw.color === "string" && raw.color ? raw.color : "";
-  const shape = CONNECTOR_SHAPES.includes(raw.shape) ? raw.shape : "";
-  const arrow = CONNECTOR_ARROWS.includes(raw.arrow) ? raw.arrow : "";
-  return color && shape && arrow ? { color, shape, arrow } : null;
 }
 
 async function loadImages() {
@@ -1013,6 +1006,20 @@ function drawSelectionFor(item, el, lone) {
     if (!lone) return;
     const geometry = connectorGeometry(item, boundsOfItem);
     if (!geometry) return;
+    /* 折点圈先放、两端圈后放：折点被拖到端口上时，端点圈仍然压在上面能拖 */
+    if (item.bend) {
+      for (const [index, point] of (geometry.points || []).entries()) {
+        const screen = worldToStage(point.x, point.y);
+        const handle = document.createElement("span");
+        handle.className = "canvas-handle canvas-handle-point canvas-handle-bend";
+        handle.dataset.handle = "bend";
+        handle.dataset.index = String(index);
+        handle.title = "拖动调整走线，双击删除折点";
+        handle.style.left = `${screen.x}px`;
+        handle.style.top = `${screen.y}px`;
+        ui.endpointLayer.append(handle);
+      }
+    }
     for (const [end, point] of [
       ["from", geometry.a],
       ["to", geometry.b],
@@ -1141,8 +1148,17 @@ function onStagePointerDown(e) {
     startDraw(e);
     return;
   }
-  /* 连线没有整条拖动，只能拖端点 */
-  if (item.type === "connector") return;
+  /* 连线没有整条拖动；打开折点后，拖线身才会插一个折点跟着走 */
+  if (item.type === "connector") {
+    if (!item.bend) return;
+    drag = {
+      kind: "bend-insert",
+      id: item.id,
+      start: clientToWorld(e.clientX, e.clientY),
+      moved: false,
+    };
+    return;
+  }
   if (editingId === item.id) return;
 
   const start = clientToWorld(e.clientX, e.clientY);
@@ -1341,6 +1357,16 @@ function startResize(handle, e) {
   const item = findItem(loneSelected());
   if (!item) return;
   const start = clientToWorld(e.clientX, e.clientY);
+  if (handle.dataset.handle === "bend") {
+    drag = {
+      kind: "bend",
+      id: item.id,
+      index: Number(handle.dataset.index),
+      start,
+      moved: false,
+    };
+    return;
+  }
   if (handle.dataset.handle === "connect-end") {
     drag = {
       kind: "connect-end",
@@ -1446,6 +1472,40 @@ function onWindowPointerMove(e) {
   if (!item) return;
   const el = itemEls.get(item.id);
   if (!el) return;
+
+  if (drag.kind === "bend-insert") {
+    /* 手一抖不算拖：超过 3px 才真插折点 */
+    if (Math.hypot(dx, dy) < 3) return;
+    const anchor = nearestPathPoint(el, point);
+    const geometry = connectorGeometry(item, boundsOfItem);
+    if (!anchor || !geometry) return;
+    /* 第一次拖线身：先把当前自动折线的拐点原样收下，插折点那一刻形状不跳；
+       曲线没有现成拐点，只能从头排 */
+    const points = item.points?.length
+      ? [...item.points]
+      : item.shape === "curve"
+        ? []
+        : (geometry.vertices || []).slice(1, -1);
+    if (points.length >= CONNECTOR_MAX_POINTS) return;
+    const index = bendInsertIndex([geometry.a, ...points, geometry.b], anchor);
+    points.splice(index, 0, anchor);
+    item.points = points;
+    drag.moved = true;
+    drag.kind = "bend";
+    drag.index = index;
+    drag.start = { ...anchor };
+    syncConnector(item);
+    updateSelection();
+    return;
+  }
+
+  if (drag.kind === "bend") {
+    if (!item.points?.[drag.index]) return;
+    item.points[drag.index] = { x: point.x, y: point.y };
+    syncConnector(item);
+    updateSelection();
+    return;
+  }
 
   if (drag.kind === "endpoint") {
     if (drag.end === "a") {
@@ -1744,6 +1804,7 @@ function drawConnectPreview() {
               drag.targetSide || "auto",
               fixedBounds,
               movingBounds,
+              connector.points,
             )
           : routeConnectorPreview(
               connector.shape,
@@ -1751,6 +1812,7 @@ function drawConnectPreview() {
               connector.to.side,
               movingBounds,
               fixedBounds,
+              connector.points,
             );
     }
   }
@@ -1785,13 +1847,6 @@ function finishConnect(finished) {
   if (!targetId) return;
   const connector = makeConnector(finished.from.item, finished.from.side, targetId);
   connector.to.side = finished.targetSide || "auto";
-  /* 这个空间复制过属性的话，新线直接照复制来的那套长 */
-  const preset = current.connectorPreset;
-  if (preset) {
-    connector.color = preset.color;
-    connector.shape = preset.shape;
-    connector.arrow = preset.arrow;
-  }
   current.items.push(connector);
   /* 接上那一刻就把两条边定死，之后挪块只改走线不改接法 */
   pinConnectorSides(connector, boundsOfItem);
@@ -1811,6 +1866,84 @@ function finishConnectEnd(finished) {
   /* 换到新块上的那一端同样当场定死 */
   pinConnectorSides(connector, boundsOfItem);
   syncConnector(connector);
+  updateSelection();
+  scheduleItemsSave();
+}
+
+/* ---------- 连线折点 ---------- */
+
+/* 把指针位置贴到线上最近的一点：拖线身插折点时，折点落在线上而不是凭空跳一下 */
+function nearestPathPoint(el, target) {
+  const path = el?.querySelector(".canvas-edge-visible");
+  if (!path) return null;
+  let length = 0;
+  try {
+    length = path.getTotalLength();
+  } catch {
+    return null;
+  }
+  if (!(length > 0)) return null;
+  const steps = Math.min(240, Math.max(24, Math.ceil(length / 8)));
+  let best = null;
+  for (let i = 0; i <= steps; i++) {
+    const point = path.getPointAtLength((length * i) / steps);
+    const distance = Math.hypot(point.x - target.x, point.y - target.y);
+    if (!best || distance < best.distance) best = { distance, point: { x: point.x, y: point.y } };
+  }
+  return best?.point || null;
+}
+
+function distanceToSegment(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = dx * dx + dy * dy;
+  if (!length) return Math.hypot(point.x - a.x, point.y - a.y);
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / length));
+  return Math.hypot(point.x - (a.x + dx * t), point.y - (a.y + dy * t));
+}
+
+/* 新折点落在哪一段上：按它离哪两个相邻顶点最近来定插入位置 */
+function bendInsertIndex(vertices, point) {
+  let index = 0;
+  let best = Infinity;
+  for (let i = 0; i < vertices.length - 1; i++) {
+    const distance = distanceToSegment(point, vertices[i], vertices[i + 1]);
+    if (distance < best) {
+      best = distance;
+      index = i;
+    }
+  }
+  return index;
+}
+
+/* 双击折点圈就地删掉它；剩最后一个就回到自动走线 */
+function onBendHandleDoubleClick(e) {
+  const handle = e.target.closest?.('.canvas-handle[data-handle="bend"]');
+  if (!handle || !current) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const item = findItem(loneSelected());
+  if (!item || item.type !== "connector" || !item.points) return;
+  const index = Number(handle.dataset.index);
+  if (!Number.isInteger(index) || !item.points[index]) return;
+  item.points.splice(index, 1);
+  if (!item.points.length) delete item.points;
+  syncConnector(item);
+  updateSelection();
+  scheduleItemsSave();
+}
+
+/* 折点模式：默认关闭，拖线身不会插点；打开后拖线身才插，关闭时连同已有折点一起清掉 */
+function setConnectorBend(item, on) {
+  if (on) {
+    if (item.bend) return;
+    item.bend = true;
+  } else {
+    if (!item.bend && !item.points?.length) return;
+    delete item.bend;
+    delete item.points;
+  }
+  syncConnector(item);
   updateSelection();
   scheduleItemsSave();
 }
@@ -1850,6 +1983,12 @@ function onStageContextMenu(e) {
   e.preventDefault();
   e.stopPropagation();
   if (editingId || edgeLabelEditor) commitEditing();
+  /* 右键折点圈：菜单还是这条线的，别退成空白处菜单 */
+  if (e.target.closest?.('.canvas-handle[data-handle="bend"]')) {
+    const connector = findItem(loneSelected());
+    if (connector?.type === "connector") openItemMenu(connector, e.clientX, e.clientY);
+    return;
+  }
   const target = e.target.closest?.(".canvas-item, .canvas-connector");
   if (!target) {
     openBlankMenu(e.clientX, e.clientY);
@@ -1908,8 +2047,6 @@ function openItemMenu(item, x, y) {
     });
     entries.push({ label: "圆角", onClick: () => openRadiusDialog(item) });
   } else if (item.type === "connector") {
-    /* 这个空间还没复制过属性：第一次右键的这条线，它当前的属性就是初始值 */
-    if (!current?.connectorPreset) copyConnectorPreset(item);
     entries.push({
       label: "线条颜色",
       onClick: pick("color"),
@@ -1925,16 +2062,10 @@ function openItemMenu(item, x, y) {
       onClick: () => openConnectorArrowMenu(item, x, y),
       ...connectorValueMark(item, "arrow"),
     });
-    entries.push("-", {
-      label: "复制属性",
-      onClick: () => copyConnectorPreset(item),
+    entries.push({
+      label: item.bend ? "关闭折点" : "打开折点",
+      onClick: () => setConnectorBend(item, !item.bend),
     });
-    if (current?.connectorPreset) {
-      entries.push({
-        label: "快速设置",
-        onClick: () => openConnectorPresetMenu(item, x, y),
-      });
-    }
   } else if (item.type === "image") {
     entries.push({
       label: "边框颜色",
@@ -2203,8 +2334,7 @@ const CONNECTOR_ARROWS = [
 ];
 
 /* 表示连线属性的图标：统一 22x14、1.9 描边、走 currentColor，三个看起来是一套。
-   菜单行尾的「当前值」和「快速设置」行首都用这一套。
-   颜色那一格不用 SVG，直接用线自己的颜色画圆点（见 .menu-icon-dot）。 */
+   菜单行尾的「当前值」用这一套；颜色那一格不用 SVG，直接用线自己的颜色画圆点（见 .menu-icon-dot）。 */
 const CONNECTOR_ICONS = {
   dot: '<span class="menu-icon-dot"></span>',
   elbow:
@@ -2266,76 +2396,6 @@ function connectorValueMark(item, prop) {
   return prop === "color"
     ? { trailing: CONNECTOR_ICONS.dot, color: value }
     : { trailing: CONNECTOR_ICONS[value] };
-}
-
-/* 把这条线当前的三项属性复制到空间上，之后新连的线和「快速设置」都照它来 */
-function copyConnectorPreset(item) {
-  if (!current) return;
-  const preset = {
-    color: connectorValue(item, "color"),
-    shape: connectorValue(item, "shape"),
-    arrow: connectorValue(item, "arrow"),
-  };
-  current.connectorPreset = preset;
-  persistConnectorPreset(preset);
-}
-
-async function persistConnectorPreset(preset) {
-  const id = current?.meta.id;
-  if (!id) return;
-  try {
-    await store.saveConnectorPreset(id, preset);
-  } catch (error) {
-    showError(error);
-  }
-}
-
-/* 把复制来的某一项刷到当前这条线上 */
-function applyConnectorPreset(item, prop) {
-  const preset = current?.connectorPreset;
-  if (!preset) return;
-  if (prop === "color") {
-    applyColor(item, "color", preset.color);
-    scheduleItemsSave();
-  } else {
-    setConnectorProp(item, prop, preset[prop]);
-  }
-}
-
-/* 「快速设置」子菜单：三行就是复制下来的那三项属性，行首图标画出它长什么样。
-   点一行只刷这一项，菜单原地重开（✓ 跟着更新），好让人连着把三项刷完。 */
-function openConnectorPresetMenu(item, x, y) {
-  const preset = current?.connectorPreset;
-  if (!preset) return;
-  const nameOf = (options, value) => options.find(([v]) => v === value)[1];
-  const rows = [
-    { prop: "color", icon: CONNECTOR_ICONS.dot, color: preset.color, label: `颜色 ${preset.color}` },
-    {
-      prop: "shape",
-      icon: CONNECTOR_ICONS[preset.shape],
-      label: `线型 ${nameOf(CONNECTOR_SHAPES, preset.shape)}`,
-    },
-    {
-      prop: "arrow",
-      icon: CONNECTOR_ICONS[preset.arrow],
-      label: `箭头 ${nameOf(CONNECTOR_ARROWS, preset.arrow)}`,
-    },
-  ];
-  openMenu(
-    x,
-    y,
-    rows.map((row) => ({
-      icon: row.icon,
-      color: row.color,
-      label: `${row.label}${connectorValue(item, row.prop) === preset[row.prop] ? " ✓" : ""}`,
-      keepOpen: true,
-      onClick: () => {
-        applyConnectorPreset(item, row.prop);
-        openConnectorPresetMenu(item, x, y);
-      },
-    })),
-    { label: "快速设置" },
-  );
 }
 
 function applyColor(item, prop, color) {
@@ -4653,6 +4713,11 @@ function agentSummary(item) {
       arrow: item.arrow,
       color: item.color,
       label: item.label || "",
+      bend: Boolean(item.bend),
+      points: (item.points || []).map((point) => ({
+        x: Math.round(point.x),
+        y: Math.round(point.y),
+      })),
     };
   }
   if (item.type === "text") {
@@ -5075,6 +5140,14 @@ function agentCreateConnector(spec = {}) {
   if (spec.arrow === "none" || spec.arrow === "both" || spec.arrow === "end") item.arrow = spec.arrow;
   if (spec.color) item.color = String(spec.color);
   if (spec.label !== undefined) item.label = String(spec.label);
+  if (spec.points !== undefined) {
+    const points = normalizeConnectorPoints(spec.points);
+    if (points.length) {
+      item.points = points;
+      item.bend = true;
+    }
+  }
+  if (spec.bend === true) item.bend = true;
   current.items.push(item);
   /* 和拖线一样，接上那一刻就把两条边定死 */
   pinConnectorSides(item, boundsOfItem);
@@ -5105,6 +5178,25 @@ function agentUpdateConnector(item, patch) {
     item.label = String(patch.label || "");
     touched = true;
   }
+  if (patch.bend !== undefined) {
+    if (patch.bend) {
+      item.bend = true;
+    } else {
+      delete item.bend;
+      delete item.points;
+    }
+    touched = true;
+  }
+  if (patch.points !== undefined) {
+    const points = normalizeConnectorPoints(patch.points);
+    if (points.length) {
+      item.points = points;
+      item.bend = true;
+    } else {
+      delete item.points;
+    }
+    touched = true;
+  }
   if (patch.from !== undefined || patch.to !== undefined || patch.fromSide !== undefined) {
     const from = agentRequireItem(patch.from ?? item.from.item);
     const to = agentRequireItem(patch.to ?? item.to.item);
@@ -5117,6 +5209,7 @@ function agentUpdateConnector(item, patch) {
   }
   if (!touched) return agentSummary(item);
   refreshConnectors();
+  if (selectedIds.has(item.id)) updateSelection();
   scheduleItemsSave();
   return agentSummary(item);
 }

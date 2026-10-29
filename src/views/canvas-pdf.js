@@ -1,6 +1,6 @@
 /* PDF 预览：pdf.js（vendor 在 src/vendor/pdfjs）把指定的页画进调用方给的 <canvas>。
  *
- * 没用浏览器自带的 PDF 查看器（<iframe src="asset:...">）：那颗工具栏塞不进画布块，
+ * 没用浏览器自带的 PDF 查看器（<iframe src="asset:...">）：那颗工具栏塞不进空间块，
  * 帧还会把滚轮和按下拖动吃掉——电子书书页就是栽在这儿，最后只能把帧钉成不可交互。
  * 自己画到 canvas 上，滚动、翻页、鼠标路径就都还在我们手里。
  *
@@ -12,7 +12,7 @@ import * as pdfjs from "../vendor/pdfjs/build/pdf.mjs";
 const VENDOR = new URL("../vendor/pdfjs/", import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("build/pdf.worker.mjs", VENDOR).href;
 
-/* url -> Promise<PDFDocumentProxy>。同一份 PDF 在一张画布上出现多次也只开一遍。 */
+/* url -> Promise<PDFDocumentProxy>。同一份 PDF 在同一个空间里出现多次也只开一遍。 */
 const documents = new Map();
 
 export function openPdf(url) {
@@ -25,7 +25,7 @@ export function openPdf(url) {
       standardFontDataUrl: new URL("standard_fonts/", VENDOR).href,
       /* 只按需读：asset 地址支持 Range，pdf.js 要多少字节读多少。
          默认那套「后台把整本预取进内存」是为网页连续滚动设计的，
-         画布一块一次只挂几页，预取等于把 70MB 的书整份搬进内存。 */
+         一个空间一次只挂几页，预取等于把 70MB 的书整份搬进内存。 */
       disableAutoFetch: true,
     }).promise;
     /* 读坏了就别留着这个 key，下次重试还能有机会（比如文件后来补全了） */
@@ -90,7 +90,7 @@ export async function renderPdfPage({ url, page, canvas, width, slot }) {
 /* pdf.js 抛的这几种名字稳定，够用来把话说清楚；其余的把原文带上 */
 export function pdfProblem(error) {
   const name = error?.name || "";
-  if (name === "PasswordException") return "这份 PDF 设了打开密码，画布里读不出来";
+  if (name === "PasswordException") return "这份 PDF 设了打开密码，空间里读不出来";
   if (name === "InvalidPDFException") return "这份 PDF 不像是一份有效的 PDF，读不出来";
   if (name === "MissingPDFException") return "这份 PDF 已经不在了";
   const message = error?.message || error;

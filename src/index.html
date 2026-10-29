@@ -116,8 +116,8 @@
           class="rail-item is-active"
           type="button"
           data-route="canvas"
-          title="画布"
-          aria-label="画布"
+          title="空间"
+          aria-label="空间"
           aria-current="page"
         >
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -206,24 +206,6 @@
         <aside class="notes-tree-pane" id="notes-tree">
           <header class="notes-tree-head">
             <span class="notes-root-name" id="notes-root-name" title="">笔记</span>
-            <button
-              class="notes-icon-btn"
-              id="notes-root-reveal"
-              type="button"
-              title="在资源管理器里打开笔记文件夹"
-              aria-label="在资源管理器里打开笔记文件夹"
-            >
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                <path
-                  d="M2 4.6c0-.6.45-1 1-1h3.05L7.5 5.3h5.5c.55 0 1 .45 1 1v6.1c0 .55-.45 1-1 1H3c-.55 0-1-.45-1-1z"
-                  stroke="currentColor"
-                  stroke-width="1.2"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
           </header>
           <div class="notes-tree-scroll" id="notes-tree-scroll"></div>
           <p class="notes-tree-empty" id="notes-tree-empty" hidden>还没有笔记，右键空白处新建</p>
@@ -326,10 +308,10 @@
             class="canvas-name"
             id="canvas-name"
             type="button"
-            title="切换画布"
+            title="切换空间"
             aria-haspopup="true"
           >
-            <span id="canvas-name-text">画布</span>
+            <span id="canvas-name-text">空间</span>
             <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
               <path
                 d="M2.5 4.5 6 8l3.5-3.5"
@@ -342,7 +324,7 @@
             </svg>
           </button>
 
-          <div class="canvas-tools" id="canvas-tools" role="toolbar" aria-label="画布工具">
+          <div class="canvas-tools" id="canvas-tools" role="toolbar" aria-label="空间工具">
             <button class="canvas-tool is-active" type="button" data-tool="select" title="选择 / 移动">
               <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
                 <path
@@ -529,10 +511,10 @@
           <div class="canvas-guide-layer" id="canvas-guide-layer" aria-hidden="true"></div>
           <p class="canvas-metrics" id="canvas-metrics" hidden></p>
 
-          <!-- 鸟瞰窗：右下角整张画布的缩小版，拖亮框或点框外就把主画布带到那儿 -->
+          <!-- 鸟瞰窗：右下角整个空间的缩小版，拖亮框或点框外就把视野带到那儿 -->
           <div class="canvas-minimap" id="canvas-minimap">
             <canvas class="canvas-minimap-canvas" id="canvas-minimap-canvas"></canvas>
-            <span class="canvas-minimap-count" id="canvas-minimap-count" aria-label="画布上的面板数量">0</span>
+            <span class="canvas-minimap-count" id="canvas-minimap-count" aria-label="空间上的面板数量">0</span>
             <button
               class="canvas-minimap-min"
               id="canvas-minimap-min"
@@ -569,13 +551,13 @@
 
         <div class="canvas-empty" id="canvas-empty" hidden>
           <div class="canvas-empty-card">
-            <h2>无限画布</h2>
+            <h2>无限空间</h2>
             <p>
-              每块画布都是本地的一个文件夹：图片放在 images 里，内容放在 json 里。
+              每个空间都是本地的一个文件夹：图片放在 images 里，内容放在 json 里。
               重启后还在，也能直接用资源管理器打开。
             </p>
             <button class="notes-btn notes-btn-primary" id="canvas-create" type="button">
-              新建画布
+              新建空间
             </button>
           </div>
         </div>
@@ -590,8 +572,8 @@
         <div class="settings-card">
           <p class="settings-title">数据文件夹</p>
           <p class="settings-hint">
-            笔记、画布都存在这一个文件夹里：notes/ 是那棵 Markdown 树，canvases/
-            是一块画布一个文件夹。 换文件夹时会先问旧的要拷贝一份留着、剪贴走，还是干脆新建一份不带过去。
+            笔记、空间都存在这一个文件夹里：notes/ 是那棵 Markdown 树，spaces/
+            是一个空间一个文件夹。 换文件夹时会先问旧的要拷贝一份留着、剪贴走，还是干脆新建一份不带过去。
           </p>
           <code class="settings-path" id="settings-data-path"></code>
           <div class="settings-actions">
@@ -605,7 +587,7 @@
         <div class="settings-card" id="settings-ffmpeg-card" hidden>
           <p class="settings-title">视频组件</p>
           <p class="settings-hint">
-            画布里的视频碰到本机放不出声的音轨（AC3、DTS 这类）时，要靠 ffmpeg
+            空间里的视频碰到本机放不出声的音轨（AC3、DTS 这类）时，要靠 ffmpeg
             把那条音轨转成 AAC。没装它画面照样能播，只是那条视频不会响。
             要修就把 ffmpeg.exe 放进下面这个文件夹，再点重新检测。
           </p>

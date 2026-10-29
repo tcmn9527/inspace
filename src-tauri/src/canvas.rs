@@ -1,8 +1,8 @@
-//! 无限画布 = 一个画布一个文件夹，全部落在本地文件里（不进数据库）。
+//! 无限空间 = 一个空间一个文件夹，全部落在本地文件里（不进数据库）。
 //!
-//! 目录结构（根目录 = 数据文件夹/canvases，跟着设置页那个目录一起搬）：
-//!   <画布名>/
-//!     canvas.json   画布信息与相机（缩放/平移）
+//! 目录结构（根目录 = 数据文件夹/spaces，跟着设置页那个目录一起搬）：
+//!   <空间名>/
+//!     space.json    空间信息与相机（缩放/平移）
 //!     items.json    所有图元
 //!     images/       粘贴/拖入的图片
 //!     audio/        粘贴/拖入的音频
@@ -11,9 +11,9 @@
 //!     stickies/     便签块的内容，一块一个 <块id>.json
 //!     notes/        笔记块的内容，一块一个 <块id>.md，图片副本在同名的 <块id>/ 目录里
 //!
-//! 删除画布时整个文件夹进系统回收站。
+//! 删除空间时整个文件夹进系统回收站。
 //!
-//! 前端只传画布 id（就是文件夹名），路径一律在这里算，不接受路径片段。
+//! 前端只传空间 id（就是文件夹名），路径一律在这里算，不接受路径片段。
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -32,7 +32,9 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::store::DataRoot;
 
-const META_FILE: &str = "canvas.json";
+pub(crate) const META_FILE: &str = "space.json";
+/// 旧版的元数据文件名；读到就顺手改成 space.json
+pub(crate) const LEGACY_META_FILE: &str = "canvas.json";
 const ITEMS_FILE: &str = "items.json";
 const IMAGE_DIR: &str = "images";
 const AUDIO_DIR: &str = "audio";
@@ -42,15 +44,15 @@ const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 const BAD_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
-/// 画布不自己记根目录，只在数据根目录下面挂一层 canvases/；
-/// 用户在设置页换了数据文件夹，画布列表立刻跟着变。
+/// 空间不自己记根目录，只在数据根目录下面挂一层 spaces/；
+/// 用户在设置页换了数据文件夹，空间列表立刻跟着变。
 pub struct CanvasState {
     data: DataRoot,
 }
 
 impl CanvasState {
     fn root(&self) -> PathBuf {
-        self.data.dir(crate::store::CANVAS_DIR)
+        self.data.dir(crate::store::SPACE_DIR)
     }
 }
 
@@ -70,7 +72,7 @@ pub struct CanvasData {
     pub meta: CanvasMeta,
     pub camera: Value,
     pub items: Value,
-    /// 这张画布「复制的连接线属性」（颜色/线型/箭头），没复制过就是 null
+    /// 这个空间「复制的连接线属性」（颜色/线型/箭头），没复制过就是 null
     pub connector: Value,
 }
 
@@ -86,14 +88,15 @@ fn default_camera() -> Value {
 }
 
 pub fn init(data: DataRoot, legacy_dir: PathBuf) -> Result<CanvasState, String> {
-    let root = data.dir(crate::store::CANVAS_DIR);
-    fs::create_dir_all(&root).map_err(|e| format!("无法创建画布目录：{e}"))?;
+    let root = data.dir(crate::store::SPACE_DIR);
+    fs::create_dir_all(&root).map_err(|e| format!("无法创建空间目录：{e}"))?;
     adopt_legacy(&legacy_dir, &root);
+    align_meta_names(&root);
     Ok(CanvasState { data })
 }
 
-/// 旧版的画布直接住在 app_data_dir/canvases 下；数据统一到一个文件夹之后，
-/// 首次启动把那批画布整批挪进去，只挪一次（新位置已经有同名文件夹就不动旧的）。
+/// 旧版的空间直接住在 app_data_dir/canvases 下；数据统一到一个文件夹之后，
+/// 首次启动把那批空间整批挪进去，只挪一次（新位置已经有同名文件夹就不动旧的）。
 fn adopt_legacy(legacy_dir: &Path, root: &Path) {
     if legacy_dir == root || !legacy_dir.is_dir() {
         return;
@@ -115,7 +118,35 @@ fn adopt_legacy(legacy_dir: &Path, root: &Path) {
     }
 }
 
-/// 画布 id -> 目录。
+/// 元数据文件名换过一次：旧版叫 canvas.json。读到旧文件就顺手改成新名字，
+/// 改不动也继续用它，不耽误打开。
+fn meta_path(dir: &Path) -> PathBuf {
+    let current = dir.join(META_FILE);
+    if current.exists() {
+        return current;
+    }
+    let legacy = dir.join(LEGACY_META_FILE);
+    if legacy.exists() {
+        if fs::rename(&legacy, &current).is_ok() {
+            return current;
+        }
+        return legacy;
+    }
+    current
+}
+
+/// 启动时把每个空间里的旧元数据文件名改过来；改不动的留给 meta_path 兜底。
+fn align_meta_names(root: &Path) {
+    let Ok(entries) = fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && !entry.file_name().to_string_lossy().starts_with('.') {
+            let _ = meta_path(&path);
+        }
+    }
+}
+
+/// 空间 id -> 目录。
 fn resolve_dir(state: &CanvasState, id: &str) -> Result<PathBuf, String> {
     canvas_dir(&state.root(), id)
 }
@@ -198,7 +229,7 @@ fn check_name(raw: &str) -> Result<String, String> {
         return Err("这个名字不能用".to_string());
     }
     if name.starts_with('.') {
-        name.insert_str(0, "画布 ");
+        name.insert_str(0, "空间 ");
     }
     Ok(name)
 }
@@ -217,21 +248,21 @@ fn unique_dir(root: &Path, name: &str) -> PathBuf {
     root.join(format!("{name} 1000"))
 }
 
-/// 画布 id 只允许单层文件夹名；同时要求目录确实存在。
+/// 空间 id 只允许单层文件夹名；同时要求目录确实存在。
 fn canvas_dir(root: &Path, id: &str) -> Result<PathBuf, String> {
     if id.trim().is_empty() {
-        return Err("画布不存在".to_string());
+        return Err("空间不存在".to_string());
     }
     let rel = id.replace('\\', "/");
     let path = Path::new(&rel);
     let mut components = path.components();
     let valid = matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
     if !valid {
-        return Err("画布路径不合法".to_string());
+        return Err("空间路径不合法".to_string());
     }
     let dir = root.join(path);
     if !dir.is_dir() {
-        return Err("画布不存在或已被移除".to_string());
+        return Err("空间不存在或已被移除".to_string());
     }
     Ok(dir)
 }
@@ -375,7 +406,7 @@ fn audio_path(dir: &Path, rel: &str) -> Result<PathBuf, String> {
     media_path(dir, rel, AUDIO_DIR, "音频")
 }
 
-/// 媒体块的来源路径：拷贝态按画布目录下的相对路径找副本，引用态 src 就是原文件绝对路径。
+/// 媒体块的来源路径：拷贝态按空间目录下的相对路径找副本，引用态 src 就是原文件绝对路径。
 fn media_source_path(
     state: &CanvasState,
     id: &str,
@@ -431,14 +462,14 @@ fn check_item_id(raw: &str) -> Result<String, String> {
     Ok(id.to_string())
 }
 
-/// 笔记块的正文：<画布>/notes/<块id>.md。
+/// 笔记块的正文：<空间>/notes/<块id>.md。
 fn note_text_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
     Ok(dir
         .join(NOTE_DIR)
         .join(format!("{}.md", check_item_id(item_id)?)))
 }
 
-/// 便签块的正文：<画布>/stickies/<块id>.json。
+/// 便签块的正文：<空间>/stickies/<块id>.json。
 fn sticky_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
     Ok(dir
         .join(STICKY_DIR)
@@ -446,7 +477,7 @@ fn sticky_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
 }
 
 /// 空壳目录不留：删掉最后一张便签/最后一篇笔记之后把 `stickies/`、`notes/` 一起收走，
-/// 免得列表里挂着一张什么也没有的画布文件夹。
+/// 免得列表里挂着一个空的空间文件夹。
 fn prune_empty(dir: &Path) {
     if dir.is_dir() && fs::read_dir(dir).map(|mut i| i.next().is_none()).unwrap_or(false) {
         let _ = fs::remove_dir(dir);
@@ -469,7 +500,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 笔记块图片目录：<画布>/notes/<块id>/。块 id 是前端生成的单层名字。
+/// 笔记块图片目录：<空间>/notes/<块id>/。块 id 是前端生成的单层名字。
 fn note_item_dir(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
     Ok(dir.join(NOTE_DIR).join(check_item_id(item_id)?))
 }
@@ -516,7 +547,7 @@ fn image_data_url(path: &Path, missing: &str) -> Result<String, String> {
 }
 
 fn read_meta(dir: &Path, fallback: &str) -> (String, Value) {
-    let meta = read_json(&dir.join(META_FILE)).ok().flatten();
+    let meta = read_json(&meta_path(dir)).ok().flatten();
     let name = meta
         .as_ref()
         .and_then(|m| m.get("name"))
@@ -531,9 +562,9 @@ fn read_meta(dir: &Path, fallback: &str) -> (String, Value) {
     (name, camera)
 }
 
-/// 复制下来的连接线属性；没复制过（或老画布）就是 null，由前端用各自的默认值。
+/// 复制下来的连接线属性；没复制过（或老空间）就是 null，由前端用各自的默认值。
 fn read_connector(dir: &Path) -> Value {
-    read_json(&dir.join(META_FILE))
+    read_json(&meta_path(dir))
         .ok()
         .flatten()
         .and_then(|m| m.get("connector").cloned())
@@ -548,7 +579,7 @@ fn read_items(dir: &Path) -> Result<Value, String> {
     Ok(items)
 }
 
-/// canvas.json 没写名字时退回文件夹名；画布 id 就是文件夹名，所以直接用 id。
+/// space.json 没写名字时退回文件夹名；空间 id 就是文件夹名，所以直接用 id。
 fn meta_of(dir: &Path, id: &str) -> CanvasMeta {
     let (name, _) = read_meta(dir, id);
     let items_path = dir.join(ITEMS_FILE);
@@ -559,7 +590,7 @@ fn meta_of(dir: &Path, id: &str) -> CanvasMeta {
         id: id.to_string(),
         name,
         item_count,
-        modified: file_mtime(&items_path).max(file_mtime(&dir.join(META_FILE))),
+        modified: file_mtime(&items_path).max(file_mtime(&meta_path(dir))),
         path: dir.to_string_lossy().to_string(),
     }
 }
@@ -573,7 +604,7 @@ fn open_dir(dir: &Path, id: &str) -> Result<CanvasData, String> {
             id: id.to_string(),
             name,
             item_count,
-            modified: file_mtime(&dir.join(ITEMS_FILE)).max(file_mtime(&dir.join(META_FILE))),
+            modified: file_mtime(&dir.join(ITEMS_FILE)).max(file_mtime(&meta_path(dir))),
             path: dir.to_string_lossy().to_string(),
         },
         camera,
@@ -618,7 +649,7 @@ fn reveal_path(path: &Path) {
 #[tauri::command]
 pub fn canvas_list(state: tauri::State<'_, CanvasState>) -> Result<Vec<CanvasMeta>, String> {
     let root = state.root();
-    let entries = fs::read_dir(&root).map_err(|e| format!("读取画布目录失败：{e}"))?;
+    let entries = fs::read_dir(&root).map_err(|e| format!("读取空间目录失败：{e}"))?;
     let mut list = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -636,7 +667,7 @@ pub fn canvas_list(state: tauri::State<'_, CanvasState>) -> Result<Vec<CanvasMet
     Ok(list)
 }
 
-/// 新建画布：一律落在数据文件夹的 canvases 下，文件夹名就是画布名。
+/// 新建空间：一律落在数据文件夹的 spaces 下，文件夹名就是空间名。
 #[tauri::command]
 pub fn canvas_create(
     name: String,
@@ -647,10 +678,10 @@ pub fn canvas_create(
     let id = folder
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .ok_or_else(|| "无法创建画布目录".to_string())?;
-    fs::create_dir_all(folder.join(IMAGE_DIR)).map_err(|e| format!("创建画布失败：{e}"))?;
+        .ok_or_else(|| "无法创建空间目录".to_string())?;
+    fs::create_dir_all(folder.join(IMAGE_DIR)).map_err(|e| format!("创建空间失败：{e}"))?;
     write_json(
-        &folder.join(META_FILE),
+        &meta_path(&folder),
         &json!({
             "name": name,
             "camera": default_camera(),
@@ -668,7 +699,7 @@ pub fn canvas_open(
     state: tauri::State<'_, CanvasState>,
 ) -> Result<CanvasData, String> {
     let dir = resolve_dir(&state, &id)?;
-    // 进画布就把整个画布目录交给 asset protocol：之前存过的视频不用一个个再授权，
+    // 进空间就把整个空间目录交给 asset protocol：之前存过的视频不用一个个再授权，
     // 用户换了数据目录也会在这里重新授权。
     let _ = app.asset_protocol_scope().allow_directory(&dir, true);
     open_dir(&dir, &id)
@@ -697,17 +728,17 @@ pub fn canvas_save_camera(
         return Err("相机数据格式不对".to_string());
     }
     let dir = resolve_dir(&state, &id)?;
-    let mut meta = read_json(&dir.join(META_FILE))?.unwrap_or_else(|| json!({}));
+    let mut meta = read_json(&meta_path(&dir))?.unwrap_or_else(|| json!({}));
     let (name, _) = read_meta(&dir, &id);
     meta["name"] = json!(name);
     meta["camera"] = camera;
     if meta.get("createdAt").is_none() {
         meta["createdAt"] = json!(now_ms());
     }
-    write_json(&dir.join(META_FILE), &meta)
+    write_json(&meta_path(&dir), &meta)
 }
 
-/// 存这张画布复制的连接线属性；传 null 表示没复制过。
+/// 存这个空间复制的连接线属性；传 null 表示没复制过。
 #[tauri::command]
 pub fn canvas_save_connector(
     id: String,
@@ -718,14 +749,14 @@ pub fn canvas_save_connector(
         return Err("连接线属性格式不对".to_string());
     }
     let dir = resolve_dir(&state, &id)?;
-    let mut meta = read_json(&dir.join(META_FILE))?.unwrap_or_else(|| json!({}));
+    let mut meta = read_json(&meta_path(&dir))?.unwrap_or_else(|| json!({}));
     let (name, _) = read_meta(&dir, &id);
     meta["name"] = json!(name);
     meta["connector"] = connector;
     if meta.get("createdAt").is_none() {
         meta["createdAt"] = json!(now_ms());
     }
-    write_json(&dir.join(META_FILE), &meta)
+    write_json(&meta_path(&dir), &meta)
 }
 
 #[tauri::command]
@@ -742,13 +773,13 @@ pub fn canvas_rename(
     let new_id = new_dir
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .ok_or_else(|| "无法重命名画布".to_string())?;
+        .ok_or_else(|| "无法重命名空间".to_string())?;
     if new_dir != dir {
         fs::rename(&dir, &new_dir).map_err(|e| format!("重命名失败：{e}"))?;
     }
-    let mut meta = read_json(&new_dir.join(META_FILE))?.unwrap_or_else(|| json!({}));
+    let mut meta = read_json(&meta_path(&new_dir))?.unwrap_or_else(|| json!({}));
     meta["name"] = json!(name);
-    write_json(&new_dir.join(META_FILE), &meta)?;
+    write_json(&meta_path(&new_dir), &meta)?;
     Ok(meta_of(&new_dir, &new_id))
 }
 
@@ -796,7 +827,7 @@ pub fn canvas_pick_image(app: tauri::AppHandle) -> Result<Option<String>, String
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
-/// 把资源管理器里拖进画布的图片存进 images/。
+/// 把资源管理器里拖进空间的图片存进 images/。
 #[tauri::command]
 pub fn canvas_import_image(
     id: String,
@@ -841,7 +872,7 @@ pub struct PickedAudio {
     pub name: String,
 }
 
-/// 选文件/拖文件进画布前的共同一问：空的没什么可显示
+/// 选文件/拖文件进空间前的共同一问：空的没什么可显示
 fn require_non_empty(path: &Path, what: &str) -> Result<(), String> {
     let meta = fs::metadata(path).map_err(|_| format!("{what}不在了"))?;
     if meta.len() == 0 {
@@ -850,7 +881,7 @@ fn require_non_empty(path: &Path, what: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 从磁盘整份拷进画布的某个媒体目录。走 fs::copy 不过 base64，
+/// 从磁盘整份拷进空间的某个媒体目录。走 fs::copy 不过 base64，
 /// 所以这里不用像「前端递字节」那样卡体积：一部 200MB 的片子也是边读边写。
 fn copy_media(dir: &Path, src: &Path, sub_dir: &str, ext: &str) -> Result<String, String> {
     let target_dir = dir.join(sub_dir);
@@ -893,7 +924,7 @@ fn import_audio_file(dir: &Path, path: &Path) -> Result<PickedAudio, String> {
     Ok(PickedAudio { rel, name })
 }
 
-/// 图片块的显示地址：拷贝态给画布 images/ 里那份，引用态给原文件。
+/// 图片块的显示地址：拷贝态给空间 images/ 里那份，引用态给原文件。
 #[tauri::command]
 pub fn canvas_image_url(
     id: String,
@@ -905,7 +936,7 @@ pub fn canvas_image_url(
     media_url(&state, &app, &id, &src, linked, IMAGE_DIR, "图片")
 }
 
-/// 删图片块：拷贝态把画布里那份副本送进回收站；引用态只断链接，原图是用户自己的东西。
+/// 删图片块：拷贝态把空间里那份副本送进回收站；引用态只断链接，原图是用户自己的东西。
 #[tauri::command]
 pub fn canvas_delete_image(
     id: String,
@@ -921,7 +952,7 @@ pub fn canvas_delete_image(
     recycle_path(&path).map_err(|e| format!("删除图片失败：{e}"))
 }
 
-/// 画布笔记块自己的图片副本：notes/<块id>/<时间戳>.<ext>。
+/// 空间笔记块自己的图片副本：notes/<块id>/<时间戳>.<ext>。
 /// 原笔记的图片先读成 data URL，再由这里复制进来，之后怎么编辑都不碰原 .md。
 #[tauri::command]
 pub fn canvas_save_note_image(
@@ -967,7 +998,7 @@ pub fn canvas_read_note_image(
 
 // ---------- 便签块与笔记块：一块一份文件 ----------
 //
-// 画布上的便签和笔记各有一份自己的文件，住在画布自己的目录里。
+// 空间上的便签和笔记各有一份自己的文件，住在空间自己的目录里。
 // 数据根顶层那个 `stickies/` 是已下线的首页便签墙留下的，跟这里同名不同物，互不相干。
 // 字段口径沿用当年的便签卡（title/body/color/textColor/width/height），
 // 「一个便签就是一个 json 文件」这句话在两边字面一致。
@@ -996,6 +1027,7 @@ fn sticky_of(raw: &Value) -> Value {
         "body": text("body", MAX_STICKY_CHARS),
         "color": text("color", MAX_COLOR_CHARS),
         "textColor": text("textColor", MAX_COLOR_CHARS),
+        "borderColor": text("borderColor", MAX_COLOR_CHARS),
         "width": size("width"),
         "height": size("height"),
         "updatedAt": now_ms(),
@@ -1031,7 +1063,7 @@ pub fn canvas_write_sticky(
     Ok(value)
 }
 
-/// 复制便签块：读源画布那块的那份 json，原样写成目标块自己的文件。
+/// 复制便签块：读源空间那块的那份 json，原样写成目标块自己的文件。
 /// 两边各是各的文件，之后改谁都不影响谁。
 #[tauri::command]
 pub fn canvas_duplicate_sticky(
@@ -1053,7 +1085,7 @@ pub fn canvas_duplicate_sticky(
     Ok(value)
 }
 
-/// 画布笔记块的正文（不是引用态；引用态那份走 notes_read / canvas_note_write_back 碰用户自己的文件）。
+/// 空间笔记块的正文（不是引用态；引用态那份走 notes_read / canvas_note_write_back 碰用户自己的文件）。
 #[tauri::command]
 pub fn canvas_read_note(
     id: String,
@@ -1110,7 +1142,7 @@ pub fn canvas_duplicate_note(
     Ok(())
 }
 
-/// 删掉一块便签：它自己那份 json 进系统回收站，画布上没别的地方用它。
+/// 删掉一块便签：它自己那份 json 进系统回收站，空间上没别的地方用它。
 #[tauri::command]
 pub fn canvas_delete_sticky(
     id: String,
@@ -1147,7 +1179,7 @@ pub fn canvas_delete_note(
 }
 
 /// 带用户去看这块便签/笔记自己那份文件躺在哪儿：路径只从 items.json 里那块记的类型算，
-/// 前端递来的块 id 是唯一线索，所以这儿开不出画布目录以外的东西。
+/// 前端递来的块 id 是唯一线索，所以这儿开不出空间目录以外的东西。
 #[tauri::command]
 pub fn canvas_reveal_block(
     id: String,
@@ -1162,7 +1194,7 @@ pub fn canvas_reveal_block(
             list.iter()
                 .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id.as_str()))
         })
-        .ok_or_else(|| "这块已经不在画布上了".to_string())?;
+        .ok_or_else(|| "这块已经不在空间上了".to_string())?;
     let path = match found.get("type").and_then(Value::as_str).unwrap_or_default() {
         "sticky" => sticky_file(&dir, &item_id)?,
         "note" => note_text_file(&dir, &item_id)?,
@@ -1210,7 +1242,7 @@ pub fn canvas_pick_audio(app: tauri::AppHandle) -> Result<Option<String>, String
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
-/// 把资源管理器里拖进画布的音频存进 audio/。
+/// 把资源管理器里拖进空间的音频存进 audio/。
 #[tauri::command]
 pub fn canvas_import_audio(
     id: String,
@@ -1221,7 +1253,7 @@ pub fn canvas_import_audio(
     import_audio_file(&dir, Path::new(&path))
 }
 
-/// 音频块的播放地址：拷贝态给画布 audio/ 里那份，引用态给原文件。
+/// 音频块的播放地址：拷贝态给空间 audio/ 里那份，引用态给原文件。
 #[tauri::command]
 pub fn canvas_audio_url(
     id: String,
@@ -1233,7 +1265,7 @@ pub fn canvas_audio_url(
     media_url(&state, &app, &id, &src, linked, AUDIO_DIR, "音频")
 }
 
-/// 删音频块：拷贝态回收画布里那份副本；引用态只断链接，不动原文件。
+/// 删音频块：拷贝态回收空间里那份副本；引用态只断链接，不动原文件。
 #[tauri::command]
 pub fn canvas_delete_audio(
     id: String,
@@ -1402,7 +1434,7 @@ struct VideoCopyProgress {
     phase: String,
     copied: u64,
     total: u64,
-    /// done 时才非空：画布里的相对路径。
+    /// done 时才非空：空间里的相对路径。
     rel: String,
     name: String,
     error: String,
@@ -1414,7 +1446,7 @@ fn emit_copy(app: &tauri::AppHandle, payload: VideoCopyProgress) {
     }
 }
 
-/// 把视频拷进画布目录。后台线程跑，立刻返回任务号，进度走 canvas-video-copy 事件。
+/// 把视频拷进空间目录。后台线程跑，立刻返回任务号，进度走 canvas-video-copy 事件。
 #[tauri::command]
 pub fn canvas_copy_video(
     id: String,
@@ -1557,7 +1589,7 @@ struct AudioFixProgress {
     phase: String,
     /// 0.0 ~ 1.0，ffmpeg 自己报的 out_time / duration
     percent: f64,
-    /// done 时才非空：音轨副本在画布里的相对路径
+    /// done 时才非空：音轨副本在空间里的相对路径
     rel: String,
     error: String,
 }
@@ -1568,7 +1600,7 @@ fn emit_audio(app: &tauri::AppHandle, payload: AudioFixProgress) {
     }
 }
 
-/// 音轨靠系统解码器、WebView2 播不出声时，把第一条音轨转成 AAC 存进画布，
+/// 音轨靠系统解码器、WebView2 播不出声时，把第一条音轨转成 AAC 存进空间，
 /// 前端再拿它跟画面对声。后台线程跑，立刻返回任务号，进度走 canvas-video-audio 事件。
 #[tauri::command]
 pub fn canvas_audio_fix(
@@ -1629,7 +1661,7 @@ fn fix_audio(
             },
         );
     };
-    // 转一半的 sidecar 同样当场删掉，画布目录里不留半截文件
+    // 转一半的 sidecar 同样当场删掉，空间目录里不留半截文件
     let abandon = |phase: &str, error: String| {
         let _ = fs::remove_file(part);
         send(phase, 1.0, error);
@@ -1674,7 +1706,7 @@ pub fn canvas_video_url(
     Ok(path.to_string_lossy().to_string())
 }
 
-/// 引用态 src 就是原片绝对路径，拷贝态按画布目录下的相对路径找。
+/// 引用态 src 就是原片绝对路径，拷贝态按空间目录下的相对路径找。
 fn video_source_path(
     state: &CanvasState,
     id: &str,
@@ -1697,7 +1729,7 @@ pub fn canvas_video_probe(
     Ok(crate::ffmpeg::probe(&app, &path))
 }
 
-/// 删视频块：拷贝进来的删画布里那份副本（原片还在用户手里）；
+/// 删视频块：拷贝进来的删空间里那份副本（原片还在用户手里）；
 /// 引用态只是解除关联，绝不碰用户磁盘上的原片。
 #[tauri::command]
 pub fn canvas_delete_video(
@@ -1711,7 +1743,7 @@ pub fn canvas_delete_video(
         return Ok(());
     }
     let dir = resolve_dir(&state, &id)?;
-    /* 转出来的 AAC 副本跟着块一起走，不然画布目录里留一堆没人认领的音轨 */
+    /* 转出来的 AAC 副本跟着块一起走，不然空间目录里留一堆没人认领的音轨 */
     if let Some(rel) = audio_rel.filter(|r| !r.is_empty()) {
         if let Ok(path) = video_path(&dir, &rel) {
             let _ = recycle_path(&path);
@@ -1723,7 +1755,7 @@ pub fn canvas_delete_video(
 
 // ---------- 文件块 ----------
 
-/// 图片/音频/视频之外的都算文件：一律拷进画布 files/，双击交给系统默认程序打开。
+/// 图片/音频/视频之外的都算文件：一律拷进空间 files/，双击交给系统默认程序打开。
 /// 这一层不认格式、不装解析器，先保证「任何文件拖进来都有个落点，原文件删了也还在」。
 const FILE_DIR: &str = "files";
 /// 视频和文件共用这根进度事件：同一时刻只跑一个后台拷贝，两根进度条会打架。
@@ -1732,7 +1764,7 @@ const COPY_EVENT: &str = "canvas-video-copy";
 const SYNC_FILE_BYTES: u64 = 32 * 1024 * 1024;
 /// Markdown 拖进来是当笔记块用的，正文抄进 items.json，太大的抄进去也没法看
 const MAX_TEXT_BYTES: u64 = 4 * 1024 * 1024;
-/// 预览只读文件头这么多字节：20MB 的日志整份塞进 DOM 会把画布卡死
+/// 预览只读文件头这么多字节：20MB 的日志整份塞进 DOM 会把空间卡死
 const PREVIEW_BYTES: u64 = 512 * 1024;
 const MARKDOWN_EXTS: [&str; 2] = ["md", "markdown"];
 
@@ -1861,7 +1893,7 @@ pub fn canvas_pick_file(app: tauri::AppHandle) -> Result<Option<FileInfo>, Strin
     describe_file(&path).map(Some)
 }
 
-/// 拷进画布之后的落点，卡片上的名字和体积都从这里来。
+/// 拷进空间之后的落点，卡片上的名字和体积都从这里来。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PickedFile {
@@ -1944,9 +1976,9 @@ pub fn canvas_copy_file(
     Ok(job)
 }
 
-/// 复制一块的时候，把源块那份文件原样再拷一份，落进目标画布的同一个子目录，
-/// 返回新的相对路径。路径不从嘴里信：只认源画布 items.json 里那条记录。
-/// 引用态那块也一样收：src 是用户原文件的绝对路径，从那儿拷进画布，
+/// 复制一块的时候，把源块那份文件原样再拷一份，落进目标空间的同一个子目录，
+/// 返回新的相对路径。路径不从嘴里信：只认源空间 items.json 里那条记录。
+/// 引用态那块也一样收：src 是用户原文件的绝对路径，从那儿拷进空间，
 /// 粘出来的新块从此自己带一份副本，删它不会碰到用户那份原文件。
 /// 命令放在 async 上，视频几十 GB 也只是占住一个工作线程，不堵命令线程。
 #[tauri::command]
@@ -1965,7 +1997,7 @@ pub async fn canvas_duplicate_media(
             list.iter()
                 .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id.as_str()))
         })
-        .ok_or_else(|| "这块已经不在画布上了".to_string())?;
+        .ok_or_else(|| "这块已经不在空间上了".to_string())?;
     let (sub, missing) = match item.get("type").and_then(Value::as_str).unwrap_or_default() {
         "image" => (IMAGE_DIR, "图片"),
         "audio" => (AUDIO_DIR, "音频"),
@@ -1996,7 +2028,7 @@ pub async fn canvas_duplicate_media(
     Ok(out)
 }
 
-/// 把一份已经在盘上的副本按新名字收进 `<目标画布>/<子目录>/`，返回带目录名的相对路径。
+/// 把一份已经在盘上的副本按新名字收进 `<目标空间>/<子目录>/`，返回带目录名的相对路径。
 /// 扩展名只收字母数字（名字由我们自己写，别把花样带进新文件），撞名靠 unique_media_path 让号。
 fn store_copy(dir: &Path, src: &Path, sub: &str) -> Result<String, String> {
     let target_dir = dir.join(sub);
@@ -2074,7 +2106,7 @@ pub struct FilePreview {
 }
 
 /// 只读文件开头给卡片当预览，20MB 的日志不至于整个进内存。
-/// 引用态 rel 就是原文件绝对路径，画布里没有副本。
+/// 引用态 rel 就是原文件绝对路径，空间里没有副本。
 #[tauri::command]
 pub fn canvas_file_preview(
     id: String,
@@ -2126,7 +2158,7 @@ fn editable_text_item(dir: &Path, item_id: &str) -> Result<(String, bool), Strin
             list.iter()
                 .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id))
         })
-        .ok_or_else(|| "这块已经不在画布上了".to_string())?;
+        .ok_or_else(|| "这块已经不在空间上了".to_string())?;
     if item.get("type").and_then(Value::as_str) != Some("file")
         || item.get("text").and_then(Value::as_bool) != Some(true)
     {
@@ -2173,7 +2205,7 @@ pub fn canvas_file_body(
     let path = file_source_path(&state, &id, &src, linked)?;
     let meta = fs::metadata(&path).map_err(|_| "文件不在了".to_string())?;
     if meta.len() > MAX_TEXT_BYTES {
-        return Err("这份文本超过 4MB，画布里只读不改，请到原文件里编辑".to_string());
+        return Err("这份文本超过 4MB，空间里只读不改，请到原文件里编辑".to_string());
     }
     let bytes = fs::read(&path).map_err(|e| format!("读取失败：{e}"))?;
     let decoded = decode_text(&bytes)?;
@@ -2197,7 +2229,7 @@ pub struct WriteBackResult {
 }
 
 /// 文本块写回它自己记着的那份文件。GBK 存的中文文件还按 GB18030 落盘，
-/// CRLF 的文件别因为画布改了一次就整篇换行大改。
+/// CRLF 的文件别因为空间改了一次就整篇换行大改。
 #[tauri::command]
 pub fn canvas_file_write_back(
     id: String,
@@ -2294,7 +2326,7 @@ fn decoded_text(text: String, format: &'static str) -> DecodedText {
 }
 
 /// 写回原文件时把读上来时记下的编码和换行还原回去：
-/// GBK 存的中文笔记不该因为画布改了一次就变 UTF-8，CRLF 的文件别整篇换行大改。
+/// GBK 存的中文笔记不该因为空间改了一次就变 UTF-8，CRLF 的文件别整篇换行大改。
 fn encode_text(text: &str, format: &str, crlf: bool) -> Result<Vec<u8>, String> {
     let normalized = if crlf {
         text.replace('\n', "\r\n")
@@ -2457,7 +2489,7 @@ fn gb18030_bytes(_text: &str) -> Result<Vec<u8>, String> {
     Err("这份 GB18030 文件写不回去，先另存为 UTF-8 再改".to_string())
 }
 
-/// 引用态 rel 就是原文件绝对路径，拷贝态按画布目录下的相对路径找。
+/// 引用态 rel 就是原文件绝对路径，拷贝态按空间目录下的相对路径找。
 fn file_source_path(
     state: &CanvasState,
     id: &str,
@@ -2525,14 +2557,14 @@ pub fn canvas_file_exists(
     }
 }
 
-/// 书往画布上放之前先整本预读一遍目录：DRM、KF8 这类读不了的在这里就报错，
+/// 书往空间上放之前先整本预读一遍目录：DRM、KF8 这类读不了的在这里就报错，
 /// 免得用户先拷了 20MB 再发现打不开。
 #[tauri::command]
 pub fn canvas_ebook_info(path: String) -> Result<crate::ebook::Book, String> {
     crate::ebook::open(Path::new(&path))
 }
 
-/// 重开画布时只想拿目录，不重新弹一次「这书多大」：直接按块记的路径读。
+/// 重开空间时只想拿目录，不重新弹一次「这书多大」：直接按块记的路径读。
 #[tauri::command]
 pub fn canvas_ebook_toc(
     id: String,
@@ -2573,7 +2605,7 @@ pub fn canvas_note_write_back(
             list.iter()
                 .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id.as_str()))
         })
-        .ok_or_else(|| "这块已经不在画布上了".to_string())?;
+        .ok_or_else(|| "这块已经不在空间上了".to_string())?;
     let is_linked_note = item.get("type").and_then(Value::as_str) == Some("note")
         && item.get("linked").and_then(Value::as_bool) == Some(true);
     if !is_linked_note {

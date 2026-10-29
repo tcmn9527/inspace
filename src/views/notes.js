@@ -89,7 +89,6 @@ export function initNotes() {
   ui.view = document.getElementById("notes-view");
   ui.tree = document.getElementById("notes-tree-scroll");
   ui.rootName = document.getElementById("notes-root-name");
-  ui.rootReveal = document.getElementById("notes-root-reveal");
   ui.crumb = document.getElementById("notes-crumb");
   ui.body = document.getElementById("notes-body");
   ui.empty = document.getElementById("notes-empty");
@@ -104,7 +103,6 @@ export function initNotes() {
   ui.emptyTree = document.getElementById("notes-tree-empty");
   ui.treeToggle = document.getElementById("notes-tree-toggle");
 
-  ui.rootReveal.addEventListener("click", () => revealPath(""));
   ui.treeToggle.addEventListener("click", () => {
     applyTreeHidden(!ui.view.classList.contains("is-tree-hidden"));
   });

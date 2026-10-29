@@ -355,7 +355,7 @@ body.is-resizing {
   color: var(--danger);
 }
 
-/* 行首图标槽（画布「快速设置」用）：宽度固定，三行的文字才能左对齐；
+/* 行首图标槽（空间「快速设置」用）：宽度固定，三行的文字才能左对齐；
    颜色比正文淡一档，只做说明，不抢菜单文字。 */
 .menu-icon {
   display: inline-flex;
@@ -801,7 +801,7 @@ body.is-resizing {
   user-select: text;
 }
 
-/* ---------- 画布笔记选择框 ---------- */
+/* ---------- 空间笔记选择框 ---------- */
 .canvas-picker {
   display: flex;
   flex-direction: column;
@@ -1736,7 +1736,7 @@ body.is-resizing {
   min-width: 20px;
   max-width: calc(100% - 20px);
 }
-/* ---------- 无限画布 ---------- */
+/* ---------- 无限空间 ---------- */
 .canvas-page {
   position: relative;
   flex: 1 1 auto;
@@ -1752,18 +1752,13 @@ body.is-resizing {
   cursor: grab;
   touch-action: none;
   background-color: var(--bg);
-  background-image: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--fg) 18%, transparent) 1px,
-    transparent 1.2px
-  );
 }
 
 .canvas-stage.is-panning {
   cursor: grabbing;
 }
 
-/* 从资源管理器拖文件进来时，给画布一圈提示 */
+/* 从资源管理器拖文件进来时，给空间一圈提示 */
 .canvas-stage.is-file-over::after {
   content: "";
   position: absolute;
@@ -1850,6 +1845,42 @@ body.is-resizing {
   pointer-events: none;
 }
 
+/* 连线中间的文字：位置由 JS 按路径中点摆，用背景色描一圈边，线从字缝里过也不糊 */
+.canvas-edge-label {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.canvas-edge-label-text {
+  font-size: 13px;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  user-select: none;
+}
+
+/* 编辑时文字先藏起来，同一位置换成输入框，免得两层字叠在一起 */
+.canvas-connector.is-label-editing .canvas-edge-label {
+  visibility: hidden;
+}
+
+.canvas-edge-label-input {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, -50%);
+  width: 90px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  line-height: 1.5;
+  text-align: center;
+  outline: none;
+}
+
 /* 连线端口：一个框装四个圈，框画在块自己身上（inset 由 JS 补），所以块被压在下面时端口也一起被压住。
    框本身不吃指针，只有圆圈可点。 */
 .canvas-port-box {
@@ -1923,7 +1954,7 @@ body.is-resizing {
 }
 
 /* 图元 */
-/* 画布上的卡片型面板（便签/笔记/音频/文件/电子书/视频）共用同一套外壳：
+/* 空间上的卡片型面板（便签/笔记/音频/文件/电子书/视频）共用同一套外壳：
    1px --line 40% 边框、10px 圆角、--surface 底色，一律不投影。 */
 .canvas-item {
   position: absolute;
@@ -1951,8 +1982,9 @@ body.is-resizing {
 }
 
 .canvas-item-text.is-bordered {
-  /* 失焦时也要一眼看出块的范围，1px 太虚 */
+  /* 失焦时也要一眼看出块的范围，1px 太虚；边框默认就是实线 */
   border-width: 2px;
+  border-style: solid;
   border-color: var(--text-border, color-mix(in srgb, var(--fg) 65%, transparent));
 }
 
@@ -1979,7 +2011,7 @@ body.is-resizing {
   cursor: text;
 }
 
-/* 画布上的便签块：底色、文字色、内边距、字号都照卡片那套走 */
+/* 空间上的便签块：底色、文字色、内边距、字号都照卡片那套走 */
 .canvas-item-sticky {
   cursor: move;
 }
@@ -2444,6 +2476,8 @@ body.is-resizing {
   overflow: auto;
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   border-radius: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
 }
 
 .canvas-file-pdf-track {
@@ -2520,12 +2554,13 @@ body.is-resizing {
   padding-top: 7px;
   border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
   overflow: auto;
+  /* 轨道留空，露出卡片自己的底色：用户改过背景色也不出现一条白边 */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
 }
 
 .canvas-file-card-text {
   padding-bottom: 10px;
-  /* 右上方是收起键，打开按钮和预览都往左让一点 */
-  padding-right: 38px;
 }
 
 .canvas-file-lines {
@@ -2566,12 +2601,14 @@ body.is-resizing {
 /* 编辑框跟预览那一格用同一套字：字号、行高、左右留白都对齐 .canvas-file-lines，
    不然双击进编辑，同一份文本会当场换个样子，看着像内容被改了 */
 .canvas-file-textarea {
-  padding: 0 38px 0 0;
+  padding: 0;
   font-size: 11px;
   line-height: 16px;
   word-break: break-word;
   user-select: text;
   -webkit-user-select: text;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
 }
 
 .canvas-item-file.is-editing {
@@ -3143,8 +3180,9 @@ body.is-resizing {
   pointer-events: none;
 }
 
-/* 挪块途中只藏四角把手（停下来才用来改大小），端口圈和线端点圈是唯一的选中记号，得跟着块飞 */
-.canvas-stage.is-moving .canvas-handle[data-handle="corner"] {
+/* 挪块途中只藏缩放把手（停下来才用来改大小），端口圈和线端点圈是唯一的选中记号，得跟着块飞 */
+.canvas-stage.is-moving .canvas-handle[data-handle="corner"],
+.canvas-stage.is-moving .canvas-handle[data-handle="edge"] {
   display: none;
 }
 
@@ -3193,6 +3231,55 @@ body.is-resizing {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+}
+
+/* 四条边也能拖着改大小：一条看不见的窄带，上下改高度、左右改宽度。
+   边中点的端口圈压在它上面，所以那一小圈仍然归拉连线。 */
+.canvas-handle[data-handle="edge"] {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.canvas-handle-n,
+.canvas-handle-s {
+  left: 0;
+  right: 0;
+  width: auto;
+  height: calc(10px * var(--canvas-inv, 1));
+}
+
+.canvas-handle-n {
+  top: 0;
+  transform: translateY(-50%);
+  cursor: ns-resize;
+}
+
+.canvas-handle-s {
+  bottom: 0;
+  transform: translateY(50%);
+  cursor: ns-resize;
+}
+
+.canvas-handle-e,
+.canvas-handle-w {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  width: calc(10px * var(--canvas-inv, 1));
+}
+
+.canvas-handle-e {
+  right: 0;
+  transform: translateX(50%);
+  cursor: ew-resize;
+}
+
+.canvas-handle-w {
+  left: 0;
+  transform: translateX(-50%);
+  cursor: ew-resize;
 }
 
 .canvas-handle-nw {
@@ -3413,7 +3500,7 @@ body.is-resizing {
   z-index: 6;
   border: 1px solid color-mix(in srgb, var(--line) 34%, transparent);
   border-radius: 8px;
-  /* 必须不透明：透出底下的画布网格和块会跟鸟瞰窗里的小方框混成一片 */
+  /* 必须不透明：透出底下的空间网格和块会跟鸟瞰窗里的小方框混成一片 */
   background: var(--surface);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
   overflow: hidden;
@@ -3502,7 +3589,7 @@ body.is-resizing {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-/* ---- 空状态：还没有画布 ---- */
+/* ---- 空状态：还没有空间 ---- */
 .canvas-empty {
   position: absolute;
   inset: 0;

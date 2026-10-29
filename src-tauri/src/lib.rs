@@ -21,10 +21,13 @@ pub fn run() {
             let db_state = db::init_state(dir.clone())?;
             let store_state = store::init(dir.clone());
             // migrate 顺手把 SQLite 里记的数据根目录同步进 DataRoot 镜像，
-            // 之后画布、笔记、便签读的是同一个路径
+            // 之后空间、笔记、便签读的是同一个路径
             store::migrate(&db_state, &store_state)?;
             let data_root = store::root_handle(&store_state);
-            app.manage(canvas::init(data_root.clone(), dir.join(store::CANVAS_DIR))?);
+            app.manage(canvas::init(
+                data_root.clone(),
+                dir.join(store::LEGACY_CANVAS_DIR),
+            )?);
             app.manage(data_root);
             // 视频拷贝是后台线程在跑，用 Arc 包一层才既能在命令里读、又能挪进线程
             app.manage(Arc::new(canvas::VideoCopyJobs::default()));

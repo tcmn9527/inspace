@@ -35,7 +35,7 @@ function factsLine(probe) {
     bits.push(`音轨 ${probe.audioCodec}${probe.audioLayout ? ` ${probe.audioLayout}` : ""}`);
   }
   if (probe.audioTracks > 1) bits.push(`共 ${probe.audioTracks} 条音轨`);
-  if (probe.subtitleTracks > 0) bits.push(`${probe.subtitleTracks} 条字幕（画布里暂时不显示）`);
+  if (probe.subtitleTracks > 0) bits.push(`${probe.subtitleTracks} 条字幕（空间里暂时不显示）`);
   return bits.join(" · ");
 }
 
@@ -48,7 +48,7 @@ function audioSteps(status) {
     ];
   }
   return [
-    "只转第一条音轨，画面原样不动，转出来的 AAC 放在画布目录里。",
+    "只转第一条音轨，画面原样不动，转出来的 AAC 放在空间目录里。",
     "原片不会被改动，删掉视频块时这份 AAC 一起删。",
     "片子越长转得越久，中途随时能停，停了不留半截文件。",
   ];
@@ -57,7 +57,7 @@ function audioSteps(status) {
 const VIDEO_STEPS = [
   "打开 Microsoft Store，搜「HEVC 视频扩展」，开发商是 Microsoft Corporation，装上（约 6 元）。",
   "不想为解码器花钱，也可以先把片子压成 H.264 再拖进来 —— 那是另一条路，这里不拦你。",
-  "装完回到画布再播一次；解码器是系统级的，不用重启无限空间。",
+  "装完回到空间再播一次；解码器是系统级的，不用重启无限空间。",
 ];
 
 const VIDEO_NOTE =

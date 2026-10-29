@@ -1,7 +1,7 @@
 [package]
 name = "inspace"
 version = "0.1.0"
-description = "无限空间：一块装得下笔记、画布和媒体的桌面画布"
+description = "无限空间：一块装得下笔记、文件和媒体的桌面空间"
 authors = ["you"]
 edition = "2024"
 
@@ -23,7 +23,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
-# 画布这边已经不直接开文件了，这条留着只为把 shellexecute-on-windows 这个 feature
+# 空间这边已经不直接开文件了，这条留着只为把 shellexecute-on-windows 这个 feature
 # 钉在依赖树上：opener 插件也用它，关掉的话它会去拉一个 powershell.exe 子进程。
 open = { version = "5", features = ["shellexecute-on-windows"] }
 serde = { version = "1", features = ["derive"] }

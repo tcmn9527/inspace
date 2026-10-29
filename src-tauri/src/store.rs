@@ -1,14 +1,14 @@
 //! 无限空间的数据根目录：用户内容全在它下面，一条路径由 SQLite 的 setting 记住。
 //!
 //!   notes/               笔记页那棵 Markdown 树（notes.rs）
-//!   canvases/<画布名>/   无限画布，一个画布一个文件夹（canvas.rs）
+//!   spaces/<空间名>/     无限空间，一个空间一个文件夹（canvas.rs）
 //!
 //! 换根目录时这两块一起走（用户当场选拷贝、剪贴还是新建）；`components/ffmpeg` 和
 //! SQLite 留在 app_data_dir，那是程序自己的东西，不算用户内容。
 //!
 //! 旧版的便签墙和待办栏已经在界面上线，它们留下的 `stickies/`、`todos/` 两个目录
 //! 归启动时的 `migrate` 送进系统回收站——原地留着只会让人以为功能还在。
-//! 画布上的便签块另有一套，住在各画布自己的目录里，跟这两个目录无关。
+//! 空间上的便签块另有一套，住在各空间自己的目录里，跟这两个目录无关。
 //!
 //! 根目录路径存在 SQLite 的 setting 表里，启动时同步进下面的 `DataRoot` 镜像。
 
@@ -31,12 +31,14 @@ const ROOT_KEY: &str = "data_root";
 /// 已下线的便签墙、待办栏留在数据根里的那两个目录，启动时清掉
 pub const STICKY_DIR: &str = "stickies";
 pub const TODO_DIR: &str = "todos";
-/// 笔记树和画布各自的子目录名，notes.rs / canvas.rs 认这两个
+/// 笔记树和空间各自的子目录名，notes.rs / canvas.rs 认这两个
 pub const NOTE_DIR: &str = "notes";
-pub const CANVAS_DIR: &str = "canvases";
+pub const SPACE_DIR: &str = "spaces";
+/// 旧版把空间放在 canvases/ 下，启动时整批改名
+pub const LEGACY_CANVAS_DIR: &str = "canvases";
 
 /// 当前数据根目录。SQLite 里那条 setting 是持久化，这份镜像是给
-/// 画布、笔记的命令读的：它们只想知道「现在该往哪儿放」，不该各自再存一份对不上的路径。
+/// 空间、笔记的命令读的：它们只想知道「现在该往哪儿放」，不该各自再存一份对不上的路径。
 #[derive(Clone)]
 pub struct DataRoot {
     default: PathBuf,
@@ -59,7 +61,7 @@ impl DataRoot {
             .unwrap_or_else(|_| self.default.clone())
     }
 
-    /// 根目录下的某个子目录（notes / canvases）。
+    /// 根目录下的某个子目录（notes / spaces）。
     pub fn dir(&self, sub: &str) -> PathBuf {
         self.get().join(sub)
     }
@@ -74,7 +76,7 @@ impl DataRoot {
 
 pub struct StoreState {
     default_root: PathBuf,
-    /// 换根目录时和 SQLite 一起改，画布/笔记读的就是这一份
+    /// 换根目录时和 SQLite 一起改，空间/笔记读的就是这一份
     root: DataRoot,
     /// 文件读写和「换目录」互斥，避免移动数据时还有写操作落在旧目录
     lock: Mutex<()>,
@@ -89,7 +91,7 @@ pub fn init(app_dir: PathBuf) -> StoreState {
     }
 }
 
-/// 给 lib.rs 分发用：把根目录镜像交给画布、笔记那些拿不到 StoreState 的模块。
+/// 给 lib.rs 分发用：把根目录镜像交给空间、笔记那些拿不到 StoreState 的模块。
 pub fn root_handle(state: &StoreState) -> DataRoot {
     state.root.clone()
 }
@@ -108,7 +110,7 @@ fn conn(db: &DbState) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
 }
 
 /// 当前根目录只有一份真相：`DataRoot` 里的镜像。启动时 `migrate` 用 SQLite
-/// 里那条 setting 把它填好，之后画布、笔记、便签读的都是同一个路径。
+/// 里那条 setting 把它填好，之后空间、笔记、便签读的都是同一个路径。
 fn read_root(state: &StoreState) -> PathBuf {
     state.root.get()
 }
@@ -131,7 +133,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 }
 
 fn ensure_dirs(root: &Path) -> Result<(), String> {
-    for sub in [NOTE_DIR, CANVAS_DIR] {
+    for sub in [NOTE_DIR, SPACE_DIR] {
         let dir = root.join(sub);
         fs::create_dir_all(&dir).map_err(|e| format!("无法创建目录 {}：{e}", dir.display()))?;
     }
@@ -220,6 +222,7 @@ pub fn data_set_root(
     }
     let current = read_root(&state);
     check_nesting(&current, &target, &state.default_root)?;
+    migrate_space_dir_name(&target)?;
     let path = target.to_string_lossy().to_string();
     if same_dir(&current, &target) {
         return Ok(RootSwitch {
@@ -270,7 +273,7 @@ pub struct RootSwitch {
     pub path: String,
 }
 
-/// 一次搬运：任务号 → 停止标志。和画布拷贝视频那套一个路子。
+/// 一次搬运：任务号 → 停止标志。和空间拷贝视频那套一个路子。
 #[derive(Default)]
 pub struct RootMoveJobs {
     flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -329,7 +332,7 @@ struct MoveProgress {
 pub struct DataCounts {
     /// 笔记树里的 .md，含子文件夹
     pub notes: usize,
-    /// 画布个数
+    /// 空间个数
     pub canvases: usize,
 }
 
@@ -362,7 +365,8 @@ fn count_markdown(dir: &Path) -> usize {
         .unwrap_or(0)
 }
 
-/// 画布 = 一个装着 canvas.json 的子文件夹（文件名和 canvas.rs 的 META_FILE 一致）。
+/// 空间 = 一个装着空间元数据文件的子文件夹（文件名和 canvas.rs 的 META_FILE 一致）。
+/// 旧版叫 canvas.json，统计时两种都认，换目录前才看得见旧文件夹里还有没有东西。
 fn count_canvases(dir: &Path) -> usize {
     fs::read_dir(dir)
         .map(|entries| {
@@ -370,7 +374,9 @@ fn count_canvases(dir: &Path) -> usize {
                 .flatten()
                 .filter(|entry| {
                     let path = entry.path();
-                    path.is_dir() && path.join("canvas.json").is_file()
+                    path.is_dir()
+                        && (path.join(crate::canvas::META_FILE).is_file()
+                            || path.join(crate::canvas::LEGACY_META_FILE).is_file())
                 })
                 .count()
         })
@@ -380,7 +386,8 @@ fn count_canvases(dir: &Path) -> usize {
 fn count_data(root: &Path) -> DataCounts {
     DataCounts {
         notes: count_markdown(&root.join(NOTE_DIR)),
-        canvases: count_canvases(&root.join(CANVAS_DIR)),
+        canvases: count_canvases(&root.join(SPACE_DIR))
+            + count_canvases(&root.join(LEGACY_CANVAS_DIR)),
     }
 }
 
@@ -388,9 +395,10 @@ fn count_data(root: &Path) -> DataCounts {
 /// 目标目录不能和当前根互相套娃，也不能落进默认根那些类别目录里。
 ///
 /// 后者是真会踩的坑：把根指到 `<默认根>/notes`，`ensure_dirs` 就在笔记树里
-/// 长出 `notes/ canvases/` 两个壳，用户的数据被埋进别人的目录，
+/// 长出 `notes/ spaces/` 两个壳，用户的数据被埋进别人的目录，
 /// 指针再指回来都看不见。默认根本身例外——「恢复默认位置」要用的。
-/// `stickies/`、`todos/` 虽然已经下线，旧目录可能还在原地，一并拦掉。
+/// `stickies/`、`todos/` 虽然已经下线，旧目录可能还在原地，一并拦掉；
+/// 旧版的 `canvases/` 也一样。
 fn check_nesting(from: &Path, to: &Path, default_root: &Path) -> Result<(), String> {
     let nested = |child: &Path, parent: &Path| match (fs::canonicalize(child), fs::canonicalize(parent)) {
         (Ok(child), Ok(parent)) => child != parent && child.starts_with(parent),
@@ -399,7 +407,7 @@ fn check_nesting(from: &Path, to: &Path, default_root: &Path) -> Result<(), Stri
     if nested(to, from) || nested(from, to) {
         return Err("不能选择当前数据文件夹的子文件夹或上级文件夹".to_string());
     }
-    for sub in [STICKY_DIR, TODO_DIR, NOTE_DIR, CANVAS_DIR] {
+    for sub in [STICKY_DIR, TODO_DIR, NOTE_DIR, SPACE_DIR, LEGACY_CANVAS_DIR] {
         let dir = default_root.join(sub);
         if same_dir(to, &dir) || nested(to, &dir) {
             return Err(format!(
@@ -539,9 +547,9 @@ fn label_of(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// 一共要过手多少个文件：笔记和画布各是一棵树，整棵数进去。
+/// 一共要过手多少个文件：笔记和空间各是一棵树，整棵数进去。
 fn count_files(root: &Path) -> u64 {
-    [NOTE_DIR, CANVAS_DIR]
+    [NOTE_DIR, SPACE_DIR]
         .iter()
         .map(|sub| walk_files(&root.join(sub)))
         .sum()
@@ -637,7 +645,7 @@ fn copy_tree(from: &Path, to: &Path, root: &Path, prog: &Progress) -> Result<(),
     Ok(())
 }
 
-/// 笔记/画布：整棵目录一起走。剪贴时同盘改名一步到位，跨盘退化成复制再清旧目录；
+/// 笔记/空间：整棵目录一起走。剪贴时同盘改名一步到位，跨盘退化成复制再清旧目录；
 /// 拷贝就只复制，旧树一个字节都不碰。
 fn transfer_tree(
     root: &Path,
@@ -683,11 +691,11 @@ fn transfer_tree(
     Ok(())
 }
 
-/// 把笔记树和画布弄到新目录，全程报进度；`from` 是旧根，报路径拿它当基准。
+/// 把笔记树和空间弄到新目录，全程报进度；`from` 是旧根，报路径拿它当基准。
 /// 旧版便签/待办那两个目录不跟着搬：剪贴时顺手收进回收站，拷贝一律不碰旧文件夹。
 fn transfer_data(from: &Path, to: &Path, keep_source: bool, prog: &Progress) -> Result<(), Halted> {
     ensure_dirs(to)?;
-    for sub in [NOTE_DIR, CANVAS_DIR] {
+    for sub in [NOTE_DIR, SPACE_DIR] {
         transfer_tree(from, &from.join(sub), &to.join(sub), keep_source, prog)?;
     }
     if !keep_source {
@@ -770,9 +778,44 @@ fn reveal_path(path: &Path) {
 
 // ---------- 启动时的收尾 ----------
 
-/// 启动时做两件事：把 SQLite 里记的根目录同步进 DataRoot 镜像（画布、笔记、
-/// 便签块读的都是这一个路径），再把旧版便签墙、待办栏留下的 `stickies/`、`todos/`
-/// 送进系统回收站。
+/// 旧版把空间放在 `canvases/` 下：整棵改名成 `spaces/`。两边都有时逐个搬缺的
+/// 文件夹，遇到同名就停下报错——宁可开不了也不能把两份数据混在一起。
+fn migrate_space_dir_name(root: &Path) -> Result<(), String> {
+    let old = root.join(LEGACY_CANVAS_DIR);
+    if !old.is_dir() {
+        return Ok(());
+    }
+    let new = root.join(SPACE_DIR);
+    if !new.exists() {
+        return fs::rename(&old, &new).map_err(|e| {
+            format!(
+                "无法把旧的空间目录 {} 改名为 {}：{e}",
+                old.display(),
+                new.display()
+            )
+        });
+    }
+    if !new.is_dir() {
+        return Err(format!("{} 被一个文件占了，没法安放空间数据", new.display()));
+    }
+    for entry in fs::read_dir(&old).map_err(|e| format!("读取旧空间目录失败：{e}"))? {
+        let entry = entry.map_err(|e| format!("读取旧空间目录失败：{e}"))?;
+        let dst = new.join(entry.file_name());
+        if dst.exists() {
+            return Err(format!(
+                "新旧空间目录里都有「{}」，请先手动合并再打开",
+                entry.file_name().to_string_lossy()
+            ));
+        }
+        fs::rename(entry.path(), &dst).map_err(|e| format!("搬动旧空间目录失败：{e}"))?;
+    }
+    let _ = fs::remove_dir(&old);
+    Ok(())
+}
+
+/// 启动时做三件事：把 SQLite 里记的根目录同步进 DataRoot 镜像（空间、笔记、
+/// 便签块读的都是这一个路径）；把旧版 `canvases/` 改名成 `spaces/`；
+/// 再把旧版便签墙、待办栏留下的 `stickies/`、`todos/` 送进系统回收站。
 ///
 /// 清目录不设标记、每次启动都试一遍：目录本来就不存在时什么都不做，用户手动删掉
 /// 或换过一个带旧数据的文件夹，下次启动照样收干净；进回收站的东西随时能捞回来。
@@ -788,6 +831,7 @@ pub fn migrate(db: &DbState, state: &StoreState) -> Result<(), String> {
         .lock
         .lock()
         .map_err(|_| "数据状态异常（前一次访问发生 panic）".to_string())?;
+    migrate_space_dir_name(&root)?;
     recycle_legacy_dirs(&root);
     ensure_dirs(&root)
 }
@@ -822,16 +866,16 @@ mod tests {
         }
     }
 
-    /// 笔记两篇（其中一篇在子文件夹里）+ 两张画布，全是要跟着搬的真东西
+    /// 笔记两篇（其中一篇在子文件夹里）+ 两个空间，全是要跟着搬的真东西
     fn seed_root(root: &Path) {
         fs::create_dir_all(root.join(NOTE_DIR).join("子目录")).unwrap();
-        fs::create_dir_all(root.join(CANVAS_DIR).join("一").join("images")).unwrap();
-        fs::create_dir_all(root.join(CANVAS_DIR).join("二")).unwrap();
+        fs::create_dir_all(root.join(SPACE_DIR).join("一").join("images")).unwrap();
+        fs::create_dir_all(root.join(SPACE_DIR).join("二")).unwrap();
         fs::write(root.join(NOTE_DIR).join("a.md"), "# a").unwrap();
         fs::write(root.join(NOTE_DIR).join("子目录").join("b.md"), "# b").unwrap();
-        fs::write(root.join(CANVAS_DIR).join("一").join("canvas.json"), "{}").unwrap();
-        fs::write(root.join(CANVAS_DIR).join("一").join("images").join("x.png"), "png").unwrap();
-        fs::write(root.join(CANVAS_DIR).join("二").join("canvas.json"), "{}").unwrap();
+        fs::write(root.join(SPACE_DIR).join("一").join("space.json"), "{}").unwrap();
+        fs::write(root.join(SPACE_DIR).join("一").join("images").join("x.png"), "png").unwrap();
+        fs::write(root.join(SPACE_DIR).join("二").join("space.json"), "{}").unwrap();
     }
 
     #[test]
@@ -840,17 +884,17 @@ mod tests {
         let from = base.join("from");
         let to = base.join("to");
         seed_root(&from);
-        assert_eq!(count_files(&from), 5, "两篇笔记 + 两张画布的文件全数进去");
+        assert_eq!(count_files(&from), 5, "两篇笔记 + 两个空间的文件全数进去");
 
         let sink = Collect::default();
         let prog = Progress::new(&sink, "job", count_files(&from), Arc::new(AtomicBool::new(false)));
         transfer_data(&from, &to, true, &prog).unwrap();
 
         assert_eq!(count_data(&to).notes, 2, "笔记树整棵都要过去");
-        assert_eq!(count_data(&to).canvases, 2, "画布按装着 canvas.json 的子目录数");
+        assert_eq!(count_data(&to).canvases, 2, "空间按装着 space.json 的子目录数");
         assert!(
-            to.join(CANVAS_DIR).join("一").join("images").join("x.png").is_file(),
-            "画布文件夹里的副本目录不能漏"
+            to.join(SPACE_DIR).join("一").join("images").join("x.png").is_file(),
+            "空间文件夹里的副本目录不能漏"
         );
         assert_eq!(count_files(&from), 5, "拷贝不动旧目录");
         let items = sink.items.lock().unwrap();
@@ -880,21 +924,40 @@ mod tests {
     }
 
     #[test]
+    fn legacy_canvas_dir_is_renamed_to_spaces() {
+        let base = sandbox("rename");
+        let root = base.join("data");
+        fs::create_dir_all(root.join(LEGACY_CANVAS_DIR).join("一")).unwrap();
+        fs::write(root.join(LEGACY_CANVAS_DIR).join("一").join("canvas.json"), "{}").unwrap();
+
+        migrate_space_dir_name(&root).unwrap();
+
+        assert!(!root.join(LEGACY_CANVAS_DIR).exists(), "旧目录要整棵搬走");
+        assert!(
+            root.join(SPACE_DIR).join("一").join("canvas.json").is_file(),
+            "里面的数据原样跟过来"
+        );
+        assert_eq!(count_data(&root).canvases, 1, "旧元数据文件名也要认得");
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
     fn root_cannot_land_in_default_category_dirs() {
         let base = sandbox("nest");
         let default_root = base.join("data");
-        for sub in [STICKY_DIR, TODO_DIR, NOTE_DIR, CANVAS_DIR] {
+        for sub in [STICKY_DIR, TODO_DIR, NOTE_DIR, SPACE_DIR, LEGACY_CANVAS_DIR] {
             fs::create_dir_all(default_root.join(sub)).unwrap();
         }
         let outside = base.join("outside");
         fs::create_dir_all(outside.join("x")).unwrap();
-        fs::create_dir_all(default_root.join(CANVAS_DIR).join("deep")).unwrap();
+        fs::create_dir_all(default_root.join(SPACE_DIR).join("deep")).unwrap();
 
         // 「恢复默认位置」走的就是这条，默认根本身不在禁选名单里
         assert!(check_nesting(&outside, &default_root, &default_root).is_ok());
         // 类别目录本身、以及它再往里一层，都不许当根
         assert!(check_nesting(&outside, &default_root.join(NOTE_DIR), &default_root).is_err());
-        assert!(check_nesting(&outside, &default_root.join(CANVAS_DIR).join("deep"), &default_root).is_err());
+        assert!(check_nesting(&outside, &default_root.join(SPACE_DIR).join("deep"), &default_root).is_err());
+        assert!(check_nesting(&outside, &default_root.join(LEGACY_CANVAS_DIR), &default_root).is_err());
         // 原有的套娃检查照旧
         assert!(check_nesting(&outside, &outside.join("x"), &default_root).is_err());
         assert!(check_nesting(&outside.join("x"), &outside, &default_root).is_err());

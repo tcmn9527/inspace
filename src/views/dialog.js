@@ -93,6 +93,7 @@ export function promptDialog({
   okText = "确定",
   cancelText = "取消",
   selectBase = false,
+  validate = null,
 } = {}) {
   openDialog?.(false);
 
@@ -135,8 +136,9 @@ export function promptDialog({
     };
     const submit = () => {
       const text = input.value.trim();
-      if (!text) {
-        errorEl.textContent = "名字不能为空";
+      const problem = validate ? validate(text) : text ? null : "名字不能为空";
+      if (problem) {
+        errorEl.textContent = problem;
         errorEl.hidden = false;
         input.focus();
         return;
@@ -176,7 +178,7 @@ export function promptDialog({
   });
 }
 
-/* 多选项弹层：confirmDialog 只有两个按钮，装不下「拷进画布 / 只引用原文件」。
+/* 多选项弹层：confirmDialog 只有两个按钮，装不下「拷进空间 / 只引用原文件」。
  * 返回选中项的 value，取消返回 null。上下键换选项，Enter 确认，
  * 取消没有按钮——走右上角 × 、Esc 或点空白。 */
 export function choiceDialog({

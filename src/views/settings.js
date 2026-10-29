@@ -1,11 +1,11 @@
 /* 设置页：数据文件夹 + 视频组件状态。
 
-   笔记、画布两类数据都存在这一个文件夹里；这里负责「选目录 → 问旧文件夹怎么处置 → 落地」
+   笔记、空间两类数据都存在这一个文件夹里；这里负责「选目录 → 问旧文件夹怎么处置 → 落地」
    这三步。拷贝 / 剪贴 / 新建由用户当场决定，后端只在最后一步动手，中途失败原数据保持不动。
 
    视频组件只在没认到的时候才出现：那种情况下用户需要「把 ffmpeg.exe 放进哪个文件夹」
    和「放完了点一下重新检测」，整张卡就是为这两步存在的。认到了就一行都不显示，
-   因为这时候他没有任何事可干——音轨转 AAC 是画布里点播放时顺手做的。 */
+   因为这时候他没有任何事可干——音轨转 AAC 是空间里点播放时顺手做的。 */
 
 import { choiceDialog, progressDialog } from "./dialog.js";
 
@@ -95,7 +95,7 @@ function sameDir(a, b) {
 function countText(counts) {
   const bits = [];
   if (counts.notes) bits.push(`${counts.notes} 篇笔记`);
-  if (counts.canvases) bits.push(`${counts.canvases} 张画布`);
+  if (counts.canvases) bits.push(`${counts.canvases} 个空间`);
   return bits.join("、");
 }
 
@@ -238,7 +238,7 @@ async function switchRoot(target) {
   }
 }
 
-/* 认到了就什么都不显示：这时候用户没事儿可干——转音轨是画布里点播放时顺手做的。
+/* 认到了就什么都不显示：这时候用户没事儿可干——转音轨是空间里点播放时顺手做的。
    只有没认到（或检测本身出错）才摆出修复入口：放哪儿、打开文件夹、重新检测。 */
 async function refreshFfmpeg() {
   showFfmpegError("");

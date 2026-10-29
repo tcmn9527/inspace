@@ -5,7 +5,7 @@
  *   - onChange(color) 拖动/点选时实时回调，调用方直接改卡片内联样式即可（不落库）
  *   - onDone(color)   面板关闭时回调一次，调用方在这里写库
  *   - Esc 视为取消：先把颜色还原成打开时的值，再关闭（不调用 onDone）
- *   - allowAlpha 打开后多一条透明度滑条，颜色以 #rrggbbaa 返回（只有画布用）
+ *   - allowAlpha 打开后多一条透明度滑条，颜色以 #rrggbbaa 返回（只有空间用）
  *
  * 面板是挂在 body 下的独立浮层，不是 #ctx-menu 的子节点：点它内部既不会触发
  * 「点外部关菜单」，也不会被右键菜单重建时误伤。同一时刻只会存在一个面板。 */
@@ -107,7 +107,7 @@ export function closeColorPicker(commit = true) {
  * @param {string[]} [opts.presets] 预设色块（点一下即用）
  * @param {boolean} [opts.allowNone] 显示透明项，点击后回调空字符串并关闭
  * @param {string} [opts.noneLabel] 透明项的文案（填充用「无填充」，边框用「透明」）
- * @param {boolean} [opts.allowAlpha] 显示透明度滑条，结果带 alpha（画布用）
+ * @param {boolean} [opts.allowAlpha] 显示透明度滑条，结果带 alpha（空间用）
  * @param {(color: string) => void} [opts.onChange] 实时预览
  * @param {(color: string) => void} [opts.onDone] 关闭时落库
  */

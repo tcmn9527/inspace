@@ -1,4 +1,4 @@
-/* 无限画布。
+/* 无限空间。
  *
  * 结构：stage（视口，overflow hidden）> world（translate + scale）+ 选择框层。
  * 图元坐标全部是世界坐标；屏幕坐标只在选中框和鼠标换算时出现。
@@ -11,7 +11,7 @@
  *   - 粘贴图片/纯文本时落在鼠标当前位置。
  *   - 右键图元：边框色、填充色（文字还有文字色）、删除。
  *
- * 数据落在后端给的画布文件夹里：图元是 items.json，图片在 images/。 */
+ * 数据落在后端给的空间文件夹里：图元是 items.json，图片在 images/。 */
 
 import { closeColorPicker, openColorPicker } from "./color-picker.js";
 import { confirmDialog, choiceDialog, promptDialog, CLOSE_X_SVG } from "./dialog.js";
@@ -43,6 +43,7 @@ import {
   absolutePathOf,
   capturePagePin,
   connectorGeometry,
+  connectorLabelPoint,
   createConnectorElement,
   createItemElement,
   fileBlockSize,
@@ -69,6 +70,7 @@ import {
   stretchEbookPage,
   syncConnectorElement,
   syncItemElement,
+  TEXT_DEFAULT_RADIUS,
   TEXT_DEFAULT_WIDTH,
   toPersisted,
   VIDEO_DEFAULT_HEIGHT,
@@ -85,7 +87,6 @@ const MAX_SCALE = 4;
 /* 每次缩放走 2 个百分点：1 点太慢，从 100% 挪到别处要点十几下 */
 const ZOOM_STEP = 0.02;
 const STORAGE_KEY = "workbench.canvas";
-const GRID_UNIT = 24;
 const PRESETS = [
   "#ffffff",
   "#9a9a9a",
@@ -130,7 +131,7 @@ const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "o
 const VIDEO_EXTS = new Set(["mp4", "m4v", "webm", "mkv", "mov"]);
 /* Markdown 不当附件看待：拖进来抄成正文，直接变成一个能编辑的笔记块 */
 const MARKDOWN_EXTS = new Set(["md", "markdown"]);
-/* epub/mobi 能就地在画布上读；azw/azw3 这一版读不了，仍旧按附件收进来 */
+/* epub/mobi 能就地在空间上读；azw/azw3 这一版读不了，仍旧按附件收进来 */
 const EBOOK_EXTS = new Set(["epub", "mobi"]);
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -142,6 +143,8 @@ let current = null; // { meta, camera, items }
 /* 选中的块：平时点选只会有一个，Ctrl 点选往里加/摘，Ctrl+A 全往里倒 */
 let selectedIds = new Set();
 let editingId = null;
+/* 连线中间文字的编辑态 { itemId, el, input, point, original } */
+let edgeLabelEditor = null;
 let tool = "select";
 let drag = null;
 let itemEls = new Map();
@@ -150,14 +153,14 @@ let audioCache = new Map();
 /* 视频只缓存 asset 地址（一串字符），不缓存任何字节 */
 let videoCache = new Map();
 let noteImageCache = new Map();
-/* 文本块只读预览：缓存后端解好码的开头一段，切画布就清空重来。
+/* 文本块只读预览：缓存后端解好码的开头一段，切空间就清空重来。
    键带上存在方式，免得同一个路径的拷贝态和引用态串了。 */
 let filePreviewCache = new Map();
 const previewKey = (item) => `${item.linked ? "L" : "C"}|${item.src}`;
 /* PDF 块的 asset 地址：一份文件问后端一次（顺带开的那次读权限也就够了），
    翻页和拖角缩放重画都复用这条地址 */
 let pdfUrlCache = new Map();
-/* 书的目录进画布只读一次，翻章不用再解析整本；键和预览一样带上存在方式 */
+/* 书的目录进空间只读一次，翻章不用再解析整本；键和预览一样带上存在方式 */
 let ebookTocCache = new Map();
 const ebookKey = (canvasId, item) => `${canvasId}|${item.linked}|${item.src}`;
 let noteEditor = null; // 当前笔记块的编辑态 { itemId, el, box, textarea, editor }
@@ -165,7 +168,7 @@ let noteEditor = null; // 当前笔记块的编辑态 { itemId, el, box, textare
 let noteWriteBack = false;
 /* 已经弹过「改哪一份」的块，双击连着触发两次不至于叠出两层弹层 */
 let noteAskId = null;
-/* 音视频块指向的文件找不到了（引用查原片、拷贝查副本）：块留在原地，改成丢文件卡。每次进画布重新查。 */
+/* 音视频块指向的文件找不到了（引用查原片、拷贝查副本）：块留在原地，改成丢文件卡。每次进空间重新查。 */
 let mediaMissing = new Set();
 let modalOpen = false;
 let lastPointer = { x: 0, y: 0, inside: false };
@@ -284,7 +287,7 @@ export function initCanvas() {
     "wheel",
     (e) => {
       if (!active || !current) return;
-      /* 全屏看片时滚轮是给影片的，别去动背后画布的缩放 */
+      /* 全屏看片时滚轮是给影片的，别去动背后空间的缩放 */
       if (document.fullscreenElement) return;
       const rect = ui.stage.getBoundingClientRect();
       if (e.ctrlKey || e.metaKey) {
@@ -294,7 +297,7 @@ export function initCanvas() {
         zoomAt(e.clientX - rect.left, e.clientY - rect.top, current.camera.scale + step);
         return;
       }
-      /* 滚轮落在块的滚动区上就交给块自己滚（不 preventDefault，浏览器原生滚动），滚到头也不动画布 */
+      /* 滚轮落在块的滚动区上就交给块自己滚（不 preventDefault，浏览器原生滚动），滚到头也不动空间 */
       if (hasScrollableAncestor(e.target, Math.abs(e.deltaY) >= Math.abs(e.deltaX))) return;
       e.preventDefault();
       current.camera.x -= e.deltaX;
@@ -368,13 +371,13 @@ export function leaveCanvas() {
   /* 面板已经不显示了还让方向键挪视野，到了别的页面会莫名其妙 */
   blurMinimapFocus();
   pauseMedia();
-  /* 全屏壳躲在被隐藏的画布视图里时浏览器不会自己退，切走要手动收，
+  /* 全屏壳躲在被隐藏的空间视图里时浏览器不会自己退，切走要手动收，
      不然下一页会被撑到整块屏幕的尺寸 */
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   modalOpen = false;
   activePickerClose?.();
   activePickerClose = null;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   closeColorPicker(true);
   closeMenu();
   void flushBlockContents();
@@ -382,7 +385,7 @@ export function leaveCanvas() {
   flushCamera();
 }
 
-/* ---------- 画布列表 / 新建 / 切换 ---------- */
+/* ---------- 空间列表 / 新建 / 切换 ---------- */
 
 async function loadList() {
   try {
@@ -396,7 +399,7 @@ async function loadList() {
 async function switchTo(id) {
   pauseMedia();
   if (!current || current.meta.id !== id) {
-    if (editingId) commitEditing();
+    if (editingId || edgeLabelEditor) commitEditing();
     await flushBlockContents();
     await flushItems();
     await flushCamera();
@@ -436,7 +439,7 @@ async function switchTo(id) {
     for (const item of staleNotes) {
       renderMissing(itemEls.get(item.id), item, current.meta.path || "");
     }
-    /* 自己那份内容文件读不动的便签/笔记同样是丢了，只是丢的是画布目录里的那份 */
+    /* 自己那份内容文件读不动的便签/笔记同样是丢了，只是丢的是空间目录里的那份 */
     for (const item of brokenContent) {
       renderMissing(itemEls.get(item.id), item, current.meta.path || "");
     }
@@ -486,7 +489,7 @@ function sanitizeCamera(raw) {
   };
 }
 
-/* 这张画布复制的连接线属性；三项齐全才算「复制过」，缺一项就当没复制过 */
+/* 这个空间复制的连接线属性；三项齐全才算「复制过」，缺一项就当没复制过 */
 function normalizeConnectorPreset(raw) {
   if (!raw || typeof raw !== "object") return null;
   const color = typeof raw.color === "string" && raw.color ? raw.color : "";
@@ -509,7 +512,7 @@ async function loadImages() {
   await Promise.all(tasks);
 }
 
-/* 音视频：进画布先问一句文件还在不在——引用态查原片，拷贝态查画布里的副本。
+/* 音视频：进空间先问一句文件还在不在——引用态查原片，拷贝态查空间里的副本。
    在就照常显示，没了块还留在原地，只把内容换成丢文件卡（音视频是点开才加载的，这里不提前拉数据）。 */
 async function refreshMediaFiles() {
   if (!current) return new Set();
@@ -530,7 +533,7 @@ async function refreshMediaFiles() {
   return missing;
 }
 
-/* 音视频都是按需加载的，切画布/离开时把还在响的播放器停掉 */
+/* 音视频都是按需加载的，切空间/离开时把还在响的播放器停掉 */
 function pauseMedia() {
   if (!ui || !ui.world) return;
   for (const media of ui.world.querySelectorAll("audio, video")) media.pause();
@@ -539,7 +542,7 @@ function pauseMedia() {
 function updateChrome() {
   const hasCanvas = Boolean(current);
   ui.page.classList.toggle("no-canvas", !hasCanvas);
-  ui.nameText.textContent = current?.meta.name || "画布";
+  ui.nameText.textContent = current?.meta.name || "空间";
   ui.empty.hidden = hasCanvas;
   if (!hasCanvas) {
     ui.world.textContent = "";
@@ -547,8 +550,6 @@ function updateChrome() {
     previewPath = null;
     itemEls.clear();
     ui.endpointLayer.textContent = "";
-    ui.stage.style.backgroundSize = `${GRID_UNIT}px ${GRID_UNIT}px`;
-    ui.stage.style.backgroundPosition = "0 0";
     ui.zoomValue.value = "100%";
     refreshMinimap();
   }
@@ -556,6 +557,7 @@ function updateChrome() {
 
 function showEmpty() {
   pauseMedia();
+  if (edgeLabelEditor) finishEdgeLabelEdit(false);
   current = null;
   selectedIds = new Set();
   editingId = null;
@@ -575,9 +577,9 @@ function showEmpty() {
 
 async function createFlow() {
   const name = await promptDialog({
-    title: "新建画布",
-    label: "画布名字",
-    value: "新画布",
+    title: "新建空间",
+    label: "空间名字",
+    value: "新空间",
     okText: "创建",
   });
   if (!name) return;
@@ -593,13 +595,13 @@ async function createFlow() {
 async function renameFlow() {
   if (!current) return;
   const name = await promptDialog({
-    title: "重命名画布",
-    label: "画布名字",
+    title: "重命名空间",
+    label: "空间名字",
     value: current.meta.name,
     okText: "重命名",
   });
   if (!name || name === current.meta.name) return;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   await flushBlockContents();
   await flushItems();
   await flushCamera();
@@ -617,13 +619,13 @@ async function renameFlow() {
 async function deleteFlow() {
   if (!current) return;
   const ok = await confirmDialog({
-    title: "删除画布",
+    title: "删除空间",
     message: `「${current.meta.name}」的整个文件夹会被移到系统回收站，之后仍可找回。`,
     okText: "删除",
     danger: true,
   });
   if (!ok) return;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   await flushBlockContents();
   await flushItems();
   await flushCamera();
@@ -646,13 +648,13 @@ function openSwitcher() {
     onClick: () => switchTo(canvas.id),
   }));
   if (entries.length) entries.push("-");
-  entries.push({ label: "新建画布", onClick: createFlow });
+  entries.push({ label: "新建空间", onClick: createFlow });
   if (current) {
-    entries.push({ label: "重命名画布", onClick: renameFlow });
+    entries.push({ label: "重命名空间", onClick: renameFlow });
     entries.push({ label: "在资源管理器中显示", onClick: revealFlow });
-    entries.push({ label: "删除画布", danger: true, onClick: deleteFlow });
+    entries.push({ label: "删除空间", danger: true, onClick: deleteFlow });
   }
-  openMenu(rect.left, rect.bottom + 6, entries, { label: "画布" });
+  openMenu(rect.left, rect.bottom + 6, entries, { label: "空间" });
 }
 
 async function revealFlow() {
@@ -689,16 +691,9 @@ function applyCamera() {
     "transform",
     `translate(${camera.x} ${camera.y}) scale(${camera.scale})`,
   );
-  const raw = GRID_UNIT * camera.scale;
-  let gap = raw;
-  while (gap < 12) gap *= 2;
-  while (gap > 96) gap /= 2;
-  const offsetX = ((camera.x % gap) + gap) % gap;
-  const offsetY = ((camera.y % gap) + gap) % gap;
-  ui.stage.style.backgroundSize = `${gap}px ${gap}px`;
-  ui.stage.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
   syncZoomLabel();
   updateSelection();
+  positionEdgeLabelEditor();
 }
 
 function zoomLabel() {
@@ -1053,9 +1048,17 @@ function drawSelectionFor(item, el, lone) {
     return;
   }
 
-  /* 一堆块同时缩放没意义，四角把手只给单选那一块 */
+  /* 一堆块同时缩放没意义，缩放把手只给单选那一块 */
   if (!lone) return;
   const box = addOverlayBox(el, "canvas-sel-box");
+  /* 四边先放、四角后放：角上那一小块归角缩放，边上其余位置归边缩放 */
+  for (const dir of ["n", "e", "s", "w"]) {
+    const handle = document.createElement("span");
+    handle.className = `canvas-handle canvas-handle-${dir}`;
+    handle.dataset.handle = "edge";
+    handle.dataset.dir = dir;
+    box.append(handle);
+  }
   for (const dir of ["nw", "ne", "sw", "se"]) {
     const handle = document.createElement("span");
     handle.className = `canvas-handle canvas-handle-${dir}`;
@@ -1087,13 +1090,15 @@ function addOverlayBox(el, className) {
 
 function onStagePointerDown(e) {
   if (!active || !current || e.button !== 0) return;
-  /* 全屏时画面还挂在原来那个块上，事件会顺着 DOM 冒泡回画布：
-     这时点的是影片，不是画布，别去挪那块的位置 */
+  /* 全屏时画面还挂在原来那个块上，事件会顺着 DOM 冒泡回空间：
+     这时点的是影片，不是空间，别去挪那块的位置 */
   if (document.fullscreenElement) return;
-  /* 右下角鸟瞰窗自己管自己的按下（拖视窗/点跳/收起），别当成画布平移 */
+  /* 右下角鸟瞰窗自己管自己的按下（拖视窗/点跳/收起），别当成空间平移 */
   if (e.target.closest?.(".canvas-minimap, .canvas-minimap-key")) return;
-  /* 回到画布上操作，方向键就不再是挪视野 */
+  /* 回到空间上操作，方向键就不再是挪视野 */
   blurMinimapFocus();
+  /* 连线文字的输入框自己收指针：选字、挪光标，不是平移空间 */
+  if (edgeLabelEditor && e.target === edgeLabelEditor.input) return;
   const target = e.target.closest?.(".canvas-item, .canvas-connector");
 
   /* 文本块的编辑框里按下是给输入框的：选字、拖滚动条，不该顺手把这块拖走 */
@@ -1315,10 +1320,7 @@ function startDraw(e) {
   let item = null;
   if (tool === "rect" || tool === "ellipse") item = makeBox(tool, start.x, start.y, start.x, start.y);
   else if (tool === "line" || tool === "arrow") item = makeLine(tool, start.x, start.y, start.x, start.y);
-  else if (tool === "text") {
-    item = makeText(start.x, start.y, 40);
-    item.bordered = true;
-  }
+  else if (tool === "text") item = makeText(start.x, start.y, 40);
   if (!item) return;
 
   e.preventDefault();
@@ -1471,14 +1473,24 @@ function onWindowPointerMove(e) {
   } else if (drag.kind === "resize") {
     const origin = drag.origin;
     if (item.type === "image") {
-      const width =
-        drag.dir.includes("e") ? origin.w + dx : origin.w - dx;
-      const w = Math.max(8, width);
-      const h = w / drag.aspect;
-      item.w = w;
-      item.h = h;
-      item.x = drag.dir.includes("w") ? origin.x + origin.w - w : origin.x;
-      item.y = drag.dir.includes("n") ? origin.y + origin.h - h : origin.y;
+      if (drag.dir === "n" || drag.dir === "s") {
+        /* 上下边拖：以高度为准等比缩放，水平居中，免得图被拉变形 */
+        const h = Math.max(8, drag.dir === "n" ? origin.h - dy : origin.h + dy);
+        const w = h * drag.aspect;
+        item.w = w;
+        item.h = h;
+        item.x = origin.x + (origin.w - w) / 2;
+        item.y = drag.dir === "n" ? origin.y + origin.h - h : origin.y;
+      } else {
+        const width =
+          drag.dir.includes("e") ? origin.w + dx : origin.w - dx;
+        const w = Math.max(8, width);
+        const h = w / drag.aspect;
+        item.w = w;
+        item.h = h;
+        item.x = drag.dir.includes("w") ? origin.x + origin.w - w : origin.x;
+        item.y = drag.dir.includes("n") ? origin.y + origin.h - h : origin.y;
+      }
     } else if (item.type === "text") {
       /* 拖角：左右改宽度，上下改最小高度（内容再多仍会自动长高） */
       let w = origin.w;
@@ -1665,7 +1677,7 @@ function startConnect(e) {
   if (!item) return;
   e.preventDefault();
   e.stopPropagation();
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   drag = {
     kind: "connect",
     from: { item: item.id, side: port.dataset.side },
@@ -1772,7 +1784,7 @@ function finishConnect(finished) {
   if (!targetId) return;
   const connector = makeConnector(finished.from.item, finished.from.side, targetId);
   connector.to.side = finished.targetSide || "auto";
-  /* 这张画布复制过属性的话，新线直接照复制来的那套长 */
+  /* 这个空间复制过属性的话，新线直接照复制来的那套长 */
   const preset = current.connectorPreset;
   if (preset) {
     connector.color = preset.color;
@@ -1804,10 +1816,16 @@ function finishConnectEnd(finished) {
 
 function onStageDoubleClick(e) {
   if (!active || !current) return;
-  const target = e.target.closest?.(".canvas-item");
+  const target = e.target.closest?.(".canvas-item, .canvas-connector");
   if (!target) return;
   const item = findItem(target.dataset.id);
   if (!item) return;
+  if (item.type === "connector") {
+    e.preventDefault();
+    setTool("select", true);
+    startEdgeLabelEdit(item.id);
+    return;
+  }
   if (!["text", "sticky", "note", "file"].includes(item.type)) return;
   /* 非文本的附件没有正文可编，双击仍然什么都不做（找文件走右键「在文件夹中显示」） */
   if (item.type === "file" && !isFileEditable(item)) return;
@@ -1824,9 +1842,13 @@ function onStageContextMenu(e) {
   if (!active || !current) return;
   /* 全屏时菜单挂在 body 上，只会渲染全屏子树，弹了也看不见 */
   if (document.fullscreenElement) return;
+  if (edgeLabelEditor && e.target === edgeLabelEditor.input) {
+    e.preventDefault();
+    return;
+  }
   e.preventDefault();
   e.stopPropagation();
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   const target = e.target.closest?.(".canvas-item, .canvas-connector");
   if (!target) {
     openBlankMenu(e.clientX, e.clientY);
@@ -1861,6 +1883,9 @@ function openItemMenu(item, x, y) {
       label: "填充颜色",
       onClick: pick("fillColor", none),
     });
+    if (item.type === "rect") {
+      entries.push({ label: "圆角", onClick: () => openRadiusDialog(item) });
+    }
   } else if (item.type === "line" || item.type === "arrow") {
     entries.push({ label: "线条颜色", onClick: pick("borderColor") });
   } else if (item.type === "text") {
@@ -1880,8 +1905,9 @@ function openItemMenu(item, x, y) {
       label: "边框颜色",
       onClick: pick("borderColor", none),
     });
+    entries.push({ label: "圆角", onClick: () => openRadiusDialog(item) });
   } else if (item.type === "connector") {
-    /* 这张画布还没复制过属性：第一次右键的这条线，它当前的属性就是初始值 */
+    /* 这个空间还没复制过属性：第一次右键的这条线，它当前的属性就是初始值 */
     if (!current?.connectorPreset) copyConnectorPreset(item);
     entries.push({
       label: "线条颜色",
@@ -1923,16 +1949,38 @@ function openItemMenu(item, x, y) {
       label: "背景颜色",
       onClick: () => pickStickyColor(item, "color", x, y),
     });
+    entries.push({
+      label: "边框颜色",
+      onClick: pick("borderColor", { save: () => persistSticky(item) }),
+    });
   } else if (item.type === "note") {
     entries.push({ label: "编辑", onClick: () => startNoteEdit(item.id) });
-  } else if (item.type === "file" && isFileEditable(item)) {
-    entries.push({ label: "编辑", onClick: () => startFileEdit(item.id) });
+    entries.push({
+      label: "边框颜色",
+      onClick: pick("borderColor"),
+    });
+    entries.push({
+      label: "背景颜色",
+      onClick: pick("fillColor", none),
+    });
+  } else if (item.type === "file") {
+    if (isFileEditable(item)) {
+      entries.push({ label: "编辑", onClick: () => startFileEdit(item.id) });
+    }
+    entries.push({
+      label: "边框颜色",
+      onClick: pick("borderColor"),
+    });
+    entries.push({
+      label: "背景颜色",
+      onClick: pick("fillColor", none),
+    });
   }
   /* 属性：便签报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行 */
   if (PROP_KIND[item.type]) {
     entries.push({ label: "属性", onClick: () => openItemProps(item) });
   }
-  /* 画布不替用户开文件，只把他带到那份文件躺着的地方 */
+  /* 空间不替用户开文件，只把他带到那份文件躺着的地方 */
   if (revealTarget(item)) {
     entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
   }
@@ -2009,7 +2057,7 @@ function showPropsCard(item) {
   });
 }
 
-/* 便签文字色 / 背景色：和便签墙用同一套预设；改动只落在画布里的副本上。 */
+/* 便签文字色 / 背景色：和便签墙用同一套预设；改动只落在空间里的副本上。 */
 function pickStickyColor(item, field, x, y) {
   const isText = field === "textColor";
   const initial = item[field] || (isText ? STICKY_DEFAULT_TEXT : STICKY_DEFAULT_COLOR);
@@ -2076,9 +2124,9 @@ function moveLayer(item, dir) {
 }
 
 function openBlankMenu(x, y) {
-  const entries = [{ label: "新建画布", onClick: createFlow }];
+  const entries = [{ label: "新建空间", onClick: createFlow }];
   if (current) {
-    /* 刚复制过块才给这一条：空白处右键主要是画布级操作，粘不上去时不摆个死项 */
+    /* 刚复制过块才给这一条：空白处右键主要是空间级操作，粘不上去时不摆个死项 */
     if (copiedBlocks) {
       entries.push({ label: "粘贴", onClick: pasteCopiedBlocks });
     }
@@ -2090,7 +2138,7 @@ function openBlankMenu(x, y) {
         scheduleCameraSave();
       },
     });
-    entries.push({ label: "重命名画布", onClick: renameFlow });
+    entries.push({ label: "重命名空间", onClick: renameFlow });
     entries.push({ label: "在资源管理器中显示", onClick: revealFlow });
   }
   openMenu(x, y, entries);
@@ -2122,6 +2170,23 @@ function setFontSize(item, size) {
     item.h = el.offsetHeight;
   }
   updateSelection();
+  scheduleItemsSave();
+}
+
+/* 圆角按像素填，0 就是直角；CSS 会把超过半边的值自己收住，不用另外夹 */
+async function openRadiusDialog(item) {
+  const fallback = item.type === "text" ? TEXT_DEFAULT_RADIUS : 0;
+  const value = await promptDialog({
+    title: item.type === "text" ? "文字圆角" : "矩形圆角",
+    label: "圆角半径（px，0 为直角）",
+    value: String(Number.isFinite(item.radius) ? item.radius : fallback),
+    okText: "设置",
+    validate: (text) => (/^\d{1,4}$/.test(text) ? null : "填 0 到 9999 的整数"),
+  });
+  if (value === null) return;
+  item.radius = Number(value);
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
   scheduleItemsSave();
 }
 
@@ -2202,7 +2267,7 @@ function connectorValueMark(item, prop) {
     : { trailing: CONNECTOR_ICONS[value] };
 }
 
-/* 把这条线当前的三项属性复制到画布上，之后新连的线和「快速设置」都照它来 */
+/* 把这条线当前的三项属性复制到空间上，之后新连的线和「快速设置」都照它来 */
 function copyConnectorPreset(item) {
   if (!current) return;
   const preset = {
@@ -2286,7 +2351,7 @@ function applyColor(item, prop, color) {
   if (el) syncItemElement(el, item);
 }
 
-function pickColor(item, prop, x, y, { allowNone = false, noneLabel = "无填充" } = {}) {
+function pickColor(item, prop, x, y, { allowNone = false, noneLabel = "无填充", save } = {}) {
   const seed = prop === "fillColor" ? "#ffffff" : prop === "color" ? "#ffffff" : "#9a9a9a";
   /* 打开后直接点外面关掉不算改色：否则图片这种默认无边框的图元会被填上兜底色 */
   let touched = false;
@@ -2306,7 +2371,8 @@ function pickColor(item, prop, x, y, { allowNone = false, noneLabel = "无填充
     onDone: (color) => {
       if (!touched) return;
       applyColor(item, prop, color);
-      scheduleItemsSave();
+      /* 便签的颜色不归 items.json 管，改完要写回它自己那份 json */
+      (save || scheduleItemsSave)();
     },
   });
 }
@@ -2358,7 +2424,7 @@ function deleteItems(ids) {
       if (noteEditor?.itemId === item.id) noteEditor = null;
       clearTimeout(noteTimers.get(item.id));
       noteTimers.delete(item.id);
-      /* 引用块的原文件不归这里管，删的是画布自己那份 .md */
+      /* 引用块的原文件不归这里管，删的是空间自己那份 .md */
       if (!item.linked) store.deleteNote(current.meta.id, item.id).catch(() => {});
     }
     /* 拷贝块的副本跟着块一起进回收站；引用块只断链接，原文件在用户手里不动 */
@@ -2383,11 +2449,93 @@ function removeItemFromDom(id) {
   itemEls.delete(id);
 }
 
+/* ---------- 连线文字 ----------
+   双击连线，在它中间浮出一个输入框就地写；文字本身画在 SVG 里跟着线走。 */
+
+const EDGE_LABEL_FONT = 13;
+
+function startEdgeLabelEdit(id) {
+  if (edgeLabelEditor?.itemId === id) return;
+  if (editingId || edgeLabelEditor) commitEditing();
+  if (edgeLabelEditor) commitEdgeLabelEdit();
+  const item = findItem(id);
+  const el = itemEls.get(id);
+  if (!item || item.type !== "connector" || !el) return;
+  const point = connectorLabelPoint(el, connectorGeometry(item, boundsOfItem));
+  if (!point) return;
+  select(id);
+  el.classList.add("is-label-editing");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "canvas-edge-label-input";
+  input.spellcheck = false;
+  input.placeholder = "连线文字";
+  input.value = item.label || "";
+  ui.stage.append(input);
+  edgeLabelEditor = { itemId: id, el, input, point, original: item.label || "" };
+  input.addEventListener("input", sizeEdgeLabelInput);
+  input.addEventListener("keydown", onEdgeLabelKeyDown);
+  input.addEventListener("blur", commitEdgeLabelEdit);
+  positionEdgeLabelEditor();
+  input.focus({ preventScroll: true });
+  input.select();
+}
+
+/* 跟着相机走：编辑中缩放、平移时输入框还钉在连线中间 */
+function positionEdgeLabelEditor() {
+  if (!edgeLabelEditor || !current) return;
+  const camera = current.camera;
+  const { input, point } = edgeLabelEditor;
+  input.style.left = `${camera.x + point.x * camera.scale}px`;
+  input.style.top = `${camera.y + point.y * camera.scale}px`;
+  input.style.fontSize = `${Math.max(9, EDGE_LABEL_FONT * camera.scale)}px`;
+  sizeEdgeLabelInput();
+}
+
+function sizeEdgeLabelInput() {
+  if (!edgeLabelEditor) return;
+  const { input } = edgeLabelEditor;
+  const font = parseFloat(input.style.fontSize) || EDGE_LABEL_FONT;
+  input.style.width = `${Math.min(320, Math.max(90, (input.value.length + 2) * font * 0.9))}px`;
+}
+
+function onEdgeLabelKeyDown(e) {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    commitEdgeLabelEdit();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    finishEdgeLabelEdit(false);
+  }
+}
+
+function commitEdgeLabelEdit() {
+  finishEdgeLabelEdit(true);
+}
+
+function finishEdgeLabelEdit(save) {
+  if (!edgeLabelEditor) return;
+  const { itemId, el, input, original } = edgeLabelEditor;
+  edgeLabelEditor = null;
+  const value = input.value;
+  input.removeEventListener("input", sizeEdgeLabelInput);
+  input.removeEventListener("keydown", onEdgeLabelKeyDown);
+  input.removeEventListener("blur", commitEdgeLabelEdit);
+  input.remove();
+  el.classList.remove("is-label-editing");
+  const item = findItem(itemId);
+  if (!item) return;
+  item.label = save ? value.replace(/\s+/g, " ").trim() : original;
+  syncConnector(item);
+  scheduleItemsSave();
+}
+
 /* ---------- 文字编辑 ---------- */
 
 function startTextEdit(id) {
   if (editingId === id) return;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   const item = findItem(id);
   const el = itemEls.get(id);
   if (!item || !el || item.type !== "text") return;
@@ -2440,10 +2588,11 @@ function onTextPaste(e) {
 }
 
 function onTextBlur() {
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
 }
 
 function commitEditing() {
+  if (edgeLabelEditor) commitEdgeLabelEdit();
   if (!editingId) return;
   const editing = findItem(editingId);
   if (editing?.type === "note") {
@@ -2479,9 +2628,9 @@ function commitEditing() {
 }
 
 /* ---------- 便签块 / 笔记块的内容文件 ----------
-   一块一份，住在画布自己目录里：便签 stickies/<块id>.json，笔记 notes/<块id>.md。
+   一块一份，住在空间自己目录里：便签 stickies/<块id>.json，笔记 notes/<块id>.md。
    items.json 只留位置和层级，正文不再内嵌。跟数据根顶层那两个旧目录、跟笔记页都脱钩——
-   画布上改这张便签，首页那张不动，反过来也一样。 */
+   空间上改这张便签，首页那张不动，反过来也一样。 */
 
 const CONTENT_WRITE_DELAY = 400;
 let stickyTimers = new Map(); // 块 id -> 还没落盘的写盘定时器
@@ -2494,6 +2643,7 @@ function stickyFileOf(item) {
     body: item.text || "",
     color: item.color || STICKY_DEFAULT_COLOR,
     textColor: item.textColor || STICKY_DEFAULT_TEXT,
+    borderColor: item.borderColor || "",
     width: item.w,
     height: item.h,
   };
@@ -2503,6 +2653,7 @@ function applyStickyFile(item, file) {
   item.text = typeof file.body === "string" ? file.body : "";
   item.color = file.color || STICKY_DEFAULT_COLOR;
   item.textColor = file.textColor || STICKY_DEFAULT_TEXT;
+  item.borderColor = typeof file.borderColor === "string" ? file.borderColor : "";
   if (Number.isFinite(file.width)) item.w = Math.max(STICKY_MIN_WIDTH, file.width);
   if (Number.isFinite(file.height)) item.h = Math.max(STICKY_MIN_HEIGHT, file.height);
 }
@@ -2539,7 +2690,7 @@ function persistNote(item) {
   });
 }
 
-/* 切画布、重命名、退出页面前把还没写完的正文补上，最后一次编辑不至于丢掉 */
+/* 切空间、重命名、退出页面前把还没写完的正文补上，最后一次编辑不至于丢掉 */
 async function flushBlockContents() {
   const canvasId = current?.meta.id;
   const pending = [
@@ -2605,7 +2756,7 @@ function caretEnd(el) {
 
 function startStickyEdit(id) {
   if (editingId === id) return;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   const item = findItem(id);
   const el = itemEls.get(id);
   if (!item || !el || item.type !== "sticky") return;
@@ -2644,7 +2795,7 @@ function onStickyKeyDown(e) {
 }
 
 function onStickyBlur() {
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
 }
 
 function onStickyPaste(e) {
@@ -2672,7 +2823,7 @@ function commitStickyEditing() {
 }
 
 /* 笔记块内联编辑器：工具栏、撤销重做、粘贴图片全部复用笔记页那一套。
- * 引用块默认只读——双击先问清楚「改源文件 / 转成画布副本 / 算了」，取消就一个字都不动。 */
+ * 引用块默认只读——双击先问清楚「改源文件 / 转成空间副本 / 算了」，取消就一个字都不动。 */
 async function startNoteEdit(id) {
   if (editingId === id) {
     noteEditor?.editor.focus();
@@ -2691,23 +2842,23 @@ async function startNoteEdit(id) {
       mode = await choiceDialog({
         title: "请确认编辑对象",
         message: `「${item.name}」引用的是 ${item.path}。这次编辑要改哪一份？`,
-        note: "改源文件会把正文直接写回那份 .md；复制进画布则把正文收进块里，原文件不动，之后随便改。",
+        note: "改源文件会把正文直接写回那份 .md；复制进空间则把正文收进块里，原文件不动，之后随便改。",
         options: [
           { value: "write", label: "修改源文件", hint: "直接写回那份 Markdown" },
-          { value: "copy", label: "复制进画布", hint: "原文件不动，之后随便改" },
+          { value: "copy", label: "复制进空间", hint: "原文件不动，之后随便改" },
         ],
       });
     } finally {
       noteAskId = null;
     }
-    /* 弹层期间可能切了画布 / 关了页面，块早就不存在了 */
+    /* 弹层期间可能切了空间 / 关了页面，块早就不存在了 */
     if (!current || current.meta.id !== canvasId || !findItem(id)) return;
     if (!mode) return;
     if (mode === "copy") convertNoteToCopy(item);
     else writeBack = true;
   }
 
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   const el = itemEls.get(id);
   if (!item || !el || item.type !== "note") return;
 
@@ -2735,10 +2886,10 @@ async function startNoteEdit(id) {
     const editor = createMarkdownEditor({
       textarea,
       toolbar,
-      /* 引用块贴图会把画布目录下的相对路径写进用户原文件，那份 .md 挪个窝图就全断了。
-         真要贴图就先转成画布副本，图片才跟着块走。 */
+      /* 引用块贴图会把空间目录下的相对路径写进用户原文件，那份 .md 挪个窝图就全断了。
+         真要贴图就先转成空间副本，图片才跟着块走。 */
       saveImage: async (data, ext) => {
-        if (findItem(item.id)?.linked) throw new Error("引用块请先选「复制进画布」再贴图");
+        if (findItem(item.id)?.linked) throw new Error("引用块请先选「复制进空间」再贴图");
         return store.saveCanvasNoteImage(canvasId, item.id, data, ext);
       },
       onChange: (value) => {
@@ -2845,8 +2996,8 @@ function renderNoteBody(item, el) {
   hydrateNoteImages(item, el);
 }
 
-/* 「复制进画布」：正文落到画布自己的 notes/<块id>.md，链接断掉，原 .md 一个字节都不动。
-   图片另说——引用期间本来就禁止贴图，块里不会有指向画布目录的图片路径。 */
+/* 「复制进空间」：正文落到空间自己的 notes/<块id>.md，链接断掉，原 .md 一个字节都不动。
+   图片另说——引用期间本来就禁止贴图，块里不会有指向空间目录的图片路径。 */
 function convertNoteToCopy(item) {
   item.linked = false;
   item.path = "";
@@ -2891,17 +3042,17 @@ async function startFileEdit(id) {
       mode = await choiceDialog({
         title: "请确认编辑对象",
         message: `「${item.name}」引用的是 ${item.src}。这次编辑要改哪一份？`,
-        note: "改源文件会把整份正文写回那个文件；复制进画布则先把副本收进画布，原文件不动，之后随便改。",
+        note: "改源文件会把整份正文写回那个文件；复制进空间则先把副本收进空间，原文件不动，之后随便改。",
         options: [
           { value: "write", label: "修改源文件", hint: "直接写回那份文本" },
-          { value: "copy", label: "复制进画布", hint: "原文件不动，编辑画布里的副本" },
+          { value: "copy", label: "复制进空间", hint: "原文件不动，编辑空间里的副本" },
         ],
       });
     } finally {
       modalOpen = false;
       fileAskId = null;
     }
-    /* 弹层期间可能切了画布 / 关了页面，块早就不存在了 */
+    /* 弹层期间可能切了空间 / 关了页面，块早就不存在了 */
     if (!current || current.meta.id !== canvasId || !findItem(id)) return;
     if (!mode) return;
     if (mode === "copy" && !(await copyFileBlockIntoCanvas(findItem(id)))) return;
@@ -2919,7 +3070,7 @@ async function startFileEdit(id) {
   openFileEditor(id, el, body);
 }
 
-/* 「复制进画布」：把副本收进 files/，块改指副本，原文件一个字节都不动。 */
+/* 「复制进空间」：把副本收进 files/，块改指副本，原文件一个字节都不动。 */
 async function copyFileBlockIntoCanvas(item) {
   if (!item || !current) return false;
   const canvasId = current.meta.id;
@@ -3024,7 +3175,7 @@ async function closeFileEdit() {
   return true;
 }
 
-/* 切画布、关页面、重画整张画布、删块：编辑框跟着没了，稿子仍要落盘。
+/* 切空间、关页面、重画整个空间、删块：编辑框跟着没了，稿子仍要落盘。
    这几处调用点后面都跟着把整块 DOM 换掉，所以只摘状态、不收尾，写盘在后台跑完。 */
 function flushFileEditor() {
   const state = fileEditor;
@@ -3050,7 +3201,7 @@ async function persistFileEdit(state) {
       modalOpen = true;
       const overwrite = await confirmDialog({
         title: "原文件已经变了",
-        message: `「${state.item.name}」在你编辑期间被别的程序改过。要用画布里这份覆盖吗？`,
+        message: `「${state.item.name}」在你编辑期间被别的程序改过。要用空间里这份覆盖吗？`,
         okText: "覆盖",
         cancelText: "不覆盖",
         danger: true,
@@ -3064,7 +3215,7 @@ async function persistFileEdit(state) {
     state.body = { ...state.body, text, stamp: result.stamp || "" };
     state.refreshed = true;
     filePreviewCache.delete(previewKey(state.item));
-    /* 画布已经切走时不碰 items：那份 items 不再会落盘，改了只会让内存和盘上对不上 */
+    /* 空间已经切走时不碰 items：那份 items 不再会落盘，改了只会让内存和盘上对不上 */
     if (current?.meta.id === state.canvasId) {
       state.item.size = Number(result.size) || state.item.size;
       scheduleItemsSave();
@@ -3086,9 +3237,9 @@ function refreshFileBlock(item) {
   updateSelection();
 }
 
-/* 引用块的正文只是显示缓存，进画布时现读一次原文件，用户在外面改了也能看到。
+/* 引用块的正文只是显示缓存，进空间时现读一次原文件，用户在外面改了也能看到。
  * 读不到就当原文件没了：块和最后一次读到的正文都留着，只把角标换成那句话，
- * 别把整张画布卡在这。返回这些读不到的块，renderAll 之后再改角标。 */
+ * 别把整个空间卡在这。返回这些读不到的块，renderAll 之后再改角标。 */
 async function refreshLinkedNotes() {
   if (!current) return [];
   const stale = [];
@@ -3149,7 +3300,7 @@ function splitDataUrl(dataUrl) {
   return { data: dataUrl.slice(comma + 1), ext };
 }
 
-/* 把原笔记里的本地图片读出来，复制进画布自己的 notes/<块id>/，返回映射。 */
+/* 把原笔记里的本地图片读出来，复制进空间自己的 notes/<块id>/，返回映射。 */
 async function snapshotNoteImages(canvasId, item) {
   const host = document.createElement("div");
   host.innerHTML = renderMarkdown(item.source);
@@ -3213,9 +3364,9 @@ async function hydrateNoteImages(item, el) {
 }
 
 /* ---------- 复制 / 粘贴块 ----------
-   Ctrl+C 存下这批块的一份快照（连它来自哪张画布一起记），Ctrl+V 落一批全新的块。
+   Ctrl+C 存下这批块的一份快照（连它来自哪个空间一起记），Ctrl+V 落一批全新的块。
    便签和笔记各带上自己那份 json / .md，拷贝态媒体真再拷一份副本，引用态还是指着同一份原文件；
-   连线不复制。同画布落在原块右下方一格，跨画布跟着鼠标落。 */
+   连线不复制。同空间落在原块右下方一格，跨空间跟着鼠标落。 */
 
 const BLOCK_CLIPBOARD = "workbench.canvas.blocks";
 const PASTE_OFFSET = 24;
@@ -3237,15 +3388,15 @@ function selectionBox(items) {
 
 /* 粘出去的块不能跟原块共用同一份文件——删一块会把另一块的副本一起带走，
    指着用户自己原文件的引用块还会让人以为动的是两份东西。
-   所以媒体一律真再拷一份，引用态那块粘过来就地转成画布自己的副本。
-   返回 false 表示这块落不了地（原文件都找不着），只报错，不摆一块假的上画布。 */
+   所以媒体一律真再拷一份，引用态那块粘过来就地转成空间自己的副本。
+   返回 false 表示这块落不了地（原文件都找不着），只报错，不摆一块假的上空间。 */
 async function landBlock(item, fromId, sourceId) {
   const canvasId = current.meta.id;
   /* 便签的正文由 placeBlock 写成新块自己的 json，这里什么都不用做 */
   if (item.type === "sticky") return true;
 
   if (item.type === "note") {
-    /* 引用外部 .md 的那一块，复制出来是画布里的新副本，不再连着原文件 */
+    /* 引用外部 .md 的那一块，复制出来是空间里的新副本，不再连着原文件 */
     if (item.linked) {
       item.linked = false;
       item.path = "";
@@ -3292,7 +3443,7 @@ function copyItems(ids) {
   };
   /* 后端认的是 items.json 里那条记录：刚建的块还没落盘就先催一次，不然马上复制粘贴会找不着 */
   void flushItems();
-  /* 顺手写进系统剪贴板，换张画布、换个窗口也还能粘；写不写得成本地这份照旧能用 */
+  /* 顺手写进系统剪贴板，换个空间、换个窗口也还能粘；写不写得成本地这份照旧能用 */
   navigator.clipboard
     ?.writeText(JSON.stringify({ [BLOCK_CLIPBOARD]: copiedBlocks }))
     ?.catch(() => {});
@@ -3314,10 +3465,10 @@ function clipboardBlockPayload(data) {
 
 async function pasteBlocks(payload) {
   if (!current || !payload?.blocks.length) return;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   const canvasId = current.meta.id;
   const blocks = payload.blocks.filter((raw) => raw && typeof raw === "object");
-  /* 同画布右下挪一格，跨画布落在鼠标这儿 */
+  /* 同空间右下挪一格，跨空间落在鼠标这儿 */
   const box = selectionBox(blocks.filter((raw) => raw.type !== "connector"));
   const anchor =
     payload.canvasId === canvasId
@@ -3325,7 +3476,7 @@ async function pasteBlocks(payload) {
       : pastePoint();
   const placed = [];
   for (const raw of blocks) {
-    /* 拷贝副本那几下是异步的：期间切了画布就别再把块往原来那张上摆 */
+    /* 拷贝副本那几下是异步的：期间切了空间就别再把块往原来那个空间上摆 */
     if (!current || current.meta.id !== canvasId) return;
     const item = normalizeItem({ ...raw, id: newId(), z: null });
     if (!item || item.type === "connector") continue;
@@ -3446,7 +3597,7 @@ function pastePoint() {
 
 function addTextAtPointer(text) {
   if (!current) return;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   const point = pastePoint();
   const item = makeText(point.x, point.y);
   item.text = text;
@@ -3476,13 +3627,13 @@ function imageSize(src) {
 }
 
 /* 四条入口（工具栏的图片/音频/视频/文件按钮 + 资源管理器拖入）都汇到这里：
- * 一批路径先问一次「拷进画布还是只引用」，答案整批通用，取消就一个都不插；
+ * 一批路径先问一次「拷进空间还是只引用」，答案整批通用，取消就一个都不插；
  * 再按扩展名分流——能显示的直接显示，显示不了的才做附件卡片。
  * 一次进来好几个就整排铺开（见 batchRowPoint），单个才按入口给的位置落。
- * origin 是拖入的落点：单个文件落在这儿，一批文件在空画布上也从这儿起排。 */
+ * origin 是拖入的落点：单个文件落在这儿，一批文件在空白空间上也从这儿起排。 */
 async function insertPaths(paths, origin) {
   if (!active || !current || !paths.length) return;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   const canvasId = current.meta.id;
   const mode = await askInsertMode(paths.length);
   if (!current || current.meta.id !== canvasId || !mode) return;
@@ -3499,7 +3650,7 @@ async function insertPaths(paths, origin) {
       else if (VIDEO_EXTS.has(ext)) placed = await addVideoBlock(path, at, mode);
       else if (EBOOK_EXTS.has(ext)) placed = await addEbookBlock(path, at, mode);
       else placed = await addDroppedFile(await store.fileInfo(path), at, mode);
-      /* 中途切了画布就别往新画布里插东西 */
+      /* 中途切了空间就别往新空间里插东西 */
       if (!current || current.meta.id !== canvasId) return;
       /* 没插成（失败或用户喊停拷贝）就别跟着排下一个的位置 */
       if (!placed) continue;
@@ -3512,7 +3663,7 @@ async function insertPaths(paths, origin) {
   revealItem(firstPlaced);
 }
 
-/* 插完把视野带到第一个新块那儿，不然画布一大就不知道东西落去了哪里。
+/* 插完把视野带到第一个新块那儿，不然空间一大就不知道东西落去了哪里。
    它本来就整个在视野里就不动，免得用户明明看得见还给他跳一下；要挪就把块心对准视野心。 */
 function revealItem(item) {
   const bounds = item && (boundsOfItem(item.id) || itemBounds(item, null));
@@ -3534,9 +3685,9 @@ function revealItem(item) {
   scheduleCameraSave();
 }
 
-/* 一批文件的整排落点：左端对齐到画布上最靠左那块，顶边落在最靠下那块的底边再空一档。
+/* 一批文件的整排落点：左端对齐到空间上最靠左那块，顶边落在最靠下那块的底边再空一档。
    排下一个时按前一块的实际宽度往右走，块与块之间同样空一档，所以混着类型也不会压在一起。
-   画布还空着（或只有连线）没有参照，就从拖入落点起排，落点也没有就按视野正中。 */
+   空间还空着（或只有连线）没有参照，就从拖入落点起排，落点也没有就按视野正中。 */
 function batchRowPoint(origin) {
   let left = Infinity;
   let bottom = -Infinity;
@@ -3639,7 +3790,7 @@ function placeVideo(info, src, topLeft, linked) {
 /* ---------- 电子书块 ---------- */
 
 /* 先把整本读一遍目录再决定要不要拷：DRM、KF8 这类读不了的在这里当场报错，
-   不会先往画布塞一份 20MB 的副本才发现打不开。科目已读到的目录顺手留给阅读块，
+   不会先往空间塞一份 20MB 的副本才发现打不开。科目已读到的目录顺手留给阅读块，
    免得刚放上去又解析一遍。 */
 async function addEbookBlock(path, point, mode) {
   if (!current) return null;
@@ -3675,16 +3826,16 @@ async function askInsertMode(count) {
   const who = count > 1 ? `本批 ${count} 个文件` : "这个文件";
   return choiceDialog({
     title: count > 1 ? `插入 ${count} 个文件` : "插入文件",
-    message: `${who}要拷进画布，还是只引用原文件？`,
-    note: "拷进来是在磁盘上再存一份，画布自带；只引用不占地方，但原文件挪走或删掉后这里就只剩个占位。",
+    message: `${who}要拷进空间，还是只引用原文件？`,
+    note: "拷进来是在磁盘上再存一份，空间自带；只引用不占地方，但原文件挪走或删掉后这里就只剩个占位。",
     options: [
-      { value: "copy", label: "拷进画布", hint: "占磁盘，画布自带这份文件" },
+      { value: "copy", label: "拷进空间", hint: "占磁盘，空间自带这份文件" },
       { value: "link", label: "只引用原文件", hint: "不占磁盘，原文件得留在原地" },
     ],
   });
 }
 
-/* 图片/音频/视频之外的文件怎么进画布：Markdown 变成一个笔记块，
+/* 图片/音频/视频之外的文件怎么进空间：Markdown 变成一个笔记块，
  * 其它当附件卡片；两种都按 mode 决定拷副本还是记原路径。
  * topLeft 为 null 时按块类型自己的大小找落点（三种块差着量级）。
  * 返回插好的块，一批多个文件时靠它排偏移。 */
@@ -3699,7 +3850,7 @@ async function addDroppedFile(info, topLeft, mode) {
 }
 
 /* .md 拷贝态：正文抄进 items.json，之后编辑不再看原文件，原文件删了这块照样能读能改。
- * 引用态：块里只记原文件绝对路径，正文是显示缓存，进画布现读刷新，编辑时问要不要写回。 */
+ * 引用态：块里只记原文件绝对路径，正文是显示缓存，进空间现读刷新，编辑时问要不要写回。 */
 async function placeMarkdownFile(info, topLeft, mode) {
   const canvasId = current.meta.id;
   const file = await store.readFileText(info.path);
@@ -3748,9 +3899,9 @@ async function addFileBlock(info, topLeft, mode) {
 }
 
 /* 哪块指向磁盘上的一个文件、以及它在哪儿：笔记的 path 是笔记库里的绝对路径，
-   不在画布目录里，所以一律按引用态去定位；其余块的 src 拷贝态是画布内相对路径。 */
+   不在空间目录里，所以一律按引用态去定位；其余块的 src 拷贝态是空间内相对路径。 */
 function revealTarget(item) {
-  /* 便签和画布自己的笔记：那块的内容文件叫 <块id>.json / <块id>.md，路径后端自己拼 */
+  /* 便签和空间自己的笔记：那块的内容文件叫 <块id>.json / <块id>.md，路径后端自己拼 */
   if (item.type === "sticky" || (item.type === "note" && !item.linked)) return { block: true };
   if (item.type === "note") return item.path ? { rel: item.path, linked: true } : null;
   if (
@@ -3769,7 +3920,7 @@ function revealFileBlock(item) {
   if (!current) return;
   const target = revealTarget(item);
   if (!target) return;
-  /* 便签/笔记那块的文件名就是块 id，画布目录后端知道，前端一个字都不用递 */
+  /* 便签/笔记那块的文件名就是块 id，空间目录后端知道，前端一个字都不用递 */
   const call = target.block
     ? store.revealBlock(current.meta.id, item.id)
     : store.revealCanvasFile(current.meta.id, target.rel, target.linked);
@@ -3778,7 +3929,7 @@ function revealFileBlock(item) {
 
 /* ---------- 播不出来时的兜底 ---------- */
 
-/* 探测结果按「画布 + src + 存在方式」留一份：同一块片子反复问 ffmpeg 没意义。 */
+/* 探测结果按「空间 + src + 存在方式」留一份：同一块片子反复问 ffmpeg 没意义。 */
 const probeCache = new Map();
 
 async function probeVideoBlock(item) {
@@ -3860,8 +4011,8 @@ function finishAudioFix(item, rel) {
   showError("音轨转好了，再点播放就有声音。");
 }
 
-/* 大文件拷进画布在后台线程跑，进度走 canvas-video-copy 事件，随时能停：
- * 停了后端把 .part 半截文件删掉，画布里不会留下看不懂的残骸。
+/* 大文件拷进空间在后台线程跑，进度走 canvas-video-copy 事件，随时能停：
+ * 停了后端把 .part 半截文件删掉，空间里不会留下看不懂的残骸。
  * 视频和文件共用这一根进度条，同一时刻只跑一个。 */
 function copyIntoCanvas(canvasId, info, kind) {
   if (copyTask) {
@@ -4154,13 +4305,13 @@ function createEntry({ cardClass, lines }) {
 function showNotePicker(files) {
   return openPickerShell({
     title: "选择笔记",
-    hint: "第一项新建一篇空白笔记；选已有笔记会复制到画布，编辑不会修改原笔记。",
+    hint: "第一项新建一篇空白笔记；选已有笔记会复制到空间，编辑不会修改原笔记。",
     placeholder: "搜索笔记名或所在文件夹…",
     container: "canvas-picker-notes",
     emptyText: "还没有笔记，直接新建一篇就行。",
     create: createEntry({
       cardClass: "canvas-picker-note",
-      lines: ["新建空白笔记", "只在画布上，不写进笔记库"],
+      lines: ["新建空白笔记", "只在空间上，不写进笔记库"],
     }),
     entries: files.map((node) => {
       const parts = String(node.path || "").split("/");
@@ -4188,7 +4339,7 @@ function showNotePicker(files) {
 
 async function insertNoteFromPicker() {
   if (!active || !current) return;
-  if (editingId) commitEditing();
+  if (editingId || edgeLabelEditor) commitEditing();
   let tree;
   try {
     tree = await store.listNotes();
@@ -4202,7 +4353,7 @@ async function insertNoteFromPicker() {
   modalOpen = false;
   if (!pick || !current) return;
   const at = insertPoint(NOTE_DEFAULT_WIDTH, NOTE_DEFAULT_HEIGHT);
-  /* 空白笔记块：path 和正文都留空，只活在这块画布上，不碰笔记库里任何一个 .md */
+  /* 空白笔记块：path 和正文都留空，只活在这个空间上，不碰笔记库里任何一个 .md */
   if (pick.fresh) {
     const item = makeNote(at.x, at.y, "", "未命名笔记", "");
     placeBlock(item);

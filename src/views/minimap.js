@@ -1,5 +1,5 @@
-/* 右下角鸟瞰窗：整张画布的缩小版 + 当前视窗框。
- * 拖那个框，主画布跟着走；点框外的任意处，把那处拉到屏幕正中。
+/* 右下角鸟瞰窗：整个空间的缩小版 + 当前视窗框。
+ * 拖那个框，主空间跟着走；点框外的任意处，把那处拉到屏幕正中。
  * 点过一下之后框进入「选中」态，此时方向键能一格一格挪视野（Shift 大步）。
  * 画在一张 <canvas> 上而不是把块镜像成 DOM 节点：块数上百时每次改动重建节点会卡，
  * 而这里要的只是几百个矩形，一次绘制就够跟住相机。 */
@@ -8,7 +8,7 @@ const STORAGE_KEY = "workbench.canvas.minimap";
 const EDGE_PAD = 6; /* 小窗里四周留的空白（CSS px） */
 const FIT_PAD = 0.08; /* 取景范围按内容外扩的比例 */
 const VIEWPORT_FIT = 1.6; /* 取景至少是视野这么大：框最多占小窗约三分之二，才看得出在挪 */
-const MIN_FIT = 1200; /* 空画布时的兜底取景边长（世界像素），别让缩小版糊成一个点 */
+const MIN_FIT = 1200; /* 没有空间时的兜底取景边长（世界像素），别让缩小版糊成一个点 */
 const MIN_DOT = 1.5; /* 块再小也至少画这么大，否则内容铺得远时看不见 */
 const NUDGE = 0.05; /* 方向键一格挪视野的 5% */
 const NUDGE_FAST = 0.25; /* 按住 Shift 一格挪 25% */
@@ -53,7 +53,7 @@ export function initMinimap(options) {
   ui.canvas.addEventListener("pointermove", onPointerMove);
   ui.canvas.addEventListener("pointerup", onPointerUp);
   ui.canvas.addEventListener("pointercancel", onPointerUp);
-  /* 右键别漏给画布：在那上面弹块菜单没有意义 */
+  /* 右键别漏给空间：在那上面弹块菜单没有意义 */
   ui.canvas.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -71,7 +71,7 @@ export function blurMinimapFocus() {
   return true;
 }
 
-/* 方向键此刻归谁：鸟瞰窗拿着的时候，画布就别用方向键挪块 */
+/* 方向键此刻归谁：鸟瞰窗拿着的时候，空间就别用方向键挪块 */
 export function isMinimapFocused() {
   return focused;
 }
@@ -88,7 +88,7 @@ export function refreshMinimap() {
 function setMinimized(on) {
   if (!ui) return;
   minimized = on;
-  /* 面板都看不见了还吃方向键，会让人以为画布自己乱走 */
+  /* 面板都看不见了还吃方向键，会让人以为空间自己乱走 */
   if (on) focused = false;
   ui.root.hidden = on;
   ui.key.hidden = !on;
@@ -163,7 +163,7 @@ function onPointerUp(e) {
   ui.canvas.classList.remove("is-grabbing");
   ui.canvas.releasePointerCapture?.(e.pointerId);
   hooks.commitCamera();
-  /* 拖框期间没人重画（相机变化只改主画布的 transform），松手补一次，
+  /* 拖框期间没人重画（相机变化只改主空间的 transform），松手补一次，
      顺手把选中态画出来 */
   redraw();
 }
@@ -220,7 +220,7 @@ function clamp(v, lo, hi) {
 }
 
 /* 选中态要把框线往前景色压暗一档。主题变量可能写成 hsl() 或 color-mix()，
-   画布不见得认得，所以借一个隐藏节点让浏览器自己解析成 rgb。 */
+   空间不见得认得，所以借一个隐藏节点让浏览器自己解析成 rgb。 */
 let probe = null;
 
 function toRgb(color) {
@@ -258,8 +258,8 @@ function redraw() {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  /* 没有画布可看时（删到最后一个、停在空白页），上面那次擦除就是全部工作：
-     早退要退在擦除之后，否则上一张画布的块、框、数字会一直留在玻璃上。
+  /* 没有空间可看时（删到最后一个、停在空白页），上面那次擦除就是全部工作：
+     早退要退在擦除之后，否则上一个空间的块、框、数字会一直留在玻璃上。
      view 一并清空，面板从此不再吃鼠标。 */
   if (!hooks.getCamera()) {
     view = null;
@@ -272,7 +272,7 @@ function redraw() {
   const items = hooks.getItems();
   const selectedIds = hooks.getSelectedIds();
   if (ui.count) {
-    /* 连线不是「一块面板」，按画布自己的口径排除 */
+    /* 连线不是「一块面板」，按空间自己的口径排除 */
     ui.count.textContent = String(items.filter((item) => item.type !== "connector").length);
   }
   const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
@@ -291,7 +291,7 @@ function redraw() {
   const content =
     contentBounds(items) ||
     (() => {
-      /* 空画布钉一块以原点为中心的死区域，否则缩小版跟着视窗一起滑，看不出自己在动 */
+      /* 空的空间钉一块以原点为中心的死区域，否则缩小版跟着视窗一起滑，看不出自己在动 */
       const half = MIN_FIT / 2;
       return { x1: -half, y1: -half, x2: half, y2: half };
     })();

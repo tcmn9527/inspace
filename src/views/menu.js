@@ -1,6 +1,6 @@
-/* 通用右键菜单：沿用 #ctx-menu 那个浮层，画布块、连线、笔记树都从这里弹。
+/* 通用右键菜单：沿用 #ctx-menu 那个浮层，空间块、连线、笔记树都从这里弹。
  * 用法：openMenu(x, y, [{ label, onClick, danger, swatch, icon, trailing, color, keepOpen }])
- *   icon —— 行首图标的 SVG 字符串（画布「快速设置」用它表示属性长什么样），color 给圆点当填充色；
+ *   icon —— 行首图标的 SVG 字符串（空间「快速设置」用它表示属性长什么样），color 给圆点当填充色；
  *   trailing —— 行尾的当前值指示，纯展示、不响应指针；
  *   keepOpen —— 点了不关菜单，用于「一个菜单里连着刷多项」。
  * 菜单项点击后自己 stopPropagation —— 下面挂在 document 上的「点外部关菜单」，

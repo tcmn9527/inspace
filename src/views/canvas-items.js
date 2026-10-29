@@ -1,4 +1,4 @@
-/* 画布图元：数据形状、几何计算和 DOM 渲染。
+/* 空间图元：数据形状、几何计算和 DOM 渲染。
  * 所有坐标都是世界坐标（未乘缩放），图元本身互不嵌套。 */
 
 import { renderMarkdown } from "./markdown.js";
@@ -6,6 +6,8 @@ import { isCancelled, openPdf, pdfPageSize, pdfProblem, renderPdfPage } from "./
 
 export const DEFAULT_BORDER = "#9a9a9a";
 export const TEXT_DEFAULT_WIDTH = 320;
+/* 文字块默认的圆角，跟样式表里 .canvas-item-text 的 border-radius 保持一致 */
+export const TEXT_DEFAULT_RADIUS = 10;
 export const IMAGE_MAX_SIDE = 520;
 export const AUDIO_DEFAULT_WIDTH = 320;
 export const AUDIO_DEFAULT_HEIGHT = 92;
@@ -118,6 +120,7 @@ export function normalizeItem(raw) {
       shape: raw.shape === "curve" ? "curve" : "elbow",
       arrow: raw.arrow === "none" ? "none" : raw.arrow === "both" ? "both" : "end",
       color: typeof raw.color === "string" && raw.color ? raw.color : accentStroke(),
+      label: typeof raw.label === "string" ? raw.label : "",
     };
   }
   if (type === "rect" || type === "ellipse") {
@@ -129,6 +132,7 @@ export function normalizeItem(raw) {
       h: Math.max(1, num(raw.h, 1)),
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
       fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
+      radius: Math.max(0, Math.round(num(raw.radius))),
       z: layerOf(raw),
     };
   }
@@ -157,6 +161,7 @@ export function normalizeItem(raw) {
       minH: Math.max(0, num(raw.minH)),
       fontSize: Math.min(200, Math.max(8, num(raw.fontSize, 14))),
       bordered: raw.bordered === true,
+      radius: Math.max(0, Math.round(num(raw.radius, TEXT_DEFAULT_RADIUS))),
       z: layerOf(raw),
     };
   }
@@ -169,7 +174,7 @@ export function normalizeItem(raw) {
       h: Math.max(8, num(raw.h, 120)),
       src: typeof raw.src === "string" ? raw.src : "",
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
-      /* 引用态：src 是原图绝对路径，画布里没有副本 */
+      /* 引用态：src 是原图绝对路径，空间里没有副本 */
       linked: raw.linked === true,
       z: layerOf(raw),
     };
@@ -196,11 +201,11 @@ export function normalizeItem(raw) {
       h: Math.max(VIDEO_MIN_HEIGHT, num(raw.h, VIDEO_DEFAULT_HEIGHT)),
       src: typeof raw.src === "string" ? raw.src : "",
       name: typeof raw.name === "string" ? raw.name : "",
-      /* 引用态：src 是原片的绝对路径，画布里不存副本 */
+      /* 引用态：src 是原片的绝对路径，空间里不存副本 */
       linked: raw.linked === true,
       /* sized：已经按视频真实比例定过一次大小，之后尊重用户手拉的尺寸 */
       sized: raw.sized === true,
-      /* 转出来的 AAC 音轨副本（画布目录里的相对路径），没有就是空串 */
+      /* 转出来的 AAC 音轨副本（空间目录里的相对路径），没有就是空串 */
       audioRel: typeof raw.audioRel === "string" ? raw.audioRel : "",
       z: layerOf(raw),
     };
@@ -216,6 +221,7 @@ export function normalizeItem(raw) {
       color: typeof raw.color === "string" && raw.color ? raw.color : STICKY_DEFAULT_COLOR,
       textColor:
         typeof raw.textColor === "string" && raw.textColor ? raw.textColor : STICKY_DEFAULT_TEXT,
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
       z: layerOf(raw),
     };
   }
@@ -241,6 +247,8 @@ export function normalizeItem(raw) {
       sourceFormat: typeof raw.sourceFormat === "string" ? raw.sourceFormat : "utf8",
       sourceCrlf: raw.sourceCrlf === true,
       assets,
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
+      fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
       z: layerOf(raw),
     };
   }
@@ -256,11 +264,13 @@ export function normalizeItem(raw) {
       ext: typeof raw.ext === "string" ? raw.ext : "",
       size: Math.max(0, num(raw.size)),
       text: raw.text === true,
-      /* 引用态 src 就是原文件绝对路径，画布 files/ 里没有副本 */
+      /* 引用态 src 就是原文件绝对路径，空间 files/ 里没有副本 */
       linked: raw.linked === true,
       /* PDF 块读到哪儿是这块自己的状态：第几页 + 这一页滚过去几成，重开接着读 */
       page: Math.max(1, Math.trunc(num(raw.page, 1))),
       pageFrac: Math.min(1, Math.max(0, num(raw.pageFrac, 0))),
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
+      fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
       z: layerOf(raw),
     };
   }
@@ -274,7 +284,7 @@ export function normalizeItem(raw) {
       src: typeof raw.src === "string" ? raw.src : "",
       name: typeof raw.name === "string" ? raw.name : "",
       linked: raw.linked === true,
-      /* 读到第几章是这块自己的状态，重开画布接着上次那页 */
+      /* 读到第几章是这块自己的状态，重开空间接着上次那页 */
       chapter: Math.max(0, Math.trunc(num(raw.chapter))),
       z: layerOf(raw),
     };
@@ -282,8 +292,8 @@ export function normalizeItem(raw) {
   return null;
 }
 
-/* 便签和笔记的正文不归 items.json 管：一张便签是 <画布>/stickies/<块id>.json，
-   一篇笔记是 <画布>/notes/<块id>.md。运行时对象上那些字段只是从文件里读回来的缓存，
+/* 便签和笔记的正文不归 items.json 管：一张便签是 <空间>/stickies/<块id>.json，
+   一篇笔记是 <空间>/notes/<块id>.md。运行时对象上那些字段只是从文件里读回来的缓存，
    存回去就成一份数据两处摆，改一处漏一处。 */
 export function toPersisted(item) {
   if (item.type === "sticky") {
@@ -306,6 +316,7 @@ export function makeBox(type, x1, y1, x2, y2) {
     h: Math.max(1, Math.abs(y2 - y1)),
     borderColor: DEFAULT_BORDER,
     fillColor: "",
+    radius: 0,
   };
 }
 
@@ -330,17 +341,18 @@ export function makeText(x, y, w = TEXT_DEFAULT_WIDTH, minH = 0) {
     y,
     w: Math.max(40, w),
     text: "",
-    color: "",
-    fillColor: "",
-    borderColor: "",
+    color: "#000000",
+    fillColor: "#ffffff",
+    borderColor: DEFAULT_BORDER,
     h: 0,
     minH: Math.max(0, minH),
     fontSize: 14,
-    bordered: false,
+    bordered: true,
+    radius: TEXT_DEFAULT_RADIUS,
   };
 }
 
-/* 图片块两种存在方式：拷贝态 src 是画布 images/ 里的相对路径，引用态是原图绝对路径。 */
+/* 图片块两种存在方式：拷贝态 src 是空间 images/ 里的相对路径，引用态是原图绝对路径。 */
 export function makeImage(x, y, w, h, src, linked = false) {
   return { id: newId(), type: "image", x, y, w, h, src, linked: Boolean(linked), borderColor: "" };
 }
@@ -359,7 +371,7 @@ export function makeAudio(x, y, name, src, linked = false) {
   };
 }
 
-/* 视频块有两种存在方式：拷贝进来的 src 是画布里的相对路径（linked=false），
+/* 视频块有两种存在方式：拷贝进来的 src 是空间里的相对路径（linked=false），
    引用原片的 src 是绝对路径（linked=true），播放地址统一由后端开权限后现取。
    audioRel 是转出来的 AAC 音轨副本：本机放不出原音轨时用它对声，空着就是原样播。 */
 export function makeVideo(x, y, name, src, linked) {
@@ -378,7 +390,7 @@ export function makeVideo(x, y, name, src, linked) {
   };
 }
 
-/* 笔记块默认存 Markdown 快照和一份「原图路径 → 画布副本」映射，编辑不动原 .md。
+/* 笔记块默认存 Markdown 快照和一份「原图路径 → 空间副本」映射，编辑不动原 .md。
    引用态（link.linked）多带写回要用的编码和换行，path 是原 .md 的绝对路径。 */
 export function makeNote(x, y, path, name, source, link = {}) {
   return {
@@ -395,11 +407,13 @@ export function makeNote(x, y, path, name, source, link = {}) {
     sourceFormat: link.format || "utf8",
     sourceCrlf: Boolean(link.crlf),
     assets: {},
+    borderColor: "",
+    fillColor: "",
   };
 }
 
 /* 文件块只存定位用的路径和卡片上要显示的名字/体积/扩展名，内容不进 items.json。
-   拷贝态 src 是画布 files/ 里的相对路径，引用态是原文件绝对路径。
+   拷贝态 src 是空间 files/ 里的相对路径，引用态是原文件绝对路径。
    文本块给一个能读几行的默认高度，PDF 块按 A4 竖排给一屏，剩下由用户自己拉。 */
 export function fileBlockSize(info) {
   const pdf = isPdfExt(info.ext);
@@ -427,11 +441,13 @@ export function makeFile(x, y, info) {
     size: Math.max(0, Number(info.size) || 0),
     text,
     linked,
+    borderColor: "",
+    fillColor: "",
   };
 }
 
 /* 电子书块只记书在哪儿、读到第几章；正文每次现读，不往 items.json 里存书页。
-   拷贝态 src 是画布 files/ 里的相对路径，引用态是原书绝对路径。 */
+   拷贝态 src 是空间 files/ 里的相对路径，引用态是原书绝对路径。 */
 export function makeEbook(x, y, name, src, linked = false) {
   return {
     id: newId(),
@@ -457,6 +473,7 @@ export function makeConnector(fromId, fromSide, toId) {
     shape: "elbow",
     arrow: "end",
     color: accentStroke(),
+    label: "",
   };
 }
 
@@ -682,17 +699,17 @@ const MISSING_FILE_SVG = `
     <path d="M9.2 12.5l5.6 5.6M14.8 12.5l-5.6 5.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
   </svg>`;
 
-/** 便签/笔记自己那份内容文件在画布目录里的相对位置；复制粘贴和丢文件卡都按它说话。 */
+/** 便签/笔记自己那份内容文件在空间目录里的相对位置；复制粘贴和丢文件卡都按它说话。 */
 export function contentRelOf(item) {
   if (item.type === "sticky") return `stickies/${item.id}.json`;
   if (item.type === "note") return `notes/${item.id}.md`;
   return "";
 }
 
-/** 块指向的那份文件在磁盘上的绝对位置：引用态记的就是绝对路径，其余一律按画布目录拼。 */
+/** 块指向的那份文件在磁盘上的绝对位置：引用态记的就是绝对路径，其余一律按空间目录拼。 */
 export function absolutePathOf(item, canvasDir) {
   /* 笔记块上那个 path 只在引用态有意义：拷贝进来的那块还会留着「来自哪儿」，
-     可它现在真正拥有的是画布里的 notes/<块id>.md */
+     可它现在真正拥有的是空间里的 notes/<块id>.md */
   const pointer = item.linked ? (item.type === "note" ? item.path : item.src) : item.src;
   const rel = pointer || contentRelOf(item);
   if (!rel || item.linked) return rel;
@@ -701,7 +718,7 @@ export function absolutePathOf(item, canvasDir) {
 }
 
 /* 丢文件是所有块共用的一种状态，所以只长一张卡：图标和一句话一行，下面一行文件的绝对路径。
-   块留在原地、宽高不变，只把内容换成这张卡；原文件放回原位后重开画布自己恢复。
+   块留在原地、宽高不变，只把内容换成这张卡；原文件放回原位后重开空间自己恢复。
    附件和音乐块最矮只有 64px，所以图标只能跟标题挤一行，竖着排三行会被块自己裁掉。 */
 export function createMissingCard(item, canvasDir) {
   const card = document.createElement("div");
@@ -713,7 +730,7 @@ export function createMissingCard(item, canvasDir) {
   glyph.innerHTML = MISSING_FILE_SVG;
   const title = document.createElement("div");
   title.className = "canvas-missing-title";
-  title.textContent = item.linked ? "原文件不在了" : "画布里的副本丢了";
+  title.textContent = item.linked ? "原文件不在了" : "空间里的副本丢了";
   line.append(glyph, title);
   card.append(line);
   const path = absolutePathOf(item, canvasDir);
@@ -816,13 +833,13 @@ const FILE_DOC_SVG = `
     <path d="M11.2 3.2v3.6h3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
   </svg>`;
 
-/* 文本预览一次最多渲染这么多字：后端读的是 512KB 开头，全塞进 DOM 会拖慢画布 */
+/* 文本预览一次最多渲染这么多字：后端读的是 512KB 开头，全塞进 DOM 会拖慢空间 */
 const PREVIEW_RENDER_CHARS = 20000;
 const TABLE_EXTS = new Set(["csv", "tsv"]);
 const TABLE_MAX_ROWS = 200;
 const TABLE_MAX_COLS = 24;
 
-/* 附件卡片：文件已经拷进画布的 files/ 了，这里负责把名字/体积说清楚，
+/* 附件卡片：文件已经拷进空间的 files/ 了，这里负责把名字/体积说清楚，
    文本类的再附一段只读预览。要打开文件走右键菜单的「在文件夹中显示」。 */
 function createFileCard(item, options) {
   const card = document.createElement("div");
@@ -847,7 +864,7 @@ function createFileCard(item, options) {
   head.append(icon, main);
   card.append(head);
 
-  /* 不管拷贝还是引用，进画布都问一句文件还在不在；
+  /* 不管拷贝还是引用，进空间都问一句文件还在不在；
      丢了就整块换成统一那张丢文件卡，绝对路径写在卡上 */
   options.checkFile?.(item).then((found) => {
     if (!found) options.onMissing?.(item);
@@ -868,7 +885,7 @@ function createFileCard(item, options) {
   return card;
 }
 
-/* 画布那边也靠这个决定给不给缩放手柄，所以是导出的 */
+/* 空间那边也靠这个决定给不给缩放手柄，所以是导出的 */
 export function isPdfExt(ext) {
   return String(ext || "").toLowerCase() === "pdf";
 }
@@ -929,7 +946,7 @@ function createPdfBody(item, options) {
   let url = "";
   let total = 0;
   let width = 0;
-  /* 卡片被换掉（丢文件、复制进画布、重画整张）后旧回调不能再碰 DOM，作废看 seq；
+  /* 卡片被换掉（丢文件、复制进空间、重画整张）后旧回调不能再碰 DOM，作废看 seq；
      宽度又变了一轮，画到一半那一张也不认了，作废看 gen */
   let seq = 0;
   let gen = 0;
@@ -1135,7 +1152,7 @@ function createPdfBody(item, options) {
       if (!total || stage.hidden) return;
       const a = anchor();
       chrome(a.page);
-      /* 读到哪儿当场就记在块上：他可能滚完这一下就切画布，字段得是新的 */
+      /* 读到哪儿当场就记在块上：他可能滚完这一下就切空间，字段得是新的 */
       item.page = a.page;
       item.pageFrac = a.frac;
       clearTimeout(notifyTimer);
@@ -1593,7 +1610,7 @@ function formatMediaTime(seconds) {
   return `${minutes}:${String(secs).padStart(2, "0")}`;
 }
 
-/* 播放器外壳。音频数据按需加载，避免打开画布时把所有歌都读进内存。 */
+/* 播放器外壳。音频数据按需加载，避免打开空间时把所有歌都读进内存。 */
 function createAudioPlayer(item, mediaSrc, options = {}) {
   const loadAudio = options.loadAudio;
   const player = document.createElement("div");
@@ -1731,7 +1748,7 @@ function createAudioPlayer(item, mediaSrc, options = {}) {
   });
   audio.addEventListener("timeupdate", render);
   audio.addEventListener("play", () => {
-    /* 画布上同时只播一个声音 */
+    /* 空间上同时只播一个声音 */
     const scope = player.closest(".canvas-world") || document;
     for (const other of scope.querySelectorAll("audio, video")) {
       if (other !== audio) other.pause();
@@ -1790,7 +1807,7 @@ const VIDEO_MAX_IN_SVG = `
 
 /* 视频播放壳。地址不是 base64，而是后端开了读权限的 asset 协议链接，
  * 浏览器按 Range 一段段要，所以 20GB 的片子也只占解码缓冲，不会整份进内存。
- * 地址也是点到才去取：打开画布时不会把所有片子都拉一遍。 */
+ * 地址也是点到才去取：打开空间时不会把所有片子都拉一遍。 */
 function createVideoPlayer(item, mediaSrc, options = {}) {
   const player = document.createElement("div");
   player.className = "canvas-video-player";
@@ -1929,7 +1946,7 @@ function createVideoPlayer(item, mediaSrc, options = {}) {
   };
 
   /* 副本走的是同一条 asset 通道：后端顺手把读权限开了，大音频也不会整份进内存。
-     它一定躺在画布目录里，所以按相对路径取，跟原片是不是引用态无关。 */
+     它一定躺在空间目录里，所以按相对路径取，跟原片是不是引用态无关。 */
   const ensureDub = async () => {
     if (!item.audioRel || dubReady || typeof options.loadVideo !== "function") return;
     try {
@@ -2082,7 +2099,7 @@ function createVideoPlayer(item, mediaSrc, options = {}) {
     markProblem("video");
   });
 
-  /* 副本不进 DOM：画布里有「播一个就停掉其余」的规矩，挂在树上的它会把自己挤掉。 */
+  /* 副本不进 DOM：空间里有「播一个就停掉其余」的规矩，挂在树上的它会把自己挤掉。 */
   if (item.audioRel) ensureDub();
 
   return player;
@@ -2165,6 +2182,25 @@ export function releaseEbookPage(pin) {
 }
 
 /** 把数据同步到已有 DOM（拖动/缩放/改色时只走这里，不重建节点）。 */
+/* 笔记卡片的边框和背景：空值就交回样式表，跟随主题 */
+function syncNoteColors(el, item) {
+  const card = el.querySelector(".canvas-note-card");
+  const body = el.querySelector(".canvas-note-body");
+  if (card) {
+    card.style.borderColor = item.borderColor || "";
+    card.style.background = item.fillColor || "";
+  }
+  if (body) body.style.background = item.fillColor || "";
+}
+
+/* 文件卡片的边框和背景：空值就交回样式表，跟随主题 */
+function syncFileColors(el, item) {
+  const card = el.querySelector(".canvas-file-card");
+  if (!card) return;
+  card.style.borderColor = item.borderColor || "";
+  card.style.background = item.fillColor || "";
+}
+
 export function syncItemElement(el, item) {
   el.style.left = `${item.x}px`;
   el.style.top = `${item.y}px`;
@@ -2199,6 +2235,7 @@ export function syncItemElement(el, item) {
     if (item.borderColor) el.style.setProperty("--text-border", item.borderColor);
     else el.style.removeProperty("--text-border");
     el.classList.toggle("is-bordered", Boolean(item.bordered));
+    el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : TEXT_DEFAULT_RADIUS}px`;
     return;
   }
 
@@ -2217,6 +2254,8 @@ export function syncItemElement(el, item) {
   ) {
     el.style.width = `${item.w}px`;
     el.style.height = `${item.h}px`;
+    if (item.type === "note") syncNoteColors(el, item);
+    else if (item.type === "file") syncFileColors(el, item);
     return;
   }
 
@@ -2227,6 +2266,7 @@ export function syncItemElement(el, item) {
     if (card) {
       card.style.background = item.color;
       card.style.color = item.textColor;
+      card.style.borderColor = item.borderColor || "";
     }
     return;
   }
@@ -2241,6 +2281,9 @@ export function syncItemElement(el, item) {
   }
   el.style.borderColor = item.borderColor || "transparent";
   el.style.background = item.fillColor || "transparent";
+  if (item.type === "rect") {
+    el.style.borderRadius = item.radius ? `${item.radius}px` : "";
+  }
 }
 
 /* ---------- 连线渲染 ---------- */
@@ -2280,9 +2323,36 @@ export function createConnectorElement(item) {
   const hit = document.createElementNS(SVG_NS, "path");
   hit.classList.add("canvas-edge-hit");
 
-  group.append(halo, visible, hit);
+  /* 连线中间的文字：位置每次跟着路径现算，没写字时整层不显示 */
+  const label = document.createElementNS(SVG_NS, "g");
+  label.classList.add("canvas-edge-label");
+  const labelText = document.createElementNS(SVG_NS, "text");
+  labelText.classList.add("canvas-edge-label-text");
+  labelText.setAttribute("text-anchor", "middle");
+  labelText.setAttribute("dominant-baseline", "middle");
+  label.append(labelText);
+
+  group.append(halo, visible, hit, label);
   syncConnectorElement(group, item, null);
   return group;
+}
+
+/* 标签落在连线中点：折线、曲线都按路径长度取，取不到就退到两端的中间 */
+export function connectorLabelPoint(group, geometry) {
+  const path = group?.querySelector(".canvas-edge-visible");
+  if (path) {
+    try {
+      const length = path.getTotalLength();
+      if (length > 0) {
+        const point = path.getPointAtLength(length / 2);
+        return { x: point.x, y: point.y };
+      }
+    } catch {
+      /* 路径还没成形时浏览器会抛，按下面的兜底算 */
+    }
+  }
+  if (!geometry) return null;
+  return { x: (geometry.a.x + geometry.b.x) / 2, y: (geometry.a.y + geometry.b.y) / 2 };
 }
 
 export function syncConnectorElement(group, item, geometry) {
@@ -2311,6 +2381,23 @@ export function syncConnectorElement(group, item, geometry) {
   visible.setAttribute("d", geometry.d);
   hit.setAttribute("d", geometry.d);
   if (halo) halo.setAttribute("d", geometry.d);
+
+  const label = group.querySelector(".canvas-edge-label");
+  const labelText = group.querySelector(".canvas-edge-label-text");
+  const content = String(item.label || "").trim();
+  if (!label || !labelText) return;
+  if (!content) {
+    label.setAttribute("visibility", "hidden");
+    return;
+  }
+  label.removeAttribute("visibility");
+  labelText.textContent = content;
+  labelText.setAttribute("fill", color);
+  const point = connectorLabelPoint(group, geometry);
+  if (point) {
+    labelText.setAttribute("x", String(point.x));
+    labelText.setAttribute("y", String(point.y));
+  }
 }
 
 /** 把屏幕尺寸按比例塞进 IMAGE_MAX_SIDE，并保持宽高比。 */

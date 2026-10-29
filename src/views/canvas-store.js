@@ -1,4 +1,4 @@
-/* 画布后端调用：每块画布都是数据文件夹下 canvases/ 里的一个文件夹。 */
+/* 空间后端调用：每个空间都是数据文件夹下 spaces/ 里的一个文件夹。 */
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 
@@ -7,14 +7,14 @@ export const createCanvas = (name) => invoke("canvas_create", { name });
 export const openCanvas = (id) => invoke("canvas_open", { id });
 export const saveCanvasItems = (id, items) => invoke("canvas_save_items", { id, items });
 export const saveCanvasCamera = (id, camera) => invoke("canvas_save_camera", { id, camera });
-/* 这张画布「复制的连接线属性」，跟着 canvas.json 走；没复制过时传 null */
+/* 这个空间「复制的连接线属性」，跟着 space.json 走；没复制过时传 null */
 export const saveConnectorPreset = (id, preset) =>
   invoke("canvas_save_connector", { id, connector: preset });
 export const renameCanvas = (id, name) => invoke("canvas_rename", { id, name });
 export const deleteCanvas = (id) => invoke("canvas_delete", { id });
 export const saveCanvasImage = (id, data, ext) => invoke("canvas_save_image", { id, data, ext });
 /* 图片和音频都不走 base64：后端确认文件还在、开一次 asset 读权限，这里换成地址。
-   拷贝态 src 是画布目录里的相对路径，引用态是原文件绝对路径。 */
+   拷贝态 src 是空间目录里的相对路径，引用态是原文件绝对路径。 */
 export const pickCanvasImage = () => invoke("canvas_pick_image");
 export const importCanvasImage = (id, path) => invoke("canvas_import_image", { id, path });
 export const imageUrl = async (id, src, linked) =>
@@ -39,7 +39,7 @@ export const videoUrl = async (id, src, linked) =>
 export const deleteCanvasVideo = (id, src, linked, audioRel) =>
   invoke("canvas_delete_video", { id, src, linked, audioRel: audioRel || null });
 /* 文件块：图片/音频/视频之外的都算文件。插的时候问一句——
-   拷贝态进画布 files/，引用态只记原文件绝对路径，打开都交给系统默认程序。 */
+   拷贝态进空间 files/，引用态只记原文件绝对路径，打开都交给系统默认程序。 */
 export const fileInfo = (path) => invoke("canvas_file_info", { path });
 export const pickCanvasFile = () => invoke("canvas_pick_file");
 export const importCanvasFile = (id, path) => invoke("canvas_import_file", { id, path });
@@ -68,11 +68,11 @@ export const revealCanvasFile = (id, rel, linked) =>
   invoke("canvas_reveal_file", { id, rel, linked: Boolean(linked) });
 export const deleteCanvasFile = (id, rel, linked) =>
   invoke("canvas_delete_file", { id, rel, linked: Boolean(linked) });
-/* 便签块 / 画布自己的笔记块：要显示的是它那份内容文件，路径由后端按块 id 从 items.json 认 */
+/* 便签块 / 空间自己的笔记块：要显示的是它那份内容文件，路径由后端按块 id 从 items.json 认 */
 export const revealBlock = (id, itemId) => invoke("canvas_reveal_block", { id, itemId });
 export const canvasFileExists = (id, rel, linked) =>
   invoke("canvas_file_exists", { id, rel, linked: Boolean(linked) });
-/* 电子书：放上画布前先整本读一遍目录，读不了的（DRM/KF8）当场说清楚 */
+/* 电子书：放上空间前先整本读一遍目录，读不了的（DRM/KF8）当场说清楚 */
 export const ebookInfo = (path) => invoke("canvas_ebook_info", { path });
 export const ebookToc = (id, rel, linked) =>
   invoke("canvas_ebook_toc", { id, rel, linked: Boolean(linked) });
@@ -90,7 +90,7 @@ export const saveCanvasNoteImage = (id, itemId, data, ext) =>
   invoke("canvas_save_note_image", { id, itemId, data, ext });
 export const readCanvasNoteImage = (id, itemId, rel) =>
   invoke("canvas_read_note_image", { id, itemId, rel });
-/* 画布自己的便签/笔记：一块一份文件，住在 <画布>/stickies、<画布>/notes 里。 */
+/* 空间自己的便签/笔记：一块一份文件，住在 <空间>/stickies、<空间>/notes 里。 */
 export const readSticky = (id, itemId) => invoke("canvas_read_sticky", { id, itemId });
 export const writeSticky = (id, itemId, sticky) => invoke("canvas_write_sticky", { id, itemId, sticky });
 export const duplicateSticky = (id, itemId, toId, toItem) =>
@@ -101,7 +101,7 @@ export const writeNoteText = (id, itemId, text) => invoke("canvas_write_note", {
 export const duplicateNote = (id, itemId, toId, toItem) =>
   invoke("canvas_duplicate_note", { id, itemId, toId, toItem });
 export const deleteNote = (id, itemId) => invoke("canvas_delete_note", { id, itemId });
-/* 复制块时把源块那份文件再拷一份进目标画布，返回新的相对路径；
+/* 复制块时把源块那份文件再拷一份进目标空间，返回新的相对路径；
    引用态那块也照样收：从它记的原文件路径拷，粘出来的块从此自己带一份 */
 export const duplicateMedia = (id, itemId, toId) =>
   invoke("canvas_duplicate_media", { id, itemId, toId });

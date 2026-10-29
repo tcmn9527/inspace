@@ -7,7 +7,7 @@ const { getCurrentWindow } = window.__TAURI__.window;
 
 const appWindow = getCurrentWindow();
 
-/* 画布就是首页：侧栏三颗 —— 画布、笔记、设置 */
+/* 空间就是首页：侧栏三颗 —— 空间、笔记、设置 */
 function showRoute(route) {
   const isNotes = route === "notes";
   const isCanvas = route === "canvas";
@@ -17,7 +17,7 @@ function showRoute(route) {
   document.querySelector("#canvas-view").hidden = !isCanvas;
   document.querySelector("#settings-view").hidden = !isSettings;
 
-  /* 进出页面时刷新数据：笔记树每次进页重读磁盘，画布进出要先把防抖里的改动落盘 */
+  /* 进出页面时刷新数据：笔记树每次进页重读磁盘，空间进出要先把防抖里的改动落盘 */
   if (isNotes) refreshNotes();
   if (isSettings) refreshSettings();
   if (isCanvas) enterCanvas();
@@ -47,11 +47,11 @@ window.addEventListener("DOMContentLoaded", () => {
     item.addEventListener("click", () => showRoute(item.dataset.route));
   }
 
-  /* 换过数据目录，画布和笔记都得整组重读一遍。只换个指针的话，页面上还挂着
+  /* 换过数据目录，空间和笔记都得整组重读一遍。只换个指针的话，页面上还挂着
      旧目录那些内容，看着就像「新文件夹里也有数据」。 */
   window.addEventListener("data-root-changed", () => {
     leaveCanvas();
-    enterCanvas().catch((error) => console.error(`换目录后重进画布失败：${error}`));
+    enterCanvas().catch((error) => console.error(`换目录后重进空间失败：${error}`));
     refreshNotes().catch((error) => console.error(`换目录后刷新笔记失败：${error}`));
   });
 

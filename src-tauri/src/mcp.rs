@@ -218,7 +218,7 @@ async fn handle_rpc(
                     "protocolVersion": version,
                     "capabilities": { "tools": {} },
                     "serverInfo": { "name": "inspace", "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": "这是「无限空间」桌面应用的本地 MCP，能操作空间、画布上的块、笔记库和播放器。先调 space_scene 或 notes_tree 熟悉现场再动手。工具默认会把界面切到对应页面并做演示：滚动镜头、给目标加一圈光带；传 pace: \"instant\" 可跳过演示。坐标是空间里的世界坐标，原点在空间左上角。"
+                    "instructions": "这是「无限空间」桌面应用的本地 MCP，能操作空间、块、连线、笔记库和播放器。第一次接手先调 guide 拿速查手册（不传 topic 给整本，也可以按章取），再调 app_state、space_scene 或 notes_tree 熟悉现场。工具默认会把界面切到对应页面并做演示：镜头缓动跟随、给目标加一圈光带；传 pace: \"instant\" 可跳过演示。坐标是空间里的世界坐标，原点在空间左上角。块 id 只在当前空间有效，动块前先从 space_scene 里拿。"
                 }),
             )
         }

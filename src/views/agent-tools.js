@@ -6,6 +6,7 @@
  * 所有会改界面的工具都默认先切到对应页面，用户能当场看见；返回前留一小拍高亮，
  * 传 pace: "instant" 可以跳过这一拍。 */
 
+import { GUIDE_TOPICS, guideText } from "./agent-guide.js";
 import { canvasAgent } from "./canvas.js";
 import { notesAgent } from "./notes.js";
 
@@ -38,6 +39,9 @@ const def = (name, description, properties = {}, required = []) => ({
 });
 
 const TOOL_DEFS = [
+  def("guide", "速查手册：所有工具怎么配合用、每种块怎么建、坐标与颜色约定、常用配方和易错点。第一次接手先调它；不传 topic 返回整本手册。", {
+    topic: { type: "string", enum: GUIDE_TOPICS, description: "只看一章；不传返回整本" },
+  }),
   def("app_state", "看当前应用状态：正在哪一页、数据文件夹、当前空间和相机、当前打开的笔记、MCP 服务端口。"),
   def("space_list", "列出所有空间（id、名字、文件夹路径），并标出当前打开的是哪个。"),
   def("space_open", "切换到指定空间，等它读完再返回。space 传空间 id 或空间名。", {
@@ -321,6 +325,8 @@ async function appState() {
 
 async function dispatch(name, args) {
   switch (name) {
+    case "guide":
+      return guideText(args.topic);
     case "app_state":
       return appState();
 

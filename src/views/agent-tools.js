@@ -9,6 +9,7 @@
 import { GUIDE_TOPICS, guideText } from "./agent-guide.js";
 import { canvasAgent } from "./canvas.js";
 import { notesAgent } from "./notes.js";
+import { LIGHT_THEMES, THEMES, currentTheme, setTheme } from "./theme.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -56,7 +57,11 @@ const TOOL_DEFS = [
   def("guide", "速查手册：所有工具怎么配合用、每种块怎么建、坐标与颜色约定、常用配方和易错点。第一次接手先调它；不传 topic 返回整本手册。", {
     topic: { type: "string", enum: GUIDE_TOPICS, description: "只看一章；不传返回整本" },
   }),
-  def("app_state", "看当前应用状态：正在哪一页、数据文件夹、当前空间和相机、当前打开的笔记、MCP 服务端口。"),
+  def("app_state", "看当前应用状态：正在哪一页、数据文件夹、当前主题、当前空间和相机、当前打开的笔记、MCP 服务端口。"),
+  def("theme_list", "列出所有主题（id、名字、深色/浅色），并标出当前用的那套。"),
+  def("theme_set", "切换应用主题。宇宙主题会给空间打开实时深空背景（星野、星云、行星）。", {
+    theme: { type: "string", description: "主题 id，从 theme_list 拿" },
+  }, ["theme"]),
   def("space_list", "列出所有空间（id、名字、文件夹路径），并标出当前打开的是哪个。"),
   def("space_open", "切换到指定空间，等它读完再返回。space 传空间 id 或空间名。", {
     space: { type: "string", description: "空间 id 或名字" },
@@ -339,10 +344,32 @@ async function appState() {
     route: viewNow(),
     dataRoot,
     notesRoot,
+    theme: currentTheme(),
     mcp: mcpInfo ? { running: mcpInfo.running, port: mcpInfo.port, url: mcpInfo.url, error: mcpInfo.error } : null,
     space,
     notes: notesAgent.current(),
   };
+}
+
+function themeCatalog() {
+  return [
+    ...THEMES.map(([id, name]) => ({ id, name, mode: "dark" })),
+    ...LIGHT_THEMES.map(([id, name]) => ({ id, name, mode: "light" })),
+  ];
+}
+
+function themeList() {
+  return { current: currentTheme(), themes: themeCatalog() };
+}
+
+async function themeSet(args) {
+  const id = String(args.theme || "");
+  if (!themeCatalog().some((t) => t.id === id)) {
+    throw new Error(`没有这个主题：${id}；先调 theme_list 看可选项`);
+  }
+  const applied = setTheme(id);
+  await beat(args);
+  return { theme: applied };
 }
 
 async function dispatch(name, args) {
@@ -351,6 +378,10 @@ async function dispatch(name, args) {
       return guideText(args.topic);
     case "app_state":
       return appState();
+    case "theme_list":
+      return themeList();
+    case "theme_set":
+      return themeSet(args);
 
     case "space_list":
       return onCanvas(args, () => canvasAgent.spaceList());

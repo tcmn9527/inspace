@@ -2,6 +2,7 @@ import { initNotes, refreshNotes } from "./views/notes.js";
 import { enterCanvas, initCanvas, leaveCanvas } from "./views/canvas.js";
 import { initSettings, refreshSettings } from "./views/settings.js";
 import { initTheme } from "./views/theme.js";
+import { initCosmos } from "./views/cosmos.js";
 import { initAgent } from "./views/agent.js";
 
 const { getCurrentWindow } = window.__TAURI__.window;
@@ -78,6 +79,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initTheme();
   initNotes();
   initCanvas();
+  initCosmos();
   initSettings();
   showRoute("canvas");
   initAgent();

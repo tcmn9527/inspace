@@ -285,6 +285,15 @@ body.is-resizing {
   line-height: 1.6;
 }
 
+/* 影像署名：只在设置页最底下留一行小字，不占卡片 */
+.settings-credit {
+  margin: 4px 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  opacity: 0.8;
+}
+
 .settings-path {
   display: block;
   margin-top: 12px;
@@ -1033,6 +1042,38 @@ body.is-resizing {
   border-radius: 50%;
 }
 
+/* 宇宙主题的预览缩略：一小片深空，几点星，一颗行星 */
+.theme-chip-preview.is-cosmos {
+  border-color: rgba(255, 255, 255, 0.24);
+  background:
+    radial-gradient(circle at 50% 46%, #121a33 0%, #070a15 58%, #03050b 100%);
+}
+
+.theme-chip-preview.is-cosmos::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 15% 26%, rgba(255, 255, 255, 0.95) 0 0.7px, transparent 1.2px),
+    radial-gradient(circle at 62% 16%, rgba(220, 232, 255, 0.9) 0 0.6px, transparent 1.1px),
+    radial-gradient(circle at 82% 58%, rgba(255, 240, 220, 0.85) 0 0.6px, transparent 1.1px),
+    radial-gradient(circle at 36% 74%, rgba(255, 255, 255, 0.75) 0 0.5px, transparent 1px),
+    radial-gradient(circle at 26% 52%, rgba(180, 210, 255, 0.5) 0 2.4px, transparent 3.2px);
+}
+
+.theme-chip-preview.is-cosmos .theme-chip-line {
+  background: transparent;
+}
+
+.theme-chip-preview.is-cosmos .theme-chip-dot {
+  right: 7px;
+  bottom: 4px;
+  width: 11px;
+  height: 11px;
+  background: radial-gradient(circle at 32% 30%, #bfe0ff 0%, #5b9bd9 38%, #244a7a 72%, #101d30 100%);
+  box-shadow: 0 0 4px rgba(110, 170, 255, 0.45);
+}
+
 .theme-chip-name {
   font-size: 11px;
   line-height: 13px;
@@ -1747,6 +1788,25 @@ body.is-resizing {
   cursor: grab;
   touch-action: none;
   background-color: var(--bg);
+}
+
+/* 宇宙主题的深空背景层：压在空间最底下，块和连线都在它上面 */
+.canvas-cosmos {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.canvas-cosmos[hidden] {
+  display: none;
+}
+
+/* 宇宙主题下纯文字块没有底色，星星会从字后面透出来；给字补一层弱阴影压住 */
+[data-theme="cosmos"] .canvas-item-text .canvas-text-body {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.72);
 }
 
 .canvas-stage.is-panning {

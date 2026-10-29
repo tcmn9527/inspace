@@ -1,4 +1,4 @@
-/* 应用主题：40 套配色（20 深色 + 20 浅色），覆盖页面底色、浮层、文字、线框、强调色。
+/* 应用主题：41 套配色（21 深色 + 20 浅色），覆盖页面底色、浮层、文字、线框、强调色。
  *
  * 每套主题只描述「色相 + 饱和度 + 明度 + 明暗模式」这几项骨架，具体色值由下面的
  * palette() 统一生成，所以各套之间的明暗关系完全一致：
@@ -17,6 +17,7 @@ const DEFAULT_THEME = "snow";
 
 /* [id, 名称, 底色色相, 底色饱和度, 强调色相, 底色明度] —— 深色系 */
 export const THEMES = [
+  ["cosmos", "宇宙", 220, 6, 210, 6],
   ["graphite", "石墨", 220, 6, 210, 6],
   ["steel", "钢青", 205, 14, 205, 8],
   ["ocean", "深海", 200, 32, 192, 11],
@@ -120,6 +121,17 @@ function apply(id, { persist = true } = {}) {
   for (const chip of document.querySelectorAll(".theme-chip")) {
     chip.classList.toggle("is-active", chip.dataset.theme === currentId);
   }
+  /* 深空背景层（cosmos.js）靠这个事件启停；其他监听方也可以按需响应 */
+  document.dispatchEvent(new CustomEvent("themechange", { detail: { id: currentId } }));
+}
+
+export function setTheme(id) {
+  apply(id);
+  return currentId;
+}
+
+export function currentTheme() {
+  return currentId;
 }
 
 /* 模块加载就套用上次选的主题（此时 DOM 还没解析完，但 <html> 已经在了） */
@@ -189,9 +201,14 @@ function buildPop() {
         </span>
         <span class="theme-chip-name">${name}</span>
       `;
-      chip.querySelector(".theme-chip-preview").style.background = vars["--surface"];
-      chip.querySelector(".theme-chip-line").style.background = vars["--line"];
-      chip.querySelector(".theme-chip-dot").style.background = vars["--accent"];
+      const preview = chip.querySelector(".theme-chip-preview");
+      if (id === "cosmos") {
+        preview.classList.add("is-cosmos");
+      } else {
+        preview.style.background = vars["--surface"];
+        chip.querySelector(".theme-chip-line").style.background = vars["--line"];
+        chip.querySelector(".theme-chip-dot").style.background = vars["--accent"];
+      }
       chip.classList.toggle("is-active", id === currentId);
       chip.addEventListener("click", () => apply(id));
       container.append(chip);

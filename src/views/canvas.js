@@ -82,6 +82,7 @@ import {
   VIDEO_MIN_WIDTH,
 } from "./canvas-items.js";
 import { initMinimap, refreshMinimap, blurMinimapFocus, isMinimapFocused } from "./minimap.js";
+import { setCosmosCamera, setCosmosSeed } from "./cosmos.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -417,6 +418,7 @@ async function switchTo(id) {
       camera: sanitizeCamera(data.camera),
       items: sanitizeItems(data.items),
     };
+    setCosmosSeed(current.meta.id);
     selectedIds = new Set();
     editingId = null;
     noteEditor = null;
@@ -688,6 +690,7 @@ function applyCamera() {
   syncZoomLabel();
   updateSelection();
   positionEdgeLabelEditor();
+  setCosmosCamera(camera);
 }
 
 function zoomLabel() {

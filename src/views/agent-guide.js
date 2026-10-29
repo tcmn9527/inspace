@@ -40,10 +40,22 @@ const SECTIONS = [
   {
     id: "space",
     title: "应用与空间",
-    body: `## 应用与空间（7 个工具）
+    body: `## 应用与空间（9 个工具）
 
 ### app_state
-一眼看全局，不切页。返回 route（canvas/notes/settings）、dataRoot、notesRoot、mcp 状态、当前空间（id/名字/块数/相机/选中）、当前笔记（根/路径/是否编辑/字数）。新接手先调它。
+一眼看全局，不切页。返回 route（canvas/notes/settings）、dataRoot、notesRoot、theme、mcp 状态、当前空间（id/名字/块数/相机/选中）、当前笔记（根/路径/是否编辑/字数）。新接手先调它。
+
+### theme_list
+列出全部主题 [{id,name,mode}]，mode 是 dark 或 light；current 标出当前用的那套。
+
+### theme_set
+切换主题：
+
+~~~json
+{ "theme": "cosmos" }
+~~~
+
+id 从 theme_list 拿。调 "cosmos" 会给空间页打开实时深空背景：三层视差星野、真实银河与星云、带光照和自转的行星（含土星环）、偶发流星；换成别的主题就收起。主题是应用级设置，不影响任何空间数据，也不会自动切页。
 
 ### space_list
 列出全部空间：[{id,name,path}]，current 标出当前空间。
@@ -497,7 +509,8 @@ notes_tree → notes_create_folder {name:"归档", dir:""} → notes_move {path:
 - file_write 冲突先 file_read 看新内容，再决定要不要 force；别无脑覆盖。
 - PDF 页码从 1 开始，电子书章节从 0 开始；PDF 没读完不能跳页。
 - 删除去向：space_delete 进回收站，notes_delete 永久，block_delete 不可撤销。
-- 设置页（换数据目录、主题）和窗口控制没有工具；文件选择对话框也不存在，改为直接传 path。
+- 设置页换数据目录和窗口控制没有工具；改主题用 theme_set，先 theme_list 拿 id。
+- 文件选择对话框不存在，改为直接传 path。
 - pace:"instant" 只跳过演示，不改变结果；默认 normal 更适合让用户看着你干活。`,
   },
 ];

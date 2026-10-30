@@ -223,6 +223,17 @@ export function initCanvas() {
   ui.toolButtons.forEach((button) => {
     button.addEventListener("click", () => setTool(button.dataset.tool));
   });
+  /* 插入类按钮不在 toolButtons 里（它们不是一种画图工具），点一下仍然要把
+     武装着的工具交回第一个按钮，否则「文字」的蓝会一直留在原地 */
+  for (const button of [
+    ui.insertImage,
+    ui.insertAudio,
+    ui.insertVideo,
+    ui.insertFile,
+    ui.insertNote,
+  ]) {
+    button.addEventListener("click", dropTool);
+  }
   ui.insertImage.addEventListener("click", insertImageFromFile);
   ui.insertAudio.addEventListener("click", insertAudioFromFile);
   ui.insertVideo.addEventListener("click", insertVideoFromFile);
@@ -264,6 +275,16 @@ export function initCanvas() {
   });
 
   ui.stage.addEventListener("pointerdown", onStagePointerDown);
+  /* 画面里的按下由 onStagePointerDown 自己判断是起画还是退回；画面外的一切按下
+     （缩放、侧栏、菜单、颜色面板…）都算这次操作结束，武装着的工具退回第一个按钮 */
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!active || ui.stage.contains(e.target)) return;
+      dropTool();
+    },
+    true,
+  );
   ui.stage.addEventListener("pointermove", (e) => {
     lastPointer = { x: e.clientX, y: e.clientY, inside: true };
     /* 指针停在端口上不算离开块，否则端口会在鼠标靠近时自己消失 */
@@ -403,6 +424,8 @@ async function loadList() {
 
 async function switchTo(id) {
   pauseMedia();
+  /* 换空间 = 换一块新画幅，上一个空间里武装着的画图工具不该跟着过来 */
+  setTool("select");
   if (!current || current.meta.id !== id) {
     if (editingId || edgeLabelEditor) commitEditing();
     await flushBlockContents();
@@ -673,6 +696,12 @@ function setTool(name, keepSelection = false) {
   });
   ui.stage.dataset.tool = name;
   if (name !== "select" && !keepSelection) select(null);
+}
+
+/* 画图工具是一次性的：这一按（或这一次操作）没能真的起画，就把选中态交回第一个按钮，
+   别让蓝点卡在「文字」上。保留当前选中的块，退工具不该顺手把人选的清空。 */
+function dropTool() {
+  if (tool !== "select") setTool("select", true);
 }
 
 function applyCamera() {
@@ -1100,23 +1129,43 @@ function addOverlayBox(el, className) {
 /* ---------- 指针交互 ---------- */
 
 function onStagePointerDown(e) {
-  if (!active || !current || e.button !== 0) return;
+  if (!active || !current) return;
+  /* 右键/中键起不成画，武装着的工具也一并退回默认 */
+  if (e.button !== 0) {
+    dropTool();
+    return;
+  }
   /* 全屏时画面还挂在原来那个块上，事件会顺着 DOM 冒泡回空间：
      这时点的是影片，不是空间，别去挪那块的位置 */
-  if (document.fullscreenElement) return;
+  if (document.fullscreenElement) {
+    dropTool();
+    return;
+  }
   /* 右下角鸟瞰窗自己管自己的按下（拖视窗/点跳/收起），别当成空间平移 */
-  if (e.target.closest?.(".canvas-minimap, .canvas-minimap-key")) return;
+  if (e.target.closest?.(".canvas-minimap, .canvas-minimap-key")) {
+    dropTool();
+    return;
+  }
   /* 回到空间上操作，方向键就不再是挪视野 */
   blurMinimapFocus();
   /* 连线文字的输入框自己收指针：选字、挪光标，不是平移空间 */
-  if (edgeLabelEditor && e.target === edgeLabelEditor.input) return;
+  if (edgeLabelEditor && e.target === edgeLabelEditor.input) {
+    dropTool();
+    return;
+  }
   const target = e.target.closest?.(".canvas-item, .canvas-connector");
 
   /* 文本块的编辑框里按下是给输入框的：选字、拖滚动条，不该顺手把这块拖走 */
-  if (fileEditor && target?.dataset.id === fileEditor.itemId) return;
+  if (fileEditor && target?.dataset.id === fileEditor.itemId) {
+    dropTool();
+    return;
+  }
 
   if (editingId) {
-    if (target && target.dataset.id === editingId) return;
+    if (target && target.dataset.id === editingId) {
+      dropTool();
+      return;
+    }
     commitEditing();
   }
 
@@ -1138,10 +1187,14 @@ function onStagePointerDown(e) {
 
   e.preventDefault();
   const item = findItem(target.dataset.id);
-  if (!item) return;
+  if (!item) {
+    dropTool();
+    return;
+  }
   /* Ctrl/⌘ 点只做加减选，不顺手起拖：手一抖整组就跑了 */
   if (e.ctrlKey || e.metaKey) {
     select(item.id, true);
+    dropTool();
     return;
   }
   /* 点集合里的块保持多选（整组就是这么拖走的），点集合外的块才换成单选它 */
@@ -1341,7 +1394,10 @@ function startDraw(e) {
   if (tool === "rect" || tool === "ellipse") item = makeBox(tool, start.x, start.y, start.x, start.y);
   else if (tool === "line" || tool === "arrow") item = makeLine(tool, start.x, start.y, start.x, start.y);
   else if (tool === "text") item = makeText(start.x, start.y, 40);
-  if (!item) return;
+  if (!item) {
+    dropTool();
+    return;
+  }
 
   e.preventDefault();
   select(null);
@@ -1642,7 +1698,11 @@ function onWindowPointerUp(e) {
     finishConnectEnd(finished);
     return;
   }
-  if (!item) return;
+  if (!item) {
+    /* 拖到一半这块没了（切空间/被别处删掉）：手势没有收尾，工具也得自己退回去 */
+    dropTool();
+    return;
+  }
 
   if (finished.kind === "draw") {
     if (item.type === "text") {

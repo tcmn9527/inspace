@@ -599,6 +599,21 @@
           </div>
           <p class="settings-error" id="settings-ffmpeg-error" hidden></p>
         </div>
+        <div class="settings-card" id="settings-cosmos-card">
+          <p class="settings-title">宇宙贴图</p>
+          <p class="settings-hint" id="settings-cosmos-hint">
+            内置的星体贴图是 2K，飞近了看表面会有点糊。这里是同一套贴图的 8K 版，共 7 张，
+            点一次下载到数据文件夹的 cosmos/ 里，之后离线照用；不升级也完全不影响飞行。
+          </p>
+          <p class="settings-status" id="settings-cosmos-status"></p>
+          <code class="settings-path" id="settings-cosmos-dir" hidden></code>
+          <div class="settings-actions">
+            <button class="notes-btn" id="settings-cosmos-upgrade" type="button">下载 8K 贴图</button>
+            <button class="notes-btn" id="settings-cosmos-cancel" type="button" hidden>取消下载</button>
+            <button class="notes-btn" id="settings-cosmos-clear" type="button" hidden>清除 8K 贴图</button>
+          </div>
+          <p class="settings-error" id="settings-cosmos-error" hidden></p>
+        </div>
         <div class="settings-card" id="settings-mcp-card">
           <p class="settings-title">Agent 连接（MCP）</p>
           <p class="settings-hint">
@@ -614,8 +629,7 @@
           <p class="settings-error" id="settings-mcp-error" hidden></p>
         </div>
         <p class="settings-credit">
-          宇宙主题的星体贴图来自 Solar System Scope（CC BY 4.0），星云影像来自 NASA/ESA
-          哈勃望远镜（公有领域）。
+          宇宙主题的星体与银河贴图来自 Solar System Scope（CC BY 4.0）。
         </p>
       </section>
     </div>

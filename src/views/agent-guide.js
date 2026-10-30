@@ -55,7 +55,7 @@ const SECTIONS = [
 { "theme": "cosmos" }
 ~~~
 
-id 从 theme_list 拿。调 "cosmos" 会给空间页打开实时深空背景：三层视差星野、真实银河与星云、带光照和自转的行星（含土星环）、偶发流星；换成别的主题就收起。主题是应用级设置，不影响任何空间数据，也不会自动切页。
+id 从 theme_list 拿。调 "cosmos" 会给空间页打开一条自动飞行的深空航线：镜头一直往前飞，好几分钟才遇到一颗——远处先是一枚会眨的亮星，越飞越大才显出球体，追上一颗就贴着它慢飞两三圈看表面，看完顺切线方向接着走；镜头里同时只画一颗星体。星野钉在天球方向上，镜头一转就换一片星空。飞行层的细节看「宇宙飞行」那一章。主题是应用级设置，不影响任何空间数据，也不会自动切页。
 
 ### space_list
 列出全部空间：[{id,name,path}]，current 标出当前空间。
@@ -92,6 +92,44 @@ id 从 theme_list 拿。调 "cosmos" 会给空间页打开实时深空背景：�
 ~~~
 
 返回里的 id 就是后面 block_update / connector_create / 内容工具要的 id。`,
+  },
+  {
+    id: "flight",
+    title: "宇宙飞行",
+    body: `## 宇宙飞行（3 个工具）
+
+宇宙主题的背景是一条自动航线，不需要你驱动：镜头一直往前飞，好几分钟才遇到一颗——远处先是一枚会眨的亮星，越飞越大才显出球体，追上以后绕几圈看表面，看完顺切线方向启程。地球特殊，绕四圈：头两圈退在 1.65 倍半径把整颗球、大气边和昼夜线看全，之后慢慢降到 1.3 倍掠地表。镜头里同时只画一颗星体，星体自己不自转，全靠镜头绕飞换面。这几个工具只调节奏和目的地。
+
+### flight_state
+看现在飞到哪了：phase（cruise 巡航 / approach 逼近 / orbit 绕飞观察 / depart 启程）、paused、speed、travelled（累计航程）、pitch（视线仰角，正=抬头）、focus（当前目标星体，绕飞时带 lap/laps 圈数、radius 当前半径、target 这一段要收到的半径、remaining 剩余秒数——地球的 target 会在两圈后掉一档）、ahead[]（前方星体：id、type、name 中文名、distance、radius、visited）、textures（hi = 本机就位几张 8K，resident = 此刻进显存的贴图名，空数组说明正用内置 2K）。
+
+不知道有什么可飞就先调它，goto 要的 id 从 ahead 里拿。不在宇宙主题时它会自动切过去。
+
+### flight_control
+~~~json
+{ "action": "goto", "type": "saturn" }
+~~~
+
+- pause：停住，方便看清当前这颗。
+- resume：接着飞。
+- skip：正在绕飞就结束这一圈立刻启程；在巡航/逼近就把当前目标划掉换下一颗。
+- goto：追某一颗，带 body（ahead 里的 id）或 type（earth/moon/mars/jupiter/saturn）；type 找不到就现生成一颗摆在正前方。goto 会顺带 resume。
+
+~~~json
+{ "action": "skip" }
+~~~
+
+航线本身不接受外部驱动：goto 之外没有任何「往左飞」「加速」的工具，用户在工作区平移/缩放只是小幅转头和长焦，不会改航线。别为了「飞到某处」去动相机工具，那只会改变镜头偏角。
+
+### cosmos_textures
+星体表面内置是 2K 贴图，飞近了会糊；同一套贴图的 8K 版是 7 张，用户手动升级后存在数据文件夹的 cosmos/8k/，离线照用。
+
+- status：档位、目录、已就位几张/共几张、总字节、running 有没有活在跑。
+- upgrade：启动后台下载缺的那几张（已下好的跳过），**立刻返回**，不等收尾——整包约 35MB，慢链路要几分钟。返回里带 note 告诉你怎么跟进：隔 30 秒调一次 status 看 got 涨到 7/7 就完事，中间别重复 upgrade。
+- cancel：停掉当前下载，已下好的留着。
+- reset：把 8K 清进系统回收站，回到内置 2K。
+
+不升级完全不影响飞行，所以别主动 upgrade——先问用户，他点了设置里那个按钮或明确同意之后再调。8K 只给镜头里当前这颗驻留，换星体就释放。`,
   },
   {
     id: "block",
@@ -510,6 +548,7 @@ notes_tree → notes_create_folder {name:"归档", dir:""} → notes_move {path:
 - PDF 页码从 1 开始，电子书章节从 0 开始；PDF 没读完不能跳页。
 - 删除去向：space_delete 进回收站，notes_delete 永久，block_delete 不可撤销。
 - 设置页换数据目录和窗口控制没有工具；改主题用 theme_set，先 theme_list 拿 id。
+- 宇宙主题的航线不能用相机工具驱动：camera_pan / camera_zoom 只是小幅转头和长焦，要改飞行节奏请用 flight_control。
 - 文件选择对话框不存在，改为直接传 path。
 - pace:"instant" 只跳过演示，不改变结果；默认 normal 更适合让用户看着你干活。`,
   },

@@ -62,6 +62,14 @@ export function initSettings() {
   ui.mcpReset = document.querySelector("#settings-mcp-reset");
   ui.mcpStatus = document.querySelector("#settings-mcp-status");
   ui.mcpError = document.querySelector("#settings-mcp-error");
+  ui.cosmosCard = document.querySelector("#settings-cosmos-card");
+  ui.cosmosHint = document.querySelector("#settings-cosmos-hint");
+  ui.cosmosStatus = document.querySelector("#settings-cosmos-status");
+  ui.cosmosDir = document.querySelector("#settings-cosmos-dir");
+  ui.cosmosUpgrade = document.querySelector("#settings-cosmos-upgrade");
+  ui.cosmosCancel = document.querySelector("#settings-cosmos-cancel");
+  ui.cosmosClear = document.querySelector("#settings-cosmos-clear");
+  ui.cosmosError = document.querySelector("#settings-cosmos-error");
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -70,7 +78,11 @@ export function initSettings() {
   ui.ffmpegRecheck.addEventListener("click", refreshFfmpeg);
   ui.mcpCopy.addEventListener("click", copyMcpConfig);
   ui.mcpReset.addEventListener("click", resetMcpToken);
+  ui.cosmosUpgrade.addEventListener("click", upgradeCosmosTextures);
+  ui.cosmosCancel.addEventListener("click", cancelCosmosTextures);
+  ui.cosmosClear.addEventListener("click", clearCosmosTextures);
   setupMoveEvents();
+  setupCosmosEvents();
 }
 
 function setupMoveEvents() {
@@ -95,6 +107,7 @@ export async function refreshSettings() {
   }
   refreshFfmpeg();
   refreshMcp();
+  refreshCosmos();
 }
 
 function sameDir(a, b) {
@@ -391,5 +404,141 @@ async function resetMcpToken() {
     showMcpStatus("token 已重置，请重新复制连接配置");
   } catch (error) {
     showMcpError(String(error));
+  }
+}
+
+/* ---------- 宇宙贴图 ---------- */
+
+/* 内置 2K 是保底，8K 只服务一件事：飞近贴脸时表面别糊。
+   下全了这张卡就该安静下来——一行状态加一个清除，说明文案收掉，
+   因为这时候用户没有任何事要干。下载中才把进度摊开。 */
+let cosmosStatus = null;
+let cosmosLive = null;
+const TEX_LABEL = {
+  "earth-day": "地球白天面",
+  "earth-night": "地球夜面",
+  moon: "月球",
+  mars: "火星",
+  jupiter: "木星",
+  saturn: "土星",
+  "saturn-ring": "土星环",
+};
+
+function showCosmosError(message) {
+  ui.cosmosError.textContent = message;
+  ui.cosmosError.hidden = !message;
+}
+
+function mibText(bytes) {
+  if (!bytes) return "0 MB";
+  const mib = bytes / 1024 / 1024;
+  return `${mib >= 10 ? Math.round(mib) : mib.toFixed(1)} MB`;
+}
+
+async function refreshCosmos() {
+  showCosmosError("");
+  try {
+    cosmosStatus = await invoke("cosmos_tex_status");
+  } catch (error) {
+    cosmosStatus = null;
+    ui.cosmosStatus.textContent = "贴图状态读取失败";
+    ui.cosmosUpgrade.disabled = true;
+    showCosmosError(String(error));
+    return;
+  }
+  paintCosmos();
+}
+
+function paintCosmos() {
+  const s = cosmosStatus;
+  const downloading = Boolean(cosmosLive) || s.running;
+  ui.cosmosHint.hidden = s.complete && !downloading;
+  ui.cosmosDir.hidden = s.empty;
+  ui.cosmosDir.textContent = s.dir;
+  ui.cosmosClear.hidden = s.empty;
+  ui.cosmosUpgrade.hidden = downloading;
+  ui.cosmosCancel.hidden = !downloading;
+  if (downloading) return;
+  if (s.complete) {
+    ui.cosmosStatus.textContent = `星体表面用 8K 贴图（${mibText(s.bytes)}）`;
+    return;
+  }
+  if (s.empty) {
+    ui.cosmosStatus.textContent = "星体表面用内置 2K 贴图";
+    return;
+  }
+  ui.cosmosStatus.textContent = `8K 只下到 ${s.got}/${s.total}（${mibText(s.bytes)}）`;
+}
+
+function setupCosmosEvents() {
+  const listen = window.__TAURI__?.event?.listen;
+  if (typeof listen !== "function") return;
+  Promise.resolve(
+    listen("cosmos-textures", (event) => {
+      const payload = event?.payload;
+      if (!payload) return;
+      if (["done", "partial", "canceled"].includes(payload.state)) {
+        cosmosLive = null;
+        refreshCosmos().then(() => announceCosmosTextures());
+        if (payload.error) showCosmosError(payload.error);
+        else if (payload.state === "done") ui.cosmosStatus.textContent = "8K 贴图已就位";
+        return;
+      }
+      cosmosLive = payload;
+      if (payload.state !== "downloading") return;
+      const share = payload.expected
+        ? ` · ${Math.round((payload.received / payload.expected) * 100)}%`
+        : "";
+      ui.cosmosStatus.textContent =
+        `正在下载 ${payload.index}/${payload.total} · ` +
+        `${TEX_LABEL[payload.name] || "星体"} ${mibText(payload.received)}${share}`;
+    }),
+  ).catch(() => {});
+}
+
+/* 贴图档位变了，宇宙主题那边要重新问一次状态：正在飞的航线下一颗就该用新档。 */
+function announceCosmosTextures() {
+  window.dispatchEvent(new CustomEvent("cosmos-textures-changed"));
+}
+
+async function upgradeCosmosTextures() {
+  showCosmosError("");
+  try {
+    cosmosLive = { state: "starting" };
+    ui.cosmosStatus.textContent = "开始下载…";
+    await invoke("cosmos_tex_upgrade");
+    paintCosmos();
+  } catch (error) {
+    cosmosLive = null;
+    showCosmosError(String(error));
+    paintCosmos();
+  }
+}
+
+async function cancelCosmosTextures() {
+  try {
+    await invoke("cosmos_tex_cancel");
+    ui.cosmosStatus.textContent = "正在取消…";
+  } catch (error) {
+    showCosmosError(String(error));
+  }
+}
+
+async function clearCosmosTextures() {
+  const ok = await confirmDialog({
+    title: "清除 8K 贴图",
+    message: "删掉下载的那 7 张 8K，星体回到内置 2K。文件进系统回收站，随时能再下一遍。",
+    okText: "清除",
+    danger: true,
+  });
+  if (!ok) return;
+  showCosmosError("");
+  try {
+    await invoke("cosmos_tex_reset");
+    cosmosLive = null;
+    await refreshCosmos();
+    announceCosmosTextures();
+  } catch (error) {
+    showCosmosError(String(error));
   }
 }

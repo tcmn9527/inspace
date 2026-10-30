@@ -31,6 +31,9 @@ tokio = { version = "1", features = ["net", "time", "sync"] }
 # 空间这边已经不直接开文件了，这条留着只为把 shellexecute-on-windows 这个 feature
 # 钉在依赖树上：opener 插件也用它，关掉的话它会去拉一个 powershell.exe 子进程。
 open = { version = "5", features = ["shellexecute-on-windows"] }
+# 8K 贴图要在应用里自己下：贴图站不给跨域头，前端 fetch 被挡，只能从这条线走。
+# 只开 tls，用内置的根证书，不跟系统证书库和解压库较劲。
+ureq = { version = "2", default-features = false, features = ["tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 图片粘贴：前端传 base64，这里解码落盘

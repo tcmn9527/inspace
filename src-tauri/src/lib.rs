@@ -1,4 +1,5 @@
 mod canvas;
+mod cosmos;
 mod db;
 mod ebook;
 mod ffmpeg;
@@ -38,6 +39,8 @@ pub fn run() {
             app.manage(data_root);
             // 视频拷贝是后台线程在跑，用 Arc 包一层才既能在命令里读、又能挪进线程
             app.manage(Arc::new(canvas::VideoCopyJobs::default()));
+            // 8K 贴图包的下载同样在后台线程跑，取消只改这份共享标志
+            app.manage(Arc::new(cosmos::CosmosJobs::default()));
             // 换数据目录的搬运同理：进度在后台线程报，停止只改标志
             app.manage(Arc::new(store::RootMoveJobs::default()));
             app.manage(db_state);
@@ -150,6 +153,11 @@ pub fn run() {
             canvas::canvas_note_write_back,
             ffmpeg::ffmpeg_status,
             ffmpeg::ffmpeg_reveal,
+            cosmos::cosmos_tex_status,
+            cosmos::cosmos_tex_upgrade,
+            cosmos::cosmos_tex_cancel,
+            cosmos::cosmos_tex_reset,
+            cosmos::cosmos_tex_read,
             canvas::canvas_reveal,
             mcp::mcp_register_tools,
             mcp::mcp_reply,

@@ -34,6 +34,8 @@ pub const TODO_DIR: &str = "todos";
 /// 笔记树和空间各自的子目录名，notes.rs / canvas.rs 认这两个
 pub const NOTE_DIR: &str = "notes";
 pub const SPACE_DIR: &str = "spaces";
+/// 宇宙主题下载过的 8K 贴图缓存，跟数据根走，换文件夹一并搬
+pub const COSMOS_DIR: &str = "cosmos";
 /// 旧版把空间放在 canvases/ 下，启动时整批改名
 pub const LEGACY_CANVAS_DIR: &str = "canvases";
 
@@ -133,7 +135,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 }
 
 fn ensure_dirs(root: &Path) -> Result<(), String> {
-    for sub in [NOTE_DIR, SPACE_DIR] {
+    for sub in [NOTE_DIR, SPACE_DIR, COSMOS_DIR] {
         let dir = root.join(sub);
         fs::create_dir_all(&dir).map_err(|e| format!("无法创建目录 {}：{e}", dir.display()))?;
     }
@@ -407,7 +409,7 @@ fn check_nesting(from: &Path, to: &Path, default_root: &Path) -> Result<(), Stri
     if nested(to, from) || nested(from, to) {
         return Err("不能选择当前数据文件夹的子文件夹或上级文件夹".to_string());
     }
-    for sub in [STICKY_DIR, TODO_DIR, NOTE_DIR, SPACE_DIR, LEGACY_CANVAS_DIR] {
+    for sub in [STICKY_DIR, TODO_DIR, NOTE_DIR, SPACE_DIR, COSMOS_DIR, LEGACY_CANVAS_DIR] {
         let dir = default_root.join(sub);
         if same_dir(to, &dir) || nested(to, &dir) {
             return Err(format!(
@@ -547,9 +549,9 @@ fn label_of(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// 一共要过手多少个文件：笔记和空间各是一棵树，整棵数进去。
+/// 一共要过手多少个文件：笔记、空间和 8K 贴图缓存各是一棵树，整棵数进去。
 fn count_files(root: &Path) -> u64 {
-    [NOTE_DIR, SPACE_DIR]
+    [NOTE_DIR, SPACE_DIR, COSMOS_DIR]
         .iter()
         .map(|sub| walk_files(&root.join(sub)))
         .sum()
@@ -691,11 +693,11 @@ fn transfer_tree(
     Ok(())
 }
 
-/// 把笔记树和空间弄到新目录，全程报进度；`from` 是旧根，报路径拿它当基准。
+/// 把笔记树、空间和下过的 8K 贴图弄到新目录，全程报进度；`from` 是旧根，报路径拿它当基准。
 /// 旧版便签/待办那两个目录不跟着搬：剪贴时顺手收进回收站，拷贝一律不碰旧文件夹。
 fn transfer_data(from: &Path, to: &Path, keep_source: bool, prog: &Progress) -> Result<(), Halted> {
     ensure_dirs(to)?;
-    for sub in [NOTE_DIR, SPACE_DIR] {
+    for sub in [NOTE_DIR, SPACE_DIR, COSMOS_DIR] {
         transfer_tree(from, &from.join(sub), &to.join(sub), keep_source, prog)?;
     }
     if !keep_source {

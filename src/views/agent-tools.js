@@ -9,6 +9,7 @@
 import { GUIDE_TOPICS, guideText } from "./agent-guide.js";
 import { canvasAgent } from "./canvas.js";
 import { notesAgent } from "./notes.js";
+import { cosmosFlight, cosmosFlightControl } from "./cosmos.js";
 import { LIGHT_THEMES, THEMES, currentTheme, setTheme } from "./theme.js";
 
 const { invoke } = window.__TAURI__.core;
@@ -59,9 +60,31 @@ const TOOL_DEFS = [
   }),
   def("app_state", "看当前应用状态：正在哪一页、数据文件夹、当前主题、当前空间和相机、当前打开的笔记、MCP 服务端口。"),
   def("theme_list", "列出所有主题（id、名字、深色/浅色），并标出当前用的那套。"),
-  def("theme_set", "切换应用主题。宇宙主题会给空间打开实时深空背景（星野、星云、行星）。", {
+  def("theme_set", "切换应用主题。宇宙主题是一条自动飞行航线：镜头一直往前飞，路上遇到星体会绕两圈慢慢看。", {
     theme: { type: "string", description: "主题 id，从 theme_list 拿" },
   }, ["theme"]),
+  def(
+    "flight_state",
+    "看宇宙主题的飞行状态：现在在哪个阶段（cruise 巡航 / approach 逼近 / orbit 绕飞观察 / depart 启程）、速度、累计航程、视线仰角、目标星体与前方星体列表（含 id、类型、距离）。要先知道有什么可飞就调它。需要当前是宇宙主题。",
+  ),
+  def(
+    "flight_control",
+    "控制宇宙飞行：pause 停住、resume 接着飞、skip 结束当前绕飞直接启程、goto 追某一颗星体（body 用 flight_state 里的 id，type 用 earth/moon/mars/jupiter/saturn）。航线本身是自动的，这些只改节奏不改块。",
+    {
+      action: { type: "string", enum: ["pause", "resume", "skip", "goto"], description: "飞行操作" },
+      body: { type: "string", description: "goto 用：星体 id（flight_state 的 ahead 列表里拿）" },
+      type: { type: "string", description: "goto 用：星体类型 earth/moon/mars/jupiter/saturn，没有 id 时按类型挑或现生成一颗" },
+    },
+    ["action"],
+  ),
+  def(
+    "cosmos_textures",
+    "管宇宙主题的 8K 贴图集（7 张，存在数据文件夹的 cosmos/8k/）。status 看档位（got/total、每张在不在、此刻有没有活在跑）；upgrade 启动后台下载缺的那几张并立刻返回——整包约 35MB、要几分钟，别重复调用，隔 30 秒调一次 status 看 got 就行；cancel 停掉当前下载；reset 把 8K 清进系统回收站、回到内置 2K。不升级也照飞，只是贴到脸上时表面糊。",
+    {
+      action: { type: "string", enum: ["status", "upgrade", "cancel", "reset"], description: "贴图操作" },
+    },
+    ["action"],
+  ),
   def("space_list", "列出所有空间（id、名字、文件夹路径），并标出当前打开的是哪个。"),
   def("space_open", "切换到指定空间，等它读完再返回。space 传空间 id 或空间名。", {
     space: { type: "string", description: "空间 id 或名字" },
@@ -372,6 +395,60 @@ async function themeSet(args) {
   return { theme: applied };
 }
 
+/* 飞行工具默认先把宇宙主题打开，和切页一样让用户当场看得见 */
+async function ensureCosmos(args) {
+  if (currentTheme() === "cosmos") return null;
+  setTheme("cosmos");
+  await beat(args);
+  return "已切到宇宙主题，航线开始飞";
+}
+
+async function flightState(args) {
+  const note = await ensureCosmos(args);
+  return { ...(note ? { note } : {}), ...cosmosFlight() };
+}
+
+async function flightControl(args) {
+  const note = await ensureCosmos(args);
+  const result = cosmosFlightControl(args.action, args.body ?? args.type);
+  return { ...(note ? { note } : {}), ...result };
+}
+
+/* 下载在 Rust 的后台线程上跑，整包七张要几分钟，比前端命令的等待上限长得多：
+   所以启动完就返回，让 agent 自己隔一会儿调一次 status。坐着等只会回一个假错误。 */
+async function cosmosTextures(args) {
+  const action = args.action;
+  if (action === "upgrade") {
+    await invoke("cosmos_tex_upgrade");
+    const status = await invoke("cosmos_tex_status");
+    return {
+      ...status,
+      note:
+        "下载已在后台跑，整包约 35MB、要几分钟；隔 30 秒调一次 action:\"status\" 看 got/total，" +
+        "跑完下一颗星体自动用新档，中间别再调 upgrade",
+    };
+  }
+  if (action === "cancel") {
+    await invoke("cosmos_tex_cancel");
+    return {
+      ...(await invoke("cosmos_tex_status")),
+      note: "已请求取消，下过的那几张留着",
+    };
+  }
+  if (action === "reset") {
+    await invoke("cosmos_tex_reset");
+    window.dispatchEvent(new CustomEvent("cosmos-textures-changed"));
+    return { ...(await invoke("cosmos_tex_status")), note: "8K 已进系统回收站，回到内置 2K" };
+  }
+  const status = await invoke("cosmos_tex_status");
+  /* 设置页没开着时没人通知渲染层档位变了；agent 轮到这里发现盘上的张数
+     和渲染层以为的不一样，就提醒它重问一次——不然新下的 8K 要等下次进主题才生效 */
+  if (!status.running && status.got !== (cosmosFlight().textures?.hi ?? -1)) {
+    window.dispatchEvent(new CustomEvent("cosmos-textures-changed"));
+  }
+  return status;
+}
+
 async function dispatch(name, args) {
   switch (name) {
     case "guide":
@@ -382,6 +459,12 @@ async function dispatch(name, args) {
       return themeList();
     case "theme_set":
       return themeSet(args);
+    case "flight_state":
+      return flightState(args);
+    case "flight_control":
+      return flightControl(args);
+    case "cosmos_textures":
+      return cosmosTextures(args);
 
     case "space_list":
       return onCanvas(args, () => canvasAgent.spaceList());

@@ -113,13 +113,18 @@ id 从 theme_list 拿。调 "cosmos" 会给空间页打开一条自动飞行的�
 - pause：停住，方便看清当前这颗。
 - resume：接着飞。
 - skip：正在绕飞就结束这一圈立刻启程；在巡航/逼近就把当前目标划掉换下一颗。
-- goto：追某一颗，带 body（ahead 里的 id）或 type（earth/moon/mars/jupiter/saturn）；type 找不到就现生成一颗摆在正前方。goto 会顺带 resume。
+- goto：追某一颗，带 body（ahead 里的 id）或 type（earth/moon/mars/jupiter/saturn）；type 找不到就现生成一颗摆在正前方。goto 会顺带 resume。**goto 只是改目的地，镜头照旧按 150/秒 赶过去，追上要几分钟。**
+- warp：直接挪到某一颗旁边，省掉赶路。同样带 body 或 type，可选 distance（落点距星心多少倍星体半径，默认 2.5）。落点沿「星→镜头」这条射线，所以看到的还是刚才那一面；落地后仍旧自然走「逼近→进轨→绕飞」，一两秒就开始绕。要看某颗星的脸就用它，别用 goto 干等。
+
+~~~json
+{ "action": "warp", "type": "earth", "distance": 6 }
+~~~
 
 ~~~json
 { "action": "skip" }
 ~~~
 
-航线本身不接受外部驱动：goto 之外没有任何「往左飞」「加速」的工具，用户在工作区平移/缩放只是小幅转头和长焦，不会改航线。别为了「飞到某处」去动相机工具，那只会改变镜头偏角。
+航线本身不接受外部驱动：goto / warp 之外没有任何「往左飞」「加速」的工具，用户在工作区平移/缩放只是小幅转头和长焦，不会改航线。别为了「飞到某处」去动相机工具，那只会改变镜头偏角。
 
 ### cosmos_textures
 星体表面内置是 2K 贴图，飞近了会糊；同一套贴图的 8K 版是 7 张，用户手动升级后存在数据文件夹的 cosmos/8k/，离线照用。

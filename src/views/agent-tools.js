@@ -69,11 +69,12 @@ const TOOL_DEFS = [
   ),
   def(
     "flight_control",
-    "控制宇宙飞行：pause 停住、resume 接着飞、skip 结束当前绕飞直接启程、goto 追某一颗星体（body 用 flight_state 里的 id，type 用 earth/moon/mars/jupiter/saturn）。航线本身是自动的，这些只改节奏不改块。",
+    "控制宇宙飞行：pause 停住、resume 接着飞、skip 结束当前绕飞直接启程、goto 追某一颗星体（body 用 flight_state 里的 id，type 用 earth/moon/mars/jupiter/saturn）、warp 直接挪到某一颗旁边跳过赶路。航线本身是自动的，这些只改节奏不改块。",
     {
-      action: { type: "string", enum: ["pause", "resume", "skip", "goto"], description: "飞行操作" },
-      body: { type: "string", description: "goto 用：星体 id（flight_state 的 ahead 列表里拿）" },
-      type: { type: "string", description: "goto 用：星体类型 earth/moon/mars/jupiter/saturn，没有 id 时按类型挑或现生成一颗" },
+      action: { type: "string", enum: ["pause", "resume", "skip", "goto", "warp"], description: "飞行操作" },
+      body: { type: "string", description: "goto / warp 用：星体 id（flight_state 的 ahead 列表里拿）" },
+      type: { type: "string", description: "goto / warp 用：星体类型 earth/moon/mars/jupiter/saturn，没有 id 时按类型挑或现生成一颗" },
+      distance: { type: "number", description: "warp 用：落点距星心多少倍星体半径，默认 2.5（一两秒后进绕飞）；想先看全貌就填 6 以上" },
     },
     ["action"],
   ),
@@ -410,7 +411,7 @@ async function flightState(args) {
 
 async function flightControl(args) {
   const note = await ensureCosmos(args);
-  const result = cosmosFlightControl(args.action, args.body ?? args.type);
+  const result = cosmosFlightControl(args.action, args.body ?? args.type, args.distance);
   return { ...(note ? { note } : {}), ...result };
 }
 

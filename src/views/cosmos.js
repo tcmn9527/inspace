@@ -37,14 +37,26 @@ const LEAD = 30000;
    垂直半视场约 43.6°：1.45 倍时地平线刚好压在画面上下边，
    1.3 倍时地表铺满正中、弧形地平线退到四角——低空掠过表面但又不至于看不出是个球 */
 const ORBIT_K = 1.3;
-const LAP_TIME = 68;
+/* 绕飞一圈几秒。这是「欣赏」而不是「路过」的时间尺度：一两圈摊到三到五分钟，
+   一屏的地表慢慢推过去，看得清环形山也看得出弧线。它也直接决定贴图在屏幕上
+   每秒扫过多少像素，越快越容易看出采样颗粒。 */
+const LAP_TIME = 150;
+/* 绕飞时球面贴图在屏幕上扫过约 220 设备像素每秒、一帧跨过 3.6 个（68 秒一圈时量到的是 8 个）。
+   零时长的锐利采样会让高频纹素逐帧换个相位落在同一个像素上——频闪，观感就是
+   「轮廓不动、里面的地表在游」。真实相机 1/60 秒快门里这段位移本来拖成一条线，所以照片不觉得抖。
+   这里沿本帧的位移方向铺几枚瞬时采样求平均，把高于奈奎斯特的那部分抖回压掉。乘子就是「快门时长」：
+   1 等于一帧全曝光，0 等于瞬时快照（回到原来的抖），2 是更长的拖影。 */
+const MOTION_BLUR = 1;
+const BLUR_TAPS = 5;
+/* 单帧最多按这么长（CSS 像素）来糊：正常绕飞用不到，只有 warp 那种瞬移会碰到 */
+const MAX_SWEEP_PX = 24;
 const CLOSEST_K = 1.12;
-/* 地球分两段：头两圈退到 1.65 倍，把整颗球、大气边和昼夜线看全；
-   这两圈走完再把目标半径收到 1.3 倍去掠地表。半径一直是按比例慢慢收的，
+/* 地球分两段：头一圈退到 1.65 倍，把整颗球、大气边和昼夜线看全；
+   这一圈走完再把目标半径收到 1.3 倍去掠地表。半径一直是按比例慢慢收的，
    换段只是目标值变了，不会出现一帧之内的跳 */
 const EARTH_FAR_K = 1.65;
-const EARTH_FAR_LAPS = 2;
-const EARTH_NEAR_LAPS = 2;
+const EARTH_FAR_LAPS = 1;
+const EARTH_NEAR_LAPS = 1.5;
 /* 上轨不是瞬移：离到 1.8 倍轨道半径就开始收，头几秒仍然带着「往里飞」的动量，
    切向速度慢慢加进来，走成螺旋，免得背景流动一帧之内从「往前」换成「横着绕」 */
 const ORBIT_ENTER_K = 1.8;
@@ -58,6 +70,9 @@ const SPAWN_LATERAL = 5200;
 const SPAWN_VERTICAL = 3200;
 /* 直接点名的那颗（MCP goto）不该让人先飞五分钟才看到 */
 const GOTO_DIST = ENGAGE + 2000;
+/* MCP warp 的默认落点：距星心多少倍星体半径。2.5 倍落在进轨门槛外一点点，
+   接着自然走「逼近→进轨」，一两秒就开始绕，不至于凭空插进绕飞状态 */
+const WARP_R = 2.5;
 const MAX_BODIES = 8;
 /* 前方常备几颗，镜头里同时只画一颗，但下一颗得已经在路上 */
 const KEEP_AHEAD = 3;
@@ -282,10 +297,10 @@ export function cosmosFlight() {
 }
 
 const ACTION_HINTS =
-  "pause 停住看当前这颗；resume 接着飞；skip 结束绕飞或跳过没追上的目标，立刻启程去下一颗；goto {body|type} 追某一颗（body 用 ahead 里的 id，type 是 earth/moon/mars/jupiter/saturn）";
+  "pause 停住看当前这颗；resume 接着飞；skip 结束绕飞或跳过没追上的目标，立刻启程去下一颗；goto {body|type} 追某一颗（body 用 ahead 里的 id，type 是 earth/moon/mars/jupiter/saturn）；warp {body|type} 直接挪到某一颗旁边，不再飞几分钟的路";
 
 /* 飞行控制：MCP 工具调这个，界面手势以后也能调 */
-export function cosmosFlightControl(action, arg) {
+export function cosmosFlightControl(action, arg, distance) {
   const f = state.flight;
   if (!f) return { ok: false, note: "宇宙主题还没激活" };
   const kind = String(action || "").trim().toLowerCase();
@@ -301,8 +316,10 @@ export function cosmosFlightControl(action, arg) {
       break;
     case "goto":
       return gotoBody(arg);
+    case "warp":
+      return warpBody(arg, distance);
     default:
-      throw new Error(`不认识的飞行操作：${kind || "(空)"}；可用 pause / resume / skip / goto。${ACTION_HINTS}`);
+      throw new Error(`不认识的飞行操作：${kind || "(空)"}；可用 pause / resume / skip / goto / warp。${ACTION_HINTS}`);
   }
   return { ok: true, action: kind, ...cosmosFlight() };
 }
@@ -529,14 +546,23 @@ function drawBodies(view) {
       break;
     }
   }
-  if (!b) return;
+  if (!b) {
+    state.heroTrack = null;
+    return;
+  }
   useHiRes(b);
   const sunView = normalize3(applyMat3(view.w2c, SUN_WORLD));
+  const blur = trackSweep(b, view);
 
   gl.enable(gl.DEPTH_TEST);
   gl.depthFunc(gl.LEQUAL);
   gl.disable(gl.BLEND);
-  drawSphere(b, body, sunView);
+  /* 球是封闭的，远侧那半个半球本来就不该画：靠近轮廓的地方前后两层只差十几个世界单位，
+     而 near=4 / far=160000 把 16 位深度在绕飞距离上压到约 30 单位一格，谁赢只剩舍入。
+     背面剔除把这层不确定性一起去掉，也少画一半三角形。 */
+  gl.enable(gl.CULL_FACE);
+  drawSphere(b, body, sunView, blur);
+  gl.disable(gl.CULL_FACE);
 
   if (PLANET_DEFS[b.type].ring && texOf("saturn-ring")) {
     gl.depthMask(false);
@@ -550,7 +576,37 @@ function drawBodies(view) {
   drawHeroFlare(b, body);
 }
 
-function drawSphere(b, body, sunView) {
+/* 本帧贴图在屏幕上划过多少设备像素（乘上 MOTION_BLUR 后交给着色器）。
+   取上一帧正对镜头的那个球面点，用本帧视线再投一次，两次之差就是内容这一帧走过的路——
+   贴脸掠地表才有几个像素，巡航和暂停时接近 0，所以只有绕飞才糊。换星体那一帧没有可比的前值，
+   给 0；warp 那种一帧挪几万米的会算出巨大的位移，按上限夹住，宁可少糊不可乱糊。 */
+function trackSweep(b, view) {
+  const dir = normalize3(vecSub(view.pos, b.pos));
+  const near = combine3(b.pos, 1, dir, b.r, [0, 0, 0], 0);
+  const now = projectOffset(near, view);
+  const t = state.heroTrack;
+  let out = [0, 0];
+  if (t && t.id === b.id && now) {
+    const k = state.dpr * MOTION_BLUR;
+    out = [
+      clamp(now[0] - t.x, -MAX_SWEEP_PX, MAX_SWEEP_PX) * k,
+      clamp(now[1] - t.y, -MAX_SWEEP_PX, MAX_SWEEP_PX) * k,
+    ];
+  }
+  state.heroTrack = now ? { id: b.id, x: now[0], y: now[1] } : null;
+  return out;
+}
+
+/* 世界点投到画面中心右边/上边各多少 CSS 像素（不带屏幕原点，只差值用） */
+function projectOffset(p, view) {
+  const c = applyMat3(view.w2c, vecSub(p, view.pos));
+  const d = -c[2];
+  if (d <= 1e-3) return null;
+  const f = state.proj.focal;
+  return [(c[0] / d) * f, (c[1] / d) * f];
+}
+
+function drawSphere(b, body, sunView, blur) {
   const def = PLANET_DEFS[b.type];
   const dayTex = texOf(def.day);
   if (!dayTex) return;
@@ -563,6 +619,9 @@ function drawSphere(b, body, sunView) {
   gl.uniformMatrix3fv(prog.u.u_rot, false, body.rot);
   gl.uniform3fv(prog.u.u_camc, body.camc);
   gl.uniform1f(prog.u.u_radius, b.r);
+  gl.uniform1f(prog.u.u_focal, state.proj.focal);
+  gl.uniform1f(prog.u.u_dpr, state.dpr);
+  gl.uniform2f(prog.u.u_blur, blur[0], blur[1]);
   gl.uniform1f(prog.u.u_brightness, def.brightness);
   gl.uniform3fv(prog.u.u_atmo, def.atmo || [0, 0, 0]);
   gl.uniform3fv(prog.u.u_sunView, sunView);
@@ -778,10 +837,24 @@ function departStep(f, dt) {
   f.route = normalize3(combine3(f.route, 1 - k, away, k, [0, 0, 0], 0));
   steerView(f, f.route, dt);
   advance(f, dt);
-  if (vecLen(rel) > orbitR * 1.5) {
+  /* 交回巡航的时机看画面，不看距离：绕飞结束时这颗还占着大半个屏幕，
+     一到 1.5 倍轨道半径就把它从主角里撤掉，星球会凭空消失。等它慢慢滑出视野再撤。 */
+  const d = vecLen(rel);
+  if (d > orbitR * 1.5 && (d > orbitR * 8 || !discInSight(b, f))) {
     f.focus = null;
     f.phase = "cruise";
   }
+}
+
+/* 这颗的圆面（连环一起）还有没有一部分在画面里 */
+function discInSight(b, f) {
+  const rel = vecSub(b.pos, f.pos);
+  const d = vecLen(rel);
+  if (d < 1) return true;
+  const off = Math.acos(clamp(vecDot(rel, normalize3(f.view)) / d, -1, 1));
+  /* 视锥横向半角 + 这颗自己的角半径；已经大到包住整个视野时算出来的就是「在画面里」 */
+  const half = Math.atan2(state.w / 2, state.proj.focal) + Math.asin(Math.min(0.999, (b.r * 2.6) / d));
+  return off < half;
 }
 
 function approachSpeed(d, orbitR) {
@@ -808,7 +881,9 @@ function enterOrbit(f, b, orbitR) {
   /* 地球走两段：先 1.65 倍把整颗球看全，两圈到了换的点再把目标降到 1.3 倍 */
   const earth = b.type === "earth";
   const firstR = earth ? b.r * EARTH_FAR_K : orbitR;
-  const laps = earth ? EARTH_FAR_LAPS + EARTH_NEAR_LAPS : 2 + (b.rnd() < 0.55 ? 1 : 0);
+  /* 一圈 150 秒，绕一两圈就是三到五分钟——看得完，又不至于走不了。
+     末了那 1.5 弧度（约 36 秒）本来就在偏头准备启程，不算一整圈 */
+  const laps = earth ? EARTH_FAR_LAPS + EARTH_NEAR_LAPS : 1.5 + (b.rnd() < 0.55 ? 0.5 : 0);
   f.orbit = {
     u1: o1,
     u2,
@@ -851,8 +926,19 @@ function skipEncounter() {
 function gotoBody(arg) {
   const f = state.flight;
   if (!f) return { ok: false, note: "宇宙主题还没激活" };
+  const body = resolveTarget(f, arg);
+  f.focus = body;
+  body.visited = false;
+  f.orbit = null;
+  f.phase = "approach";
+  f.paused = false;
+  return { ok: true, action: "goto", body: describeBody(body, f), ...cosmosFlight() };
+}
+
+/* 追哪颗：id 直接找；只给类型就先挑前方最近那颗没看过的，一颗都没有就现造一颗摆在正前方 */
+function resolveTarget(f, arg) {
   const key = arg === null || arg === undefined ? "" : String(arg).trim().toLowerCase();
-  if (!key) throw new Error(`goto 要带 body 或 type；${ACTION_HINTS}`);
+  if (!key) throw new Error(`要带 body 或 type；${ACTION_HINTS}`);
   let body = null;
   if (/^\d+$/.test(key)) body = f.bodies.find((b) => b.id === Number(key)) || null;
   if (!body && TYPES.includes(key)) {
@@ -863,12 +949,31 @@ function gotoBody(arg) {
     }
   }
   if (!body) throw new Error(`没有 id 或类型为「${key}」的星体；先调 flight_state 看 ahead 列表`);
-  f.focus = body;
-  body.visited = false;
+  return body;
+}
+
+/* 直接挪到那颗星旁边，省掉追上去的几分钟。落点沿「星→镜头」这条射线，
+   所以看到的还是刚才那一面，不会瞬移完球换了个朝向。
+   只摆位置和视线，阶段仍旧交给状态机自己走，落地之后运动是连续的。 */
+function warpBody(arg, distance) {
+  const f = state.flight;
+  if (!f) return { ok: false, note: "宇宙主题还没激活" };
+  const b = resolveTarget(f, arg);
+  const k = clamp(Number(distance) || WARP_R, 1.15, 60);
+  const land = b.r * k;
+  let dir = vecSub(f.pos, b.pos);
+  if (vecLen(dir) < 1) dir = vecScale(f.view, -1);
+  const unit = normalize3(dir);
+  f.pos = [b.pos[0] + unit[0] * land, b.pos[1] + unit[1] * land, b.pos[2] + unit[2] * land];
+  f.route = normalize3(vecSub(b.pos, f.pos));
+  f.view = f.route;
+  f.speed = approachSpeed(land, b.r * ORBIT_K);
+  f.focus = b;
+  b.visited = false;
   f.orbit = null;
   f.phase = "approach";
   f.paused = false;
-  return { ok: true, action: "goto", body: describeBody(body, f), ...cosmosFlight() };
+  return { ok: true, action: "warp", landRadius: Math.round(land), body: describeBody(b, f), ...cosmosFlight() };
 }
 
 function pickByType(f, type) {
@@ -1928,12 +2033,18 @@ const PLANET_FS = `#version 300 es
 precision highp float;
 in vec3 v_nrm;
 in vec2 v_uv;
+uniform mat3 u_rot;
+uniform vec3 u_camc;
 uniform sampler2D u_day;
 uniform sampler2D u_night;
 uniform float u_hasNight;
 uniform vec3 u_atmo;
 uniform vec3 u_sunView;
 uniform float u_brightness;
+uniform float u_focal;
+uniform float u_dpr;
+uniform vec2 u_blur;
+uniform float u_radius;
 out vec4 outColor;
 void main() {
   vec3 n = normalize(v_nrm);
@@ -1942,10 +2053,50 @@ void main() {
   float key = smoothstep(-0.28, 0.42, sunL);
   float fill = max(n.z, 0.0);
   float light = 0.18 + 0.5 * key + 0.38 * fill;
-  vec3 day = texture(u_day, v_uv).rgb;
+  /* 每个屏幕像素横向、纵向各跨过多少纹素，解析求出来交给 textureGrad。
+     近距绕飞时相机只在 1.3 倍半径外，看到的是个球冠：越靠轮廓，视线越贴着球面走，
+     竖直方向一像素能跨过五个纹素行，水平方向却接近 1:1。这种强各向异性用一个标量
+     LOD 表达不了——压少了轮廓那圈混叠，混叠相位随相机横移每帧变，看着就是「轮廓不
+     动、里面的地表在游」；压多了正对镜头的细节全丢。逐像素导数倒是各向异性的，但它
+     在 2x2 quad 上算，跨三角形边时整块地表会跳级，所以这里自己把导数算出来。 */
+  vec3 surf = u_camc + u_radius * n;
+  float len = length(surf);
+  vec3 dir = surf / len;
+  float focalPx = u_focal * u_dpr;
+  float rc = -focalPx * len / surf.z;
+  float cc = dot(u_camc, u_camc) - u_radius * u_radius;
+  float proj = dot(u_camc, dir);
+  float dd = sqrt(max(proj * proj - cc, 1e-4));
+  float dk = 1.0 - proj / dd;
+  vec3 ddX = (vec3(1.0, 0.0, 0.0) - dir * dir.x) / rc;
+  vec3 ddY = (vec3(0.0, 1.0, 0.0) - dir * dir.y) / rc;
+  vec3 dpX = ddX * len + dir * (dot(u_camc, ddX) * dk);
+  vec3 dpY = ddY * len + dir * (dot(u_camc, ddY) * dk);
+  mat3 toLocal = transpose(u_rot);
+  vec3 oDir = toLocal * n;
+  vec3 oX = toLocal * dpX / u_radius;
+  vec3 oY = toLocal * dpY / u_radius;
+  float latK = 1.0 / (3.14159265 * sqrt(max(1.0 - oDir.y * oDir.y, 1e-4)));
+  float lonK = 1.0 / (6.2831853 * max(oDir.x * oDir.x + oDir.z * oDir.z, 1e-6));
+  vec2 gX = vec2((oDir.z * oX.x - oDir.x * oX.z) * lonK, -oX.y * latK);
+  vec2 gY = vec2((oDir.z * oY.x - oDir.x * oY.z) * lonK, -oY.y * latK);
+  /* u_blur 是本帧贴图在屏幕上划过的设备像素（已乘 MOTION_BLUR）。锐利采样只留瞬时那一刀，
+     一帧跨过几个像素时高频纹素逐帧换相位落在同一个像素上，就是「轮廓不动、里面的地表在游」。
+     沿位移方向把快门摊成几枚瞬时采样求平均，等于真实相机 1/60 秒的那条拖影：footprint
+     仍是上面算好的各向异性那一条，只有采样点沿线散开，所以细节不糊成一团，只是不再游。 */
+  vec2 smear = u_blur.x * gX + u_blur.y * gY;
+  vec3 day = textureGrad(u_day, v_uv, gX, gY).rgb;
+  if (dot(u_blur, u_blur) > 0.25) {
+    day = vec3(0.0);
+    for (int i = 0; i < ${BLUR_TAPS}; i++) {
+      float k = (float(i) + 0.5) / float(${BLUR_TAPS}) - 0.5;
+      day += textureGrad(u_day, v_uv + smear * k, gX, gY).rgb;
+    }
+    day /= float(${BLUR_TAPS});
+  }
   vec3 col = day * light * u_brightness;
   if (u_hasNight > 0.5) {
-    vec3 night = texture(u_night, v_uv).rgb;
+    vec3 night = textureGrad(u_night, v_uv, gX, gY).rgb;
     float nightMix = (1.0 - key) * (1.0 - 0.6 * fill);
     col += night * nightMix * 0.8;
   }

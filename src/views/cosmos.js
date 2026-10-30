@@ -737,18 +737,10 @@ function orbitStep(f, dt) {
   const tangent = normalize3(combine3(o.u1, -s, o.u2, c, o.axis, 0));
   f.speed = dt > 0 ? vecLen(vecSub(f.pos, prev)) / dt : f.speed;
 
-  /* 往球心方向叠一点来回漂移，免得整圈死盯中心 */
-  const wobble = Math.sin(state.time * 0.31 + o.seed) * 0.055;
-  const observe = normalize3(
-    combine3(
-      normalize3(vecSub(b.pos, f.pos)),
-      1,
-      tangent,
-      wobble,
-      o.axis,
-      Math.sin(state.time * 0.19 + o.seed * 1.7) * 0.04,
-    ),
-  );
+  /* 绕飞死盯球心，不加来回漂移：贴脸距离下球的视角半径 50°，画面垂直半视场只有 43.6°，
+     球整个溢出画面，只有顶部那条弧对着黑天——视线哪怕只偏 3°，那条弧就在屏幕上滑上百来像素，
+     这就是「绕到这颗星，顶部这条带子每次都在晃」的来源。地表本来就一直在横向滑过，不缺这点动。 */
+  const observe = normalize3(vecSub(b.pos, f.pos));
   let desired = observe;
   const left = o.total - o.theta;
   if (left < 1.5) {
@@ -827,7 +819,6 @@ function enterOrbit(f, b, orbitR) {
     swapAt: earth ? EARTH_FAR_LAPS * Math.PI * 2 : Infinity,
     theta: 0,
     total: laps * Math.PI * 2,
-    seed: b.rnd() * Math.PI * 2,
     spin: 0,
     look: 0,
   };

@@ -30,3 +30,10 @@ src-tauri/resources/components/ffmpeg/*
 *.njsproj
 *.sln
 *.sw?
+
+# 本地临时测试产物（PPTX 预览 fixture 等），可随时删除
+.tmp-pptx/
+
+# 临时脚本与截图（可随时删除）
+.tmp-journey/
+.tmp-test/

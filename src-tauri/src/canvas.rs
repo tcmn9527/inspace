@@ -10,6 +10,8 @@
 //!     files/        拖入/选择的其它文件，一律拷副本；文本类在卡片里给只读预览，双击交系统程序打开
 //!     stickies/     便签块的内容，一块一个 <块id>.json
 //!     notes/        笔记块的内容，一块一个 <块id>.md，图片副本在同名的 <块id>/ 目录里
+//!     pictures/     画面块的绘制指令和素材表，一块一个 <块id>.json
+//!     scenes/       场景块里的东西，一块一个 <块id>.json
 //!
 //! 删除空间时整个文件夹进系统回收站。
 //!
@@ -36,10 +38,20 @@ pub(crate) const META_FILE: &str = "space.json";
 /// 旧版的元数据文件名；读到就顺手改成 space.json
 pub(crate) const LEGACY_META_FILE: &str = "canvas.json";
 const ITEMS_FILE: &str = "items.json";
+/// 自动快照：撤销栈只在内存里，刷新窗口就没了；这份是落在盘上的底。
+const HISTORY_DIR: &str = ".history";
+/// 保留多少份。一份就是当时的 items.json，多数空间只有几百 KB。
+const HISTORY_KEEP: usize = 100;
+/// 同一段连续编辑里 90 秒只留一份，否则拖一次块就刷出几十个几乎一样的快照。
+const HISTORY_GAP_MS: i64 = 90_000;
+/// 再留一道总容量闸：真遇上特别大的空间，宁可少留几份也别把盘吃满。
+const HISTORY_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const IMAGE_DIR: &str = "images";
 const AUDIO_DIR: &str = "audio";
 const NOTE_DIR: &str = "notes";
 const STICKY_DIR: &str = "stickies";
+const PICTURE_DIR: &str = "pictures";
+const SCENE_DIR: &str = "scenes";
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 const BAD_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
@@ -274,9 +286,19 @@ fn file_mtime(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-/// 先写临时文件再替换，避免写到一半断电留下半个 JSON。
 fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     let text = serde_json::to_string_pretty(value).map_err(|e| format!("数据序列化失败：{e}"))?;
+    write_text_atomic(path, &text)
+}
+
+/// 画面指令一份就是几万个坐标数，压掉缩进才不至于把盘上的体积和读盘时间一起放大几倍。
+fn write_json_compact(path: &Path, value: &Value) -> Result<(), String> {
+    let text = serde_json::to_string(value).map_err(|e| format!("数据序列化失败：{e}"))?;
+    write_text_atomic(path, &text)
+}
+
+/// 先写临时文件再替换，避免写到一半断电留下半个 JSON。
+fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -305,6 +327,225 @@ fn read_json(path: &Path) -> Result<Option<Value>, String> {
     }
     let value = serde_json::from_str(&text).map_err(|e| format!("文件内容损坏：{e}"))?;
     Ok(Some(value))
+}
+
+/// 快照文件都叫 <毫秒时间戳>.json，名字自带排序。
+fn history_stamps(dir: &Path) -> Vec<(i64, u64, PathBuf)> {
+    let mut out = Vec::new();
+    let Ok(read) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in read.flatten() {
+        let path = entry.path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(stamp) = stem.parse::<i64>() else {
+            continue;
+        };
+        let bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        out.push((stamp, bytes, path));
+    }
+    out.sort_by_key(|(stamp, _, _)| *stamp);
+    out
+}
+
+fn prune_history(dir: &Path) {
+    let mut entries = history_stamps(dir);
+    let mut total: u64 = entries.iter().map(|(_, size, _)| *size).sum();
+    while entries.len() > HISTORY_KEEP || (total > HISTORY_MAX_BYTES && entries.len() > 1) {
+        let (_, size, path) = entries.remove(0);
+        /* 删不掉就停手：这里要是硬转圈，一次保存就把主线程卡死了 */
+        if fs::remove_file(&path).is_err() {
+            break;
+        }
+        total = total.saturating_sub(size);
+    }
+}
+
+/// 覆盖 items.json 之前，把上一份留个底。
+///
+/// 快照是保险，不是主路径：任何一步失败都只是少一份备份，不该反过来挡住正常存档，
+/// 所以整条链路吞掉错误，不往上抛。
+fn snapshot_items(dir: &Path, old: &str) {
+    if old.trim().is_empty() {
+        return;
+    }
+    let hist = dir.join(HISTORY_DIR);
+    if fs::create_dir_all(&hist).is_err() {
+        return;
+    }
+    let now = now_ms();
+    if let Some((newest, _, _)) = history_stamps(&hist).last() {
+        if now.saturating_sub(*newest) < HISTORY_GAP_MS {
+            return;
+        }
+    }
+    if fs::write(hist.join(format!("{now}.json")), old).is_err() {
+        return;
+    }
+    prune_history(&hist);
+}
+
+/// 一条历史记录的摘要。前端拿它铺列表，块数用来让用户认出「那份大改之前」是哪一份。
+#[derive(Serialize)]
+pub struct HistoryEntry {
+    file: String,
+    time: i64,
+    bytes: u64,
+    items: usize,
+}
+
+#[tauri::command]
+pub fn canvas_history_list(
+    id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Vec<HistoryEntry>, String> {
+    let hist = resolve_dir(&state, &id)?.join(HISTORY_DIR);
+    let mut out = Vec::new();
+    for (stamp, bytes, path) in history_stamps(&hist) {
+        let items = read_json(&path)
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_array().map(|a| a.len()))
+            .unwrap_or(0);
+        out.push(HistoryEntry {
+            file: format!("{stamp}.json"),
+            time: stamp,
+            bytes,
+            items,
+        });
+    }
+    /* 新的在前，列表从上往下就是时间倒序 */
+    out.reverse();
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn canvas_history_read(
+    id: String,
+    file: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Value, String> {
+    let dir = resolve_dir(&state, &id)?;
+    /* 这个参数从界面递进来，只认纯数字名字：不给它拼路径的机会 */
+    let stem = file.strip_suffix(".json").unwrap_or(&file);
+    if stem.is_empty() || !stem.chars().all(|c| c.is_ascii_digit()) {
+        return Err("历史版本的名字不对".to_string());
+    }
+    read_json(&dir.join(HISTORY_DIR).join(format!("{stem}.json")))?
+        .ok_or_else(|| "这份历史版本已经不在了".to_string())
+}
+
+/// 跨空间搜索的结果。只带够定位的东西，正文交给前端高亮。
+#[derive(Serialize)]
+pub struct SearchHit {
+    space: String,
+    space_name: String,
+    item: String,
+    kind: String,
+    text: String,
+}
+
+const SEARCH_LIMIT: usize = 200;
+const SEARCH_SNIPPET: usize = 42;
+
+/// 在一段文字里找命中点，切出前后各 42 个字符的片段。
+/// 大小写不敏感只在 needle 上做（统一转小写），原文保持原样返回。
+fn match_snippet(text: &str, needle: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+    let lower = text.to_lowercase();
+    let at = lower.find(needle)?;
+    /* lowercase 对中文和 ASCII 不改变字节数，但别赌这个：切点一律对齐到字符边界 */
+    let mut start = at.saturating_sub(SEARCH_SNIPPET);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (at + needle.len() + SEARCH_SNIPPET).min(text.len());
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    let body = text.get(start..end)?;
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(body.trim());
+    if end < text.len() {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// 跨空间搜索：把所有空间的 items.json 过一遍，只认块里那点文字。
+///
+/// 不做倒排索引——空间最多几十个，一次全量扫比维护一套索引和它的失效逻辑便宜，
+/// 也不会出现「索引说改了、盘上说没改」这种两头对不上的状态。
+#[tauri::command]
+pub fn canvas_search(
+    query: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Vec<SearchHit>, String> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut hits = Vec::new();
+    let Ok(entries) = fs::read_dir(state.root()) else {
+        return Ok(hits);
+    };
+    for entry in entries.flatten() {
+        if hits.len() >= SEARCH_LIMIT {
+            break;
+        }
+        let id = entry.file_name().to_string_lossy().to_string();
+        if id.starts_with('.') || !entry.path().is_dir() {
+            continue;
+        }
+        let dir = entry.path();
+        let Ok(items) = read_items(&dir) else {
+            continue;
+        };
+        let Some(list) = items.as_array() else {
+            continue;
+        };
+        /* 空间名等真搜到东西再读：没命中的空间不该为此多开一次文件 */
+        let mut space_name: Option<String> = None;
+        for item in list {
+            if hits.len() >= SEARCH_LIMIT {
+                break;
+            }
+            let Some(object) = item.as_object() else {
+                continue;
+            };
+            let kind = object.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            for key in ["name", "text", "markdown", "label", "title", "src"] {
+                let Some(value) = object.get(key).and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(text) = match_snippet(value, &needle) else {
+                    continue;
+                };
+                let name = space_name.get_or_insert_with(|| read_meta(&dir, &id).0).clone();
+                hits.push(SearchHit {
+                    space: id.clone(),
+                    space_name: name,
+                    item: object
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    kind: kind.to_string(),
+                    text,
+                });
+                /* 一块只报一条：同一块的名字和正文都中了，也就一个结果 */
+                break;
+            }
+        }
+    }
+    Ok(hits)
 }
 
 fn image_mime(ext: &str) -> Option<&'static str> {
@@ -471,6 +712,21 @@ fn note_text_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
 fn sticky_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
     Ok(dir
         .join(STICKY_DIR)
+        .join(format!("{}.json", check_item_id(item_id)?)))
+}
+
+/// 画面块的绘制指令：<空间>/pictures/<块id>.json。
+fn picture_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
+    Ok(dir
+        .join(PICTURE_DIR)
+        .join(format!("{}.json", check_item_id(item_id)?)))
+}
+
+/// 场景块里的东西：<空间>/scenes/<块id>.json。一件东西动辄上百个坐标点，
+/// 整份塞进 items.json 会把这个空间的读写和每份快照一起拖慢。
+fn scene_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
+    Ok(dir
+        .join(SCENE_DIR)
         .join(format!("{}.json", check_item_id(item_id)?)))
 }
 
@@ -703,7 +959,18 @@ pub fn canvas_save_items(
         return Err("图元数据必须是数组".to_string());
     }
     let dir = resolve_dir(&state, &id)?;
-    write_json(&dir.join(ITEMS_FILE), &items)
+    let path = dir.join(ITEMS_FILE);
+    let next = serde_json::to_string_pretty(&items)
+        .map_err(|e| format!("数据序列化失败：{e}"))?;
+    /* 内容没变就别动盘：前端 500ms 防抖也会有空转，镜头保存还走另一条路 */
+    if let Ok(prev) = fs::read_to_string(&path) {
+        if prev == next {
+            return Ok(());
+        }
+        /* 先留底再覆盖。写在这一句之后就没有意义了——那时候旧内容已经没了 */
+        snapshot_items(&dir, &prev);
+    }
+    write_json(&path, &items)
 }
 
 #[tauri::command]
@@ -777,12 +1044,19 @@ pub fn canvas_save_image(
 }
 
 /// 用系统文件框选一张图片，只返回它的绝对路径（拷不拷由前端问用户）。取消返回 null。
+/* 系统框会一直阻塞到用户选完：命令必须跑在线程池里，不能占着主线程。
+   主线程一停，Windows 就把窗口判成未响应，用户点一下就会盖上原生的白色标题栏。
+   挂在发起命令的窗口上，框开着的时候窗口照旧点不动，但帧还能正常刷。 */
 #[tauri::command]
-pub fn canvas_pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn canvas_pick_image(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
     let picked = app
         .dialog()
         .file()
         .set_title("选择图片")
+        .set_parent(&window)
         .add_filter("图片", &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"])
         .blocking_pick_file();
     let Some(file_path) = picked else {
@@ -1125,6 +1399,154 @@ pub fn canvas_delete_sticky(
     Ok(())
 }
 
+// ---------- 画面块的绘制指令 ----------
+
+/// 一幅画面最多收多少条指令，口径跟前端那条上限一致。
+const MAX_PICTURE_CMDS: usize = 4000;
+/// 素材表的个数：老文件还没这一项，读出来就是空表。
+const MAX_PICTURE_SYMBOLS: usize = 200;
+
+/// 只收 cmds 和 symbols 两样：条数掐到上限、非对象的条目丢掉。
+/// 单条指令长什么样不在这里查——前端每读一次都会自己严格过一遍（认不了的整条丢），
+/// 这儿挡的只是坏文件把盘和内存一起撑爆。
+fn picture_of(raw: &Value) -> Value {
+    let list: Vec<Value> = raw
+        .get("cmds")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter(|cmd| cmd.is_object())
+                .take(MAX_PICTURE_CMDS)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let symbols = raw
+        .get("symbols")
+        .filter(|value| {
+            value
+                .as_object()
+                .map_or(false, |map| map.len() <= MAX_PICTURE_SYMBOLS)
+        })
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    json!({ "cmds": list, "symbols": symbols, "updatedAt": now_ms() })
+}
+
+/// 这块画面的指令文件；还没落过盘返回 null，由前端拿块上残留的指令补写一次。
+#[tauri::command]
+pub fn canvas_read_picture(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Option<Value>, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = picture_file(&dir, &item_id)?;
+    read_json(&path).map(|value| value.map(|raw| picture_of(&raw)))
+}
+
+#[tauri::command]
+pub fn canvas_write_picture(
+    id: String,
+    item_id: String,
+    cmds: Value,
+    symbols: Option<Value>,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Value, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = picture_file(&dir, &item_id)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建画面目录失败：{e}"))?;
+    }
+    let value = picture_of(&json!({ "cmds": cmds, "symbols": symbols }));
+    write_json_compact(&path, &value)?;
+    Ok(value)
+}
+
+/// 删掉一块画面：它自己那份指令文件进系统回收站，画过的东西不留在盘上没人认领。
+#[tauri::command]
+pub fn canvas_delete_picture(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = picture_file(&dir, &item_id)?;
+    if path.is_file() {
+        recycle_path(&path).map_err(|e| format!("删除画面失败：{e}"))?;
+    }
+    prune_empty(&dir.join(PICTURE_DIR));
+    Ok(())
+}
+
+// ---------- 场景块里的东西 ----------
+
+/// 一块场景最多收多少件，口径跟前端那条上限一致。
+const MAX_SCENE_PARTS: usize = 2000;
+
+/// 只收 parts 一样：件数掐到上限、非对象的条目丢掉。
+/// 单件长什么样不在这里查——前端每读一次都会自己严格过一遍（认不了的整件丢），
+/// 这儿挡的只是坏文件把盘和内存一起撑爆。
+fn scene_of(raw: &Value) -> Value {
+    let list: Vec<Value> = raw
+        .get("parts")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter(|part| part.is_object())
+                .take(MAX_SCENE_PARTS)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({ "parts": list, "updatedAt": now_ms() })
+}
+
+/// 这块场景的东西文件；还没落过盘返回 null，由前端拿块上残留的那份补写一次。
+#[tauri::command]
+pub fn canvas_read_scene(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Option<Value>, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = scene_file(&dir, &item_id)?;
+    read_json(&path).map(|value| value.map(|raw| scene_of(&raw)))
+}
+
+#[tauri::command]
+pub fn canvas_write_scene(
+    id: String,
+    item_id: String,
+    parts: Value,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Value, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = scene_file(&dir, &item_id)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建场景目录失败：{e}"))?;
+    }
+    let value = scene_of(&json!({ "parts": parts }));
+    write_json_compact(&path, &value)?;
+    Ok(value)
+}
+
+/// 删掉一块场景：它自己那份东西文件进系统回收站，摆好的院子不留在盘上没人认领。
+#[tauri::command]
+pub fn canvas_delete_scene(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = scene_file(&dir, &item_id)?;
+    if path.is_file() {
+        recycle_path(&path).map_err(|e| format!("删除场景失败：{e}"))?;
+    }
+    prune_empty(&dir.join(SCENE_DIR));
+    Ok(())
+}
+
 /// 删掉一块笔记：正文 .md 连它的图片目录一起进系统回收站（引用态的原文件不归这里管）。
 #[tauri::command]
 pub fn canvas_delete_note(
@@ -1165,6 +1587,8 @@ pub fn canvas_reveal_block(
     let path = match found.get("type").and_then(Value::as_str).unwrap_or_default() {
         "sticky" => sticky_file(&dir, &item_id)?,
         "note" => note_text_file(&dir, &item_id)?,
+        "picture" => picture_file(&dir, &item_id)?,
+        "scene" => scene_file(&dir, &item_id)?,
         _ => return Err("这块没有自己的文件".to_string()),
     };
     reveal_path(&path);
@@ -1193,11 +1617,15 @@ pub fn canvas_save_audio(
 
 /// 用系统文件框选一个音频，只返回它的绝对路径（拷不拷由前端问用户）。取消返回 null。
 #[tauri::command]
-pub fn canvas_pick_audio(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn canvas_pick_audio(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
     let picked = app
         .dialog()
         .file()
         .set_title("选择音频")
+        .set_parent(&window)
         .add_filter("音频", &AUDIO_EXTS)
         .blocking_pick_file();
     let Some(file_path) = picked else {
@@ -1253,6 +1681,225 @@ pub fn canvas_reveal(id: String, state: tauri::State<'_, CanvasState>) -> Result
     let dir = resolve_dir(&state, &id)?;
     reveal_path(&dir);
     Ok(())
+}
+
+// ---------- 导出 ----------
+
+/// 导出时把块引用的图片读成 data URL。
+/// 空间里的图走 asset 协议加载，那是另一个源，直接塞进 canvas 会把画布污染成
+/// 取不出像素的状态；从这条线把字节读出来再进导出图，就没有跨域这回事。
+#[tauri::command]
+pub fn canvas_image_data(
+    id: String,
+    src: String,
+    linked: bool,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<String, String> {
+    let path = media_source_path(&state, &id, &src, linked, IMAGE_DIR, "图片")?;
+    image_data_url(&path, "图片不在了")
+}
+
+/// 导出：弹系统保存框，把前端拼好的文件写出去。取消返回 null。
+/// 收 png / pdf / html / docx，路径由用户在那个框里定，前端递来的只是一个建议文件名。
+#[tauri::command]
+pub async fn canvas_export_save(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    name: String,
+    ext: String,
+    data: String,
+) -> Result<Option<String>, String> {
+    let ext = ext.to_lowercase();
+    if ext != "png" && ext != "pdf" && ext != "html" && ext != "docx" {
+        return Err("只支持导出 png、pdf、html 和 docx".to_string());
+    }
+    let safe_name = name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], " ");
+    let safe_name = if safe_name.trim().is_empty() {
+        "space".to_string()
+    } else {
+        safe_name.trim().to_string()
+    };
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("导出")
+        .set_parent(&window)
+        .set_file_name(format!("{safe_name}.{ext}"))
+        .add_filter(
+            match ext.as_str() {
+                "pdf" => "PDF",
+                "html" => "网页",
+                "docx" => "Word 文档",
+                _ => "PNG 图片",
+            },
+            &[ext.as_str()],
+        )
+        .blocking_save_file();
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|e| format!("无法解析保存位置：{e}"))?;
+    let bytes = BASE64
+        .decode(data.as_bytes())
+        .map_err(|e| format!("导出数据有误：{e}"))?;
+    if bytes.is_empty() {
+        return Err("导出内容是空的".to_string());
+    }
+    fs::write(&path, &bytes).map_err(|e| format!("写入文件失败：{e}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+/// 导出完顺手用默认程序打开。
+///
+/// 公众号文章的成品自带「复制全文」按钮，可用户还得自己去文件夹里翻一遍，
+/// 这一步就是为了省掉那次翻找。只放行导出的网页：这条命令把路径交给系统执行，
+/// 范围开得越小越好。
+#[tauri::command]
+pub fn canvas_open_export(path: String) -> Result<(), String> {
+    let file = PathBuf::from(&path);
+    if !file.is_file() {
+        return Err("这个文件不在了".to_string());
+    }
+    let ext = file
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext != "html" && ext != "htm" {
+        return Err("只有导出的网页能直接打开".to_string());
+    }
+    open::that(&file).map_err(|e| format!("打不开这个文件：{e}"))
+}
+
+/// 分段导出第一步：选一个文件夹。取消返回 null。
+///
+/// 分段导出会出好几张图，一张一个保存框就没法用了，所以先选一次目录，
+/// 之后由前端一张一张调用 `canvas_export_write` 写进去。
+#[tauri::command]
+pub async fn canvas_export_pick_dir(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("导出到文件夹")
+        .set_parent(&window)
+        .blocking_pick_folder();
+    let Some(dir) = picked else {
+        return Ok(None);
+    };
+    let path = dir
+        .into_path()
+        .map_err(|e| format!("无法解析文件夹：{e}"))?;
+    if !path.is_dir() {
+        return Err("选的不是一个文件夹".to_string());
+    }
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+/// 分段导出第二步：把一张图写进上面选好的文件夹。
+///
+/// 文件名由前端给（带序号），这里只挡掉路径穿越：名字里不许有分隔符，
+/// 也不许出现 ..，最后一定落在 dir 里面。
+#[tauri::command]
+pub async fn canvas_export_write(
+    dir: String,
+    name: String,
+    ext: String,
+    data: String,
+) -> Result<String, String> {
+    let path = export_write_target(&dir, &name, &ext)?;
+    /* 同名不覆盖：同一个空间导第二遍，别把上一版悄悄顶掉 */
+    let path = unique_path(path);
+    let bytes = BASE64
+        .decode(data.as_bytes())
+        .map_err(|e| format!("导出数据有误：{e}"))?;
+    if bytes.is_empty() {
+        return Err("导出内容是空的".to_string());
+    }
+    fs::write(&path, &bytes).map_err(|e| format!("写入文件失败：{e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 撞名就往后加序号：`西游记-01.png` 已存在就写 `西游记-01 (2).png`。
+/// 分段导出常常整批重来，覆盖上一版不是「更新」，是「弄丢了」。
+fn unique_path(path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    for n in 2..1000 {
+        let candidate = parent.join(format!("{stem} ({n}).{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path
+}
+
+/// 算出「这张图该写到哪」。摘出来是为了能单测：路径拼接和过滤是这个命令里
+/// 唯一会出错的地方，弹框和写盘反而没什么好测的。
+fn export_write_target(dir: &str, name: &str, ext: &str) -> Result<PathBuf, String> {
+    let ext = ext.to_lowercase();
+    if ext != "png" && ext != "pdf" && ext != "html" && ext != "docx" {
+        return Err("只支持导出 png、pdf、html 和 docx".to_string());
+    }
+    let folder = PathBuf::from(dir);
+    if !folder.is_dir() {
+        return Err("导出文件夹不在了".to_string());
+    }
+    let safe_name = name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], " ");
+    let safe_name = safe_name.trim().trim_matches('.').trim();
+    if safe_name.is_empty() || safe_name.contains("..") {
+        return Err("文件名不合法".to_string());
+    }
+    Ok(folder.join(format!("{safe_name}.{ext}")))
+}
+
+#[cfg(test)]
+mod export_write_tests {
+    use super::export_write_target;
+
+    #[test]
+    fn builds_path_for_normal_name() {
+        let dir = std::env::temp_dir();
+        let path = export_write_target(dir.to_str().unwrap(), "西游记 · 一百回全卷-03", "png").unwrap();
+        assert!(path.starts_with(&dir));
+        assert!(path.to_string_lossy().ends_with("西游记 · 一百回全卷-03.png"));
+    }
+
+    #[test]
+    fn keeps_separators_inside_dir() {
+        let dir = std::env::temp_dir();
+        let path = export_write_target(dir.to_str().unwrap(), "a/b\\c", "png").unwrap();
+        assert_eq!(path.parent(), Some(dir.as_path()));
+        assert!(path.to_string_lossy().ends_with("a b c.png"));
+    }
+
+    #[test]
+    fn rejects_traversal() {
+        let dir = std::env::temp_dir();
+        assert!(export_write_target(dir.to_str().unwrap(), "..\\..\\evil", "png").is_err());
+        assert!(export_write_target(dir.to_str().unwrap(), "....", "png").is_err());
+    }
+
+    #[test]
+    fn rejects_bad_ext_and_empty_name() {
+        let dir = std::env::temp_dir();
+        assert!(export_write_target(dir.to_str().unwrap(), "a", "exe").is_err());
+        assert!(export_write_target(dir.to_str().unwrap(), "   ", "png").is_err());
+    }
 }
 
 // ---------- 视频 ----------
@@ -1341,11 +1988,15 @@ pub fn canvas_video_info(path: String) -> Result<VideoInfo, String> {
 
 /// 用系统文件框选一个视频，只返回来源信息（拷不拷由前端问用户）。取消返回 null。
 #[tauri::command]
-pub fn canvas_pick_video(app: tauri::AppHandle) -> Result<Option<VideoInfo>, String> {
+pub async fn canvas_pick_video(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<VideoInfo>, String> {
     let picked = app
         .dialog()
         .file()
         .set_title("选择视频")
+        .set_parent(&window)
         .add_filter("视频", &VIDEO_EXTS)
         .blocking_pick_file();
     let Some(file_path) = picked else {
@@ -1845,11 +2496,15 @@ pub fn canvas_file_info(path: String) -> Result<FileInfo, String> {
 
 /// 系统文件框选一个文件，不加扩展名过滤（什么格式都收）。取消返回 null。
 #[tauri::command]
-pub fn canvas_pick_file(app: tauri::AppHandle) -> Result<Option<FileInfo>, String> {
+pub async fn canvas_pick_file(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<FileInfo>, String> {
     let picked = app
         .dialog()
         .file()
         .set_title("选择文件")
+        .set_parent(&window)
         .blocking_pick_file();
     let Some(file_path) = picked else {
         return Ok(None);
@@ -1993,6 +2648,23 @@ pub async fn canvas_duplicate_media(
         out["audioRel"] = json!(store_copy(&to_dir, &from, &track_sub)?);
     }
     Ok(out)
+}
+
+/// 画面块里垫的那张位图：按 src 直接拷一份进目标空间的 images/，回新文件名。
+/// 画面块的指令住在 pictures/<块id>.json，items.json 里查不到那张图，所以这条不走
+/// canvas_duplicate_media 的「按块 id 从 items.json 认文件」，src 由前端从指令里读出来直给；
+/// 抄来的 src 出不了源空间目录（media_path 自己会拦），引用态那条本来就是原文件的绝对路径。
+#[tauri::command]
+pub async fn canvas_duplicate_picture_image(
+    id: String,
+    src: String,
+    linked: bool,
+    to_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<String, String> {
+    let from = media_source_path(&state, &id, &src, linked, IMAGE_DIR, "图片")?;
+    let to_dir = resolve_dir(&state, &to_id)?;
+    store_copy(&to_dir, &from, IMAGE_DIR)
 }
 
 /// 把一份已经在盘上的副本按新名字收进 `<目标空间>/<子目录>/`，返回带目录名的相对路径。

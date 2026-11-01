@@ -9,7 +9,7 @@
 import { GUIDE_TOPICS, guideText } from "./agent-guide.js";
 import { canvasAgent } from "./canvas.js";
 import { notesAgent } from "./notes.js";
-import { cosmosFlight, cosmosFlightControl } from "./cosmos.js";
+import { cosmosFlight, cosmosFlightControl, cosmosRoute, cosmosRouteSet } from "./cosmos.js";
 import { LIGHT_THEMES, THEMES, currentTheme, setTheme } from "./theme.js";
 
 const { invoke } = window.__TAURI__.core;
@@ -43,6 +43,188 @@ const X = { type: "number", description: "块左上角的世界坐标 x（空间
 const Y = { type: "number", description: "块左上角的世界坐标 y" };
 const W = { type: "number", description: "宽度（像素）" };
 const H = { type: "number", description: "高度（像素）" };
+
+/* 画面块的绘制指令。坐标是块内画面坐标：块左上角就是原点，可以出现负数——
+   画到框外面数据还在，把块拉大或挪裁剪框就露出来。 */
+const PICTURE_CMDS = {
+  type: "array",
+  description: "一组绘制指令，按给的顺序叠放（后面的盖前面的）",
+  items: {
+    type: "object",
+    properties: {
+      i: { type: "number", description: "指令号：不传就自动编号；删改某一条要靠它" },
+      op: { type: "string", enum: ["rect", "poly", "line", "stroke", "text", "group", "use", "image"], description: "矩形 / 闭合多边形 / 折线 / 一笔墨迹 / 文字 / 分组 / 摆一份素材 / 垫一张位图" },
+      x: { type: "number", description: "rect / image 的左上角、text 的基线起点、group 的平移 x" },
+      y: { type: "number", description: "rect / image 的左上角、text 的基线起点、group 的平移 y" },
+      w: { type: "number", description: "rect 宽；image 是垫进去的框宽（不给就照原图量，picture_draw 可以省掉这两个数）" },
+      h: { type: "number", description: "rect 高；image 是框高" },
+      radius: { type: "number", description: "rect 圆角（px）" },
+      fill: {
+        type: ["string", "object"],
+        description: "填充：颜色 #rgb / #rrggbb / #rrggbbaa，或渐变对象 {type:\"linear\",x1,y1,x2,y2,stops:[{at,color}]} / {type:\"radial\",cx,cy,r,stops}（坐标默认按这块形状的包围盒比例 0~1，要按块内画面像素就加 units:\"user\" 并把四个数写全），或图案对象 {pattern:\"hatch\"|\"grid\"|\"dots\",gap,angle,color,width,background} / {pattern:\"tile\",ref:素材名,dx,dy,angle,background}——图案是按块内画面像素反复铺的漆，瓦、砖、鳞片靠 tile。background 是铺在纹样底下的那层底色（瓦缝里的木色、布纹里的布本），有了它就不必把同一条形状画两遍：一遍底色一遍纹样",
+      },
+      stroke: {
+        type: ["string", "object"],
+        description: "描边：同 fill，颜色、渐变、图案都行",
+      },
+      strokeWidth: { type: "number", description: "描边宽度（px）" },
+      opacity: { type: "number", description: "整条透明度 0–1，默认 1" },
+      filter: {
+        type: ["object", "array"],
+        description:
+          '柔边、投影、发光、调色，任何一种 op 都能带：{type:"blur",r} 化开边缘（远景、水汽、焦外）、{type:"shadow",dx,dy,r,color,h} 落在纸上的投影（color 不给是半透的黑）、{type:"glow",r,color} 自己发亮（不给是暖黄，正好是灯笼的颜色）、{type:"gray"|"bright"|"contrast",k} 去色 / 提亮 / 加对比（k 是倍数，1 就是原样）。r 是化开的半径（块内画面像素 0.5~200，跟着块缩放一起缩放）。shadow 还可以写 h：这东西在画里立起多高（块内画面像素）——写了 h 的不是把剪影挪一份，是从这条指令的脚底拖出一片真正的落影，影长 = h / tan(太阳高度)，太阳压得越低影子越长，越往末梢越淡（那道渐变不用你自己叠），方向由块上那套光给（没打光就一片都不画）；默认硬边，r 不给就是 0，要羽化再自己写。h 别照抄画面上看到的高度：散点俯视里那条立面已经把俯视压掉的比例算进去了，给它的一半上下，先给短了再往上加。挂在 group 上时组里每一笔各挤自己那一片，不是整组挤一大片；素材（use）算一笔，整个素材按外接框挤一片，不会素材里每一笔各拖一道。明确写了 dx / dy 的那一头照旧一个字不动。要几样一起用就写成数组，按序生效，比如压一张参考图用 [{type:"gray"},{type:"contrast",k:1.4}]。一条 css 滤镜是一次离屏合成，别每条都挂；写了 h 的那片落影是个多边形，不占合成',
+      },
+      blend: {
+        type: "string",
+        enum: [
+          "multiply",
+          "screen",
+          "overlay",
+          "darken",
+          "lighten",
+          "color-dodge",
+          "color-burn",
+          "hard-light",
+          "soft-light",
+          "difference",
+          "exclusion",
+          "hue",
+          "saturation",
+          "color",
+          "luminosity",
+        ],
+        description:
+          "混合模式：和已经画在它下面的内容叠色。叠墨用 multiply（淡彩一层层压深）、叠光用 screen、压明暗用 overlay / soft-light；不写就是正常盖上去。只在这块画面里互相影响，不会把画纸底色和块外的东西搅黑",
+      },
+      cap: { type: "string", enum: ["round", "square", "butt"], description: "折线端头，默认 round" },
+      clip: {
+        type: "object",
+        description:
+          '剪刀：只画得出这个形状里面的部分，任何一种 op 都能带。写成形状对象本身：{op:"rect",x,y,w,h,radius}、{op:"poly"|"line",points}（点还能带 c1/c2 让边是曲线）、或 {ref:"素材名",x,y,rotate,scale} 拿一份现成素材当剪刀——一百个窗共用一把，别把同一个形重算一百遍。坐标是块内画面像素，和这条指令自己在同一套坐标系；group / use 自带位移旋转时，剪刀留在这一层不动（窗在墙上转，纸不会跟着挪）。裁剪永远再和这块的画框相交，越不出块。剪掉的那部分看不见，橡皮也擦不到。剪不出任何形状（ref 的素材里没有面）就不挂剪刀，画面照出',
+      },
+      mask: {
+        type: "object",
+        description:
+          '软边遮罩，形状写法同 clip，多两样：fill 是拿什么当透明度——白=留着、黑=没了，不给是纯白（等价于硬边剪刀）；写成渐变就是渐隐，比如 {type:"linear",y2:1,stops:[{at:0,color:"#fff"},{at:1,color:"#000"}]} 自上而下淡出，图案漆也行（hatch 就是隔着百叶窗看）。soft 是羽化半径 0~200（块内画面像素），给边缘化开一点。遮罩的生效区域按整块画区算，一条长渐变不会被齐根截断。一条遮罩是一次离屏合成，别每条都挂。mask 不参与橡皮判定——渐变没有硬边界，擦得到的界在这儿划不出来',
+      },
+      close: { type: "boolean", description: "line 想围成闭合面时给 true（等价于 op=poly）；描边的线就用 line，闭合的形就用 poly" },
+      kind: { type: "string", enum: ["pen", "brush"], description: "op=stroke 的笔：pen 一路等宽，brush 按每个点的 w 提按" },
+      grain: {
+        type: "number",
+        description:
+          "op=stroke 的枯笔程度 0~1，不写就是 0（实墨一杆，和现在一样）。墨少了笔幅会撕开：一笔被拆成几根各自长短不齐的细丝，中间露纸、末端分叉。0.4~0.7 是常用的枯，0.9 以上只剩几根丝。股数和断口的位子由这条点串自己算出来——同样的点永远画成同样的形，重开、重发都不会变样；想换个枯法就改点。只作用于 stroke，poly / line 不认这个字段；橡皮擦的还是这一整条，不是一根根丝",
+      },
+      points: {
+        type: "array",
+        description: "poly / line / stroke 的顶点，{x,y} 或直接 [x,y]；最多 4000 个点。poly / line 的点还能带 c1、c2 两个控制点（{x,y}），带上这一段就是三次贝塞尔曲线，不带还是直线。stroke 的点另可各带一个 w（那一点的笔宽），用来做毛笔的提按",
+        items: {
+          type: "object",
+          properties: {
+            x: { type: "number" },
+            y: { type: "number" },
+            c1: { type: "object", description: "poly / line：进入这一点的第一个控制点 {x,y}，不写就直线段" },
+            c2: { type: "object", description: "poly / line：进入这一点的第二个控制点 {x,y}" },
+            w: { type: "number", description: "op=stroke：这一点的笔宽（px），不给就用这条的 size" },
+          },
+          required: ["x", "y"],
+        },
+      },
+      text: { type: "string", description: "op=text 要写的字，最多 500 字" },
+      size: { type: "number", description: "text 的字号 / stroke 的笔宽（px）" },
+      color: { type: "string", description: "op=text 的字色 / op=stroke 的墨色" },
+      weight: { type: "string", enum: ["normal", "bold"], description: "字重" },
+      font: { type: "string", enum: ["sans", "serif", "mono", "cjk"], description: "字体族；cjk 走系统中文黑体，题字用这个" },
+      rotate: { type: "number", description: "旋转的度数：group / use 绕自己的落点，image 绕那张图的框中心" },
+      scale: { type: "number", description: "缩放倍数（group / use），默认 1" },
+      cmds: { type: "array", description: "group 的子指令，写法同外层" },
+      name: {
+        type: "string",
+        description:
+          "图层名，任何一种 op 都能带，两处都用它：素材里给要单独开关的那几笔起名，use 靠 hide / variant 挑；块上把同名指令算成一层（group 里单独起了名的那笔也算，关它只从组里摘那一笔），用 picture_layers 的 hide / show（或 picture_draw 的 hidden）整层开关——关掉的层真不画，指令和数据都还在，条数与展开额度照样占着。几笔要一起开关就包一层 group 起同名",
+      },
+      variants: {
+        type: "array",
+        items: { type: "string" },
+        description: "这一层属于哪几个变体：素材里同一个图层想要好几种样子时标它，use 的 variant 挑中谁就只画谁那一套。标了 variants 的层是「某一副样子才出现的那一笔」——use 没给同名 variant 时它不画，所以一份素材的几副样子不会同时糊在图上；常驻的那几笔别标",
+      },
+      face: {
+        type: "string",
+        enum: ["up", "down", "left", "right", "front", "back"],
+        description:
+          "这一面的朝向，任何一种 op 都能带，只有这块打了光（picture_light）才有用：吃多少光由光来的方位角和这个朝向的夹角算出来，不用你心算明暗。front 正对观者（受光只看光源抬高多少，和方位角无关）、back 背对观者。没写 face 的指令不吃光，保持固有色——所以光是一点点加上去的，先给该受光的几组写 face。group 写一次，组里没自己写的每一笔都跟着这个面；use 写的朝向传给素材里的每一笔（同一份瓦摆在朝左的坡和朝右的墙上会各自变色）。只有漆跟着明暗走：fill（颜色 / 渐变 / 图案连同它的底色）才吃光，墨不吃——描边 stroke、一条 line、毛笔一笔、题字都守住固有色，那是贴在面上的黑，不是受光的立面。词写错整条丢掉并报回 dropped",
+      },
+      ref: { type: "string", description: "use 用哪个素材名 / tile 图案铺哪个素材，得是这块 symbols 里已经定义好的" },
+      variant: { type: "string", description: "use：挑素材的哪一个变体（图层上 variants 标过的名字）。不挑就只画没标 variants 的那些常驻笔；标了变体的层只有挑中它才出现" },
+      hide: { type: "array", items: { type: "string" }, description: "use：关掉素材里这几个名字的图层，其余照画" },
+      src: { type: "string", description: 'image 垫的那张图：images/xxx.png（这个空间里的，拷贝态）或本机绝对路径 C:\\某处\\参考图.png（引用原图，不拷字节）。联网地址和 data: 内联一律不认——这应用要离线也画得出来，一串 base64 还会把 pictures/<块id>.json 撑爆' },
+      path: { type: "string", description: 'image 简写：图还在本机某个位置就直接写 path，应用会把它拷进这个空间、回填 src，顺手量好 w / h；和 src 同时给以 path 为准。文件读不出来就整次报错，不会悄悄少一张' },
+      fit: { type: "string", enum: ["meet", "fill"], description: 'image 的框和图片本身比例不一致时怎么办：meet（默认）等比缩到整张都在框内、居中留边；fill 硬拉成正好铺满框，会变形' },
+    },
+    required: ["op"],
+  },
+};
+
+/* 素材表：{"名字":{cmds:[...]}}。一条 use 顶一整个素材，几百个小人、几万片瓦
+   才不至于把浏览器压死；也是 agent 别再一条条重算同一栋房子的唯一办法。 */
+const PICTURE_SYMBOLS = {
+  type: "object",
+  description:
+    '这块画面的素材表 {"名字":{cmds:[...],ox,oy,w,h}}：名字自己起（1~32 字），cmds 写法同外层指令。ox/oy 是落点（use 的 x,y 就对准它，默认 0,0），w/h 是声明的框，只有拿它当 tile 平铺单元时非要不可。素材内部不能再嵌 use，也不能再点别的素材当剪刀。值写成 null 是删掉这个素材，还有 use 在用它、拿它当剪刀（clip / mask 的 ref）、或用它的 tile 平铺都不让删。和 cmds 在同一个请求里发来才认得新名字',
+  additionalProperties: {
+    type: ["object", "null"],
+    properties: {
+      cmds: { type: "array", items: PICTURE_CMDS.items, description: "素材自己的指令串，坐标是素材本地坐标" },
+      ox: { type: "number", description: "落点在素材坐标里的 x" },
+      oy: { type: "number", description: "落点在素材坐标里的 y" },
+      w: { type: "number", description: "素材声明的框宽，tile 平铺一格多大照它" },
+      h: { type: "number", description: "素材声明的框高" },
+    },
+  },
+};
+
+/* 一套光：整块只认一个光源，逐条指令只声明自己那面朝哪儿，明暗由这儿算。
+   挂在块上，不写进任何一条指令——改一次光要重写上千条的话，幂等和撤销都顶不住。 */
+const PICTURE_LIGHT = {
+  type: ["object", "null"],
+  description:
+    "这块的一套光；写成 null 就是关掉。整块只认一个光源，每条指令只声明自己那面朝哪儿（face），明暗由夹角算出来，不用你心算",
+  properties: {
+    angle: { type: "number", description: "光从哪个方位来：0 是正上方、顺时针数、315 就是左上方（必填）" },
+    elev: { type: "number", description: "光源抬高 0~90，默认 45：0 贴着画面侧打（明暗差最大）、90 和观者同侧（只剩 front / back 有差别，投影也短到没有）" },
+    lit: { type: "string", description: "受光端往哪个颜色拉，默认 #fff4de（暖阳光）" },
+    dark: { type: "string", description: "背光端往哪个颜色拉，默认 #2f3a52（天光兜底的冷影）" },
+    k: { type: "number", description: "拉伸强度 0~1，默认 0.3：越大越把颜色往光色 / 影色那两端拉。别一上来就拉满——吃一半光的那类面（朝天的屋顶、地面）在 k 大时算出来就是 (光色+影色)/2，固有色被吃干、整幅像蒙了张灰纸；0.3 是「看得出朝向差、颜色还是自己的」那一档，要浓再往 0.5 走" },
+  },
+};
+
+const SCENE_PARTS = {
+  type: "array",
+  description:
+    "场景块里的东西，一件一个对象。坐标是「地上的」不是纸上的：x 左右、y 往画面里去（越大越远）、z 底面离地多高、h 立起来多高，单位仍是块内画面像素。" +
+    "三种写法：{op:\"box\",x,y,z,w,d,h,rotate,color,name}——w 是 x 方向的宽、d 是 y 方向的厚，三个尺寸都得是正数（0 高不是「一片地」，是写错了，整件丢掉并报回第几件）；" +
+    "{op:\"poly\",x,y,z,points,h,rotate,color,name}——points 是底面轮廓 [{x,y},…]（也收 [x,y]），点相对 (x,y)，首尾不用重复写、写了两遍会自己收掉，至少 3 个不重复的点，轮廓里别写 c1/c2（底面只吃折线，要圆弧就多取几点）。" +
+    "这两种都是「轮廓 + h 挤成真棱柱」：L 形、梯形、八角台都能立起来，直角就是直角。" +
+    "{op:\"roof\",x,y,z,h,…} 是屋顶：同一圈底面立到 h 高，顶上一圈往中线收。矩形底面写 w,d 再加 ridge（屋脊多长）——ridge 不写或 = w 是双坡（悬山，脊和房子一样长）、0 < ridge < w 是四阿 / 庑殿（四角都斜下去）、ridge:0 是四角攒尖；多边形底面写 points（八角亭的攒尖就这么来），这种没有脊长可写，硬写会报回。" +
+    "墙和顶是两件东西，别指望一件自带屋顶：墙 {op:\"box\",z:26,h:170} 立到 196，顶就写 {op:\"roof\",z:196,h:130}；出檐不靠参数，让顶的 w,d 各比墙宽出一圈就行（宽 100 的墙给宽 160 的顶，檐口探出去 30）。" +
+    "落点 (x,y) 永远是底面那个中心，rotate 绕它转。" +
+    "影子不用你画也不用来这儿要：块上有 light 就有一盏真的太阳，几何自己把影子落到地上，没光就是平光。",
+  items: { type: "object" },
+};
+
+const SCENE_CAMERA = {
+  type: ["object", "null"],
+  description:
+    "这块的机位；写成 null 或不写就是「按内容自动框一个」。存的是绕注视点转的球坐标，改窗口大小、挪块都不会让机位漂",
+  properties: {
+    azim: { type: "number", description: "相机绕到哪个方位：0 从正北那边看过来、顺时针数、180 是从南往北看（默认）" },
+    elev: { type: "number", description: "相机抬高 2~88 度，默认 30：越大越俯视" },
+    dist: { type: "number", description: "相机离注视点多远（块内画面像素）。不给就自动框住全部内容" },
+    tx: { type: "number", description: "注视点的地面 x，默认是所有内容的中心" },
+    ty: { type: "number", description: "注视点的地面 y（越远越大），默认同上" },
+    tz: { type: "number", description: "注视点离地多高，默认取内容高度的一档" },
+    fov: { type: "number", description: "竖直视角 8~100 度，默认 45。越小越像长焦（透视压平、远处显得大）" },
+  },
+};
 
 const def = (name, description, properties = {}, required = []) => ({
   name,
@@ -79,6 +261,18 @@ const TOOL_DEFS = [
     ["action"],
   ),
   def(
+    "cosmos_route",
+    "读或改宇宙主题的航线。不带参数只读回当前名单与间隔。带 order（星体类型数组，按遇到先后排，走完一轮从头再开始）或 minutes（1-10，两颗星之间隔几分钟）就写。改名单不打断正在绕飞的这颗，只把前方还是亮点的几颗按新名单重排；用户在 设置 › 遨游星球 里看到同样的值，改错了他能自己改回来。",
+    {
+      order: {
+        type: "array",
+        items: { type: "string", enum: ["earth", "moon", "mars", "jupiter", "saturn"] },
+        description: "星体类型按遇到先后排，至少一颗；认不出的类型直接丢掉",
+      },
+      minutes: { type: "number", description: "几分钟遇到下一颗，1-10，默认 3，四舍五入到整分钟" },
+    },
+  ),
+  def(
     "cosmos_textures",
     "管宇宙主题的 8K 贴图集（7 张，存在数据文件夹的 cosmos/8k/）。status 看档位（got/total、每张在不在、此刻有没有活在跑）；upgrade 启动后台下载缺的那几张并立刻返回——整包约 35MB、要几分钟，别重复调用，隔 30 秒调一次 status 看 got 就行；cancel 停掉当前下载；reset 把 8K 清进系统回收站、回到内置 2K。不升级也照飞，只是贴到脸上时表面糊。",
     {
@@ -101,11 +295,55 @@ const TOOL_DEFS = [
     space: { type: "string", description: "空间 id 或名字" },
   }, ["space"]),
   def("space_scene", "看当前空间里所有块的摘要：id、类型、位置尺寸、层级、各类型的关键字段。做任何块操作前先调这个拿 id。", {
-    type: { type: "string", description: "只看某一类块（text/rect/ellipse/line/arrow/sticky/note/file/image/audio/video/ebook/connector），不传就全部" },
+    type: { type: "string", description: "只看某一类块（text/rect/ellipse/line/arrow/sticky/note/picture/scene/file/image/audio/video/ebook/connector），不传就全部" },
   }),
+  def(
+    "space_snapshot",
+    "看一眼空间现在长什么样——返回一张 PNG 图片，你能直接看到画面。space_scene 给的是坐标，这个是「眼睛」：用它检查块有没有重叠、文字有没有溢出边框、连线有没有从标题中间穿过去、整张图的重心是不是歪了。画完一批东西之后调一次自查，比心算坐标可靠得多。图上的像素位置可以按返回里的 region 换算成世界坐标。",
+    {
+      region: {
+        type: "string",
+        enum: ["all", "viewport"],
+        description: "all 整张画布（默认，适合看整体构图）；viewport 用户此刻看到的这一屏（适合凑近看某处细节）",
+      },
+      rect: {
+        type: "object",
+        description: "自定义矩形 {x,y,w,h}（世界坐标）；给了就忽略 region，适合精确检查某一块附近",
+        properties: {
+          x: { type: "number" },
+          y: { type: "number" },
+          w: { type: "number" },
+          h: { type: "number" },
+        },
+        required: ["x", "y", "w", "h"],
+      },
+      maxSide: { type: "number", description: "长边像素上限，默认 1600（范围 320–4096）。凑近看细节时调大，看整体时可调小省时间" },
+      scale: { type: "number", description: "直接指定倍数（0.05–4），给了就忽略 maxSide。要读清小字时用它，比如 scale: 1.5 就是「屏幕上 150% 的样子」" },
+    },
+  ),
+  def(
+    "space_batch",
+    "一次提交一串操作，整批算一步撤销——用户按一次 Ctrl+Z 就全退掉；期间也不会每个块都运镜打光，只在最后把整批框进视野。铺一整块区域、批量改样式、批量连线，都该用它，别一个一个调：既快，用户事后也好退。每项 {tool, args}；某项失败不会中断后面的，返回里逐项标 ok。",
+    {
+      operations: {
+        type: "array",
+        description: "按顺序执行的操作，最多 200 项",
+        items: {
+          type: "object",
+          properties: {
+            tool: { type: "string", description: "工具名，如 block_create / block_update / connector_create" },
+            args: { type: "object", description: "那个工具的参数，和单独调用时一样" },
+          },
+          required: ["tool"],
+        },
+      },
+      stopOnError: { type: "boolean", description: "某一项失败就停下，默认 false（继续跑完）" },
+    },
+    ["operations"],
+  ),
   def("block_get", "看单个块的摘要。", { id: ID }, ["id"]),
   def("block_create", "在空间里新建一块。坐标不给就落在视野中央、连续创建自动错开。", {
-    type: { type: "string", description: "text/rect/ellipse/line/arrow/sticky/note/image/audio/video/file/ebook/connector" },
+    type: { type: "string", description: "text/rect/ellipse/line/arrow/sticky/note/picture/scene/image/audio/video/file/ebook/connector" },
     x: X, y: Y, w: W, h: H,
     text: { type: "string", description: "文字块/便签的正文" },
     markdown: { type: "string", description: "笔记块的 Markdown 正文" },
@@ -115,11 +353,20 @@ const TOOL_DEFS = [
     mode: { type: "string", enum: ["copy", "link"], description: "文件拷进空间还是只引用原文件，默认 copy" },
     as: { type: "string", enum: ["image", "audio", "video", "file", "ebook"], description: "按指定类型落块，覆盖按扩展名的自动判断" },
     fontSize: { type: "number", description: "文字块字号" },
-    radius: { type: "number", description: "矩形的圆角像素" },
+    radius: { type: "number", description: "圆角像素（px）：矩形/文字/图片/便签/笔记/文件都认，椭圆没有圆角" },
+    borderWidth: { type: "number", description: "边框宽度（px，0 为无边框）：矩形/椭圆/文字/图片默认 2，便签/笔记/文件默认 1" },
+    locked: { type: "boolean", description: "建好就锁住（锁住的块不能移动、缩放、改内容、删除，要先解锁）" },
     color: COLOR,
     textColor: { type: "string", description: "便签文字颜色" },
     borderColor: COLOR,
     fillColor: COLOR,
+    paperColor: { type: "string", description: "画面块的画纸底色，如 #f5efdf；空串是透明" },
+    cmds: PICTURE_CMDS,
+    symbols: PICTURE_SYMBOLS,
+    light: PICTURE_LIGHT,
+    parts: SCENE_PARTS,
+    camera: SCENE_CAMERA,
+    groundColor: { type: "string", description: "场景块的地面颜色，如 #9a917d；空串用默认那档灰" },
     x2: { type: "number", description: "线段终点的世界 x" },
     y2: { type: "number", description: "线段终点的世界 y" },
     shape: { type: "string", enum: ["curve", "elbow"], description: "连线的走线方式" },
@@ -131,12 +378,14 @@ const TOOL_DEFS = [
     to: { type: "string", description: "连线的终点块 id" },
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"], description: "连线从起点的哪条边出去" },
   }, ["type"]),
-  def("block_update", "改一块的位置、尺寸、颜色或正文。只传要改的字段。", {
+  def("block_update", "改一块的位置、尺寸、颜色或正文。只传要改的字段。画面块也能在这儿整幅换指令（cmds），但改几条不如用 picture_draw 按号追加、删。", {
     id: ID, x: X, y: Y, w: W, h: H,
     x2: { type: "number", description: "线段终点 x" },
     y2: { type: "number", description: "线段终点 y" },
     fontSize: { type: "number", description: "文字块字号" },
-    radius: { type: "number", description: "矩形/文字块的圆角像素" },
+    radius: { type: "number", description: "圆角像素（px）：所有带边框的块都认，椭圆没有圆角" },
+    borderWidth: { type: "number", description: "边框宽度（px，0 为无边框）：所有带边框的块都认" },
+    locked: { type: "boolean", description: "锁定/解锁这块；锁住的块要先传 locked:false 才能改其他字段" },
     borderColor: COLOR,
     fillColor: COLOR,
     color: { type: "string", description: "文字色；便签上是底色" },
@@ -151,12 +400,27 @@ const TOOL_DEFS = [
     from: { type: "string", description: "连线改起点块" },
     to: { type: "string", description: "连线改终点块" },
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"] },
+    paperColor: { type: "string", description: "画面块的画纸底色，如 #f5efdf；空串是透明" },
+    parts: SCENE_PARTS,
+    camera: SCENE_CAMERA,
+    groundColor: { type: "string", description: "场景块的地面颜色，如 #9a917d；空串用默认那档灰" },
+    hidden: {
+      type: "array",
+      items: { type: "string" },
+      description: "画面块关着的图层名（整幅替换这份开关，空数组是全开）；只想动开关用 picture_layers",
+    },
+    light: PICTURE_LIGHT,
+    cmds: PICTURE_CMDS,
+    symbols: PICTURE_SYMBOLS,
   }, ["id"]),
   def("block_delete", "删除一块；挂在它身上的连线一起删。", { id: ID }, ["id"]),
-  def("block_duplicate", "复制一块（媒体文件会真拷一份副本），默认落在原块右下 24px。", {
+  def("block_duplicate", "复制一块（媒体文件会真拷一份副本），默认落在原块右下 24px。给 space 就复制到那个空间（会切过去），垫在画面里的位图也一并拷进那个空间。", {
     id: ID,
-    dx: { type: "number", description: "横向偏移，默认 24" },
-    dy: { type: "number", description: "纵向偏移，默认 24" },
+    dx: { type: "number", description: "横向偏移，默认 24；给了 space 时不作数" },
+    dy: { type: "number", description: "纵向偏移，默认 24；给了 space 时不作数" },
+    space: { type: "string", description: "复制到哪个空间：id 或名字。不给就在本空间复制" },
+    x: { type: "number", description: "跨空间复制时的落点世界 x（不给就摆在镜头正中）" },
+    y: { type: "number", description: "跨空间复制时的落点世界 y" },
   }, ["id"]),
   def("block_select", "选中一块或一组块；additive 为 true 时加入现有多选。", {
     ids: IDS,
@@ -211,6 +475,41 @@ const TOOL_DEFS = [
     color: { type: "string", description: "便签底色" },
     textColor: { type: "string", description: "便签文字色" },
     borderColor: COLOR,
+  }, ["id"]),
+  def("picture_get", "读一块画面的全部绘制指令和素材表：每条带号 i、类型和几何，symbols 是这块已经定义过的素材。改某一条之前先调它拿号，picture_screenshot 上看到的东西在这里都能按号对上。", {
+    id: ID,
+  }, ["id"]),
+  def("picture_draw", "往画面块里画矢量指令。mode=replace（默认）整幅换掉、append 追加、delete 按 ids 删掉那几条。画歪了别整幅重画：picture_screenshot 看一眼，再 delete 那几条重新 append。字段写坏（颜色、半径、朝向词）不会报错、那一条整条丢掉并在返回的 dropped 里给出 at 和 why，条数对不上就是被丢了；但名字写错是致命的——素材名、变体名、图层名、tile / 剪刀点的素材名，只要一个对不上，这一笔请求整个失败并把这块现有的名字列回来，别指望少几条还能悄悄画完。用户自己在块左缘工具条上手绘的笔迹也是 op:stroke 的点串，要洗画就按号 delete 掉那几笔、换成精确指令。要重复摆同一个东西（人、船、瓦）就先用 symbols 定义一次、再摆 use，别把同一段几何重算几十遍。要照着已有的画就垫一张位图当底：{op:\"image\",path:\"C:\\\\某处\\\\参考图.png\"}，应用会把它拷进这个空间、照原图量好尺寸，再配 opacity 压淡、filter 去色；参考图也是一条指令，橡皮擦和按号 delete 都删得掉。笔画想带飞白就给那条 stroke 加 grain（0~1，0.5 上下最像写干了）：一笔会自己散成几根丝，中间露纸、末端分叉，不用你算丝。要遮、要裁就给那条加 clip（剪刀，形状里面才画得出来）或 mask（拿渐变当透镜子，做渐隐）；一百个窗就定义一个素材当剪刀，每个窗只写 ref 和落点。要把一幅画分开管就给指令起同一个 name 分层（远 / 中 / 近、城楼 / 河面），开关用 hidden 或 picture_layers，别为关一层把整幅 replace 一遍。明暗别自己心算：给块上挂一套光（picture_light），指令只声明那面朝哪个方向 face。", {
+    id: ID,
+    mode: { type: "string", enum: ["replace", "append", "delete"], description: "默认 replace" },
+    cmds: PICTURE_CMDS,
+    symbols: PICTURE_SYMBOLS,
+    ids: { type: "array", items: { type: "number" }, description: "delete 要删的指令号" },
+    hidden: {
+      type: "array",
+      items: { type: "string" },
+      description: "这块关着的图层名（整幅替换这个开关，空数组是全开）。只想动开关用 picture_layers 更省，不用把指令重发一遍",
+    },
+    paperColor: { type: "string", description: "顺手改画纸底色，如 #f5efdf；空串是透明" },
+    light: PICTURE_LIGHT,
+  }, ["id"]),
+  def("picture_screenshot", "只看这一块画面，返回一张 PNG：比 space_snapshot 近得多，用来检查刚画进去的那几条对不对。maxSide 给大一点才看得清字。", {
+    id: ID,
+    maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
+  }, ["id"]),
+  def("scene_screenshot", "看一块场景现在渲染成什么样，返回一张 PNG。这就是那块 3D 视口本身：里面是相机拍出来的，不是指令清单，所以摆歪了、影子不对、东西跑出框，都在这儿看得见。改完 parts / camera / light 就调它看一眼再决定下一步。", {
+    id: ID,
+    maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
+  }, ["id"]),
+  def("picture_layers", "看这块画面有哪些图层（同名指令算一层，group 里单独起了名的那笔也算一层；报每层几条、关没关着，另外给还没起名的条数），带 hide / show 就按层名整层开关。关掉的层真不画（截图和导出里都没有它），但指令、条数和展开额度都还在，重新打开就回来；关着的层橡皮也擦不到。名字不在 hide 和 show 里同时给才有意义：同名两边都给按 show 算（开着）。素材内部那套 name / variants 是给 use 的 hide / variant 挑的，和这块的层开关是两回事。", {
+    id: ID,
+    hide: { type: "array", items: { type: "string" }, description: "要关掉的层名" },
+    show: { type: "array", items: { type: "string" }, description: "要打开的层名" },
+  }, ["id"]),
+  def("picture_light", "给一块画面打一套光，或问它现在怎么打的光。只传 id 就是读；带哪个字段就改哪个字段，没带的沿用块上现值——挪五度方位角不该把光色、影色、强度重发一遍。off:true 关掉光。指令里存的永远是固有色：明暗是渲染时按每条的 face 和这套光的夹角算出来的，所以改一次光整幅跟着变、一条指令都不动。没写 face 的笔保持固有色，一块里一条 face 都没有时打光看不出效果（返回里的 faced 告你几条吃了光）。位图（image）不吃光；缺 dx/dy 的投影会跟着这套光倒向背光那边。", {
+    id: ID,
+    ...(PICTURE_LIGHT.properties || {}),
+    off: { type: "boolean", description: "true 就是关掉这块的光，回到没有光的原样" },
   }, ["id"]),
   def("note_read", "读笔记块的 Markdown 正文。", { id: ID }, ["id"]),
   def("note_write", "写笔记块的 Markdown 正文；引用外部 .md 的块会把正文写回原文件。", {
@@ -340,9 +639,11 @@ function pick(args, keys) {
 }
 
 const BLOCK_FIELDS = [
-  "x", "y", "w", "h", "x2", "y2", "fontSize", "radius",
+  "x", "y", "w", "h", "x2", "y2", "fontSize", "radius", "borderWidth", "locked",
   "borderColor", "fillColor", "color", "textColor", "text", "markdown",
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
+  "cmds", "symbols", "paperColor", "hidden", "light",
+  "parts", "camera", "groundColor",
 ];
 
 async function appState() {
@@ -450,6 +751,113 @@ async function cosmosTextures(args) {
   return status;
 }
 
+/* 航线是偏好，不是飞行操作：不为了改个名单就把用户从别的主题拽进宇宙。 */
+function cosmosRouteTool(args) {
+  const changed = args.order !== undefined || args.minutes !== undefined;
+  const route = changed ? cosmosRouteSet(args.order, args.minutes) : cosmosRoute();
+  if (currentTheme() === "cosmos") return route;
+  return { ...route, note: "当前不是宇宙主题；名单已存下，切过去就按这条航线飞" };
+}
+
+/* 截图不改任何数据，所以不走 pace 那一拍；但要先把画布页切出来，不然取不到 DOM */
+async function snapshot(args) {
+  await ensureView("canvas");
+  const region = args.rect && typeof args.rect === "object" ? args.rect : args.region || "all";
+  const shot = await canvasAgent.snapshot({ region, maxSide: args.maxSide, scale: args.scale });
+  const perPixel = shot.region.w / shot.width;
+  return {
+    __image: { data: shot.data, mimeType: "image/png" },
+    note:
+      `截图 ${shot.width}×${shot.height}，覆盖世界坐标 x ${shot.region.x}~${shot.region.x + shot.region.w}、` +
+      `y ${shot.region.y}~${shot.region.y + shot.region.h}；画面里 ${shot.blocks} 个块、${shot.connectors} 条连线。` +
+      `换算世界坐标：x = ${shot.region.x} + 图上横向像素 × ${perPixel.toFixed(2)}，y 同理从 ${shot.region.y} 起算。`,
+  };
+}
+
+/* 只看一块画面：把这块的包围盒当自定义矩形交给同一套截图管线。
+   外扩 2px 是为了把块自己那圈边框也带上，不然看不出画到边了没有。 */
+async function blockScreenshot(args, type, label) {
+  await ensureView("canvas");
+  const block = canvasAgent.blockGet(args.id);
+  if (block.type !== type) throw new Error(`这不是${label}块`);
+  const pad = 2;
+  const shot = await canvasAgent.snapshot({
+    region: {
+      x: block.x - pad,
+      y: block.y - pad,
+      w: block.w + pad * 2,
+      h: block.h + pad * 2,
+    },
+    maxSide: args.maxSide || 1200,
+  });
+  const perPixel = shot.region.w / shot.width;
+  return {
+    __image: { data: shot.data, mimeType: "image/png" },
+    note:
+      `${label}块 ${block.id}：${shot.width}×${shot.height}，覆盖世界坐标 x ${shot.region.x}~${shot.region.x + shot.region.w}、` +
+      `y ${shot.region.y}~${shot.region.y + shot.region.h}；块内 ${type === "picture" ? `${block.cmds} 条指令` : `${block.parts} 件东西`}。` +
+      `换算块内画面坐标：x = ${(shot.region.x - block.x).toFixed(0)} + 图上横向像素 × ${perPixel.toFixed(2)}，y 同理。`,
+  };
+}
+
+/* 批量里只放画布上的块操作。切空间、换主题、写笔记这些会跳页或者把撤销栈搅乱，
+   混进来「一次撤销全退」就不成立了，所以按白名单放行 */
+const BATCH_ALLOWED = /^(block_|connector_|sticky_|picture_|scene_|note_read$|note_write$|file_import$|pdf_goto$|ebook_goto$|camera_)/;
+
+/* 一项的结果只留 id 和类型：200 项把完整摘要都塞回去，这个回复会大到没法看 */
+function briefResult(data) {
+  if (data && typeof data === "object" && !Array.isArray(data) && data.id) {
+    return { id: data.id, type: data.type };
+  }
+  return undefined;
+}
+
+async function runBatch(args) {
+  const ops = Array.isArray(args.operations) ? args.operations : [];
+  if (!ops.length) throw new Error("operations 是空的，没什么可做");
+  if (ops.length > 200) throw new Error(`一次最多 200 项，这次给了 ${ops.length} 项`);
+  await ensureView("canvas");
+
+  const results = [];
+  let failed = 0;
+  let firstId = "";
+  let lastId = "";
+  canvasAgent.beginBatch();
+  try {
+    for (const op of ops) {
+      const tool = String(op?.tool || "");
+      const sub = op?.args && typeof op.args === "object" ? op.args : {};
+      if (!BATCH_ALLOWED.test(tool)) {
+        failed += 1;
+        results.push({ tool, ok: false, error: "这个工具不能放进批量里" });
+        continue;
+      }
+      try {
+        const data = await dispatch(tool, sub);
+        if (!firstId && data?.id) firstId = data.id;
+        if (data?.id) lastId = data.id;
+        results.push({ tool, ok: true, result: briefResult(data) });
+      } catch (error) {
+        failed += 1;
+        results.push({ tool, ok: false, error: String(error?.message || error) });
+        if (args.stopOnError) break;
+      }
+    }
+  } finally {
+    canvasAgent.endBatch();
+  }
+
+  /* 整批做完再把视野收到这批东西上，比中途每建一块跳一次镜头好得多 */
+  if (firstId || lastId) canvasAgent.batchFit();
+
+  return {
+    done: results.length - failed,
+    failed,
+    note: "整批算一步撤销，Ctrl+Z 一次全退",
+    operations: results,
+  };
+}
+
 async function dispatch(name, args) {
   switch (name) {
     case "guide":
@@ -464,6 +872,8 @@ async function dispatch(name, args) {
       return flightState(args);
     case "flight_control":
       return flightControl(args);
+    case "cosmos_route":
+      return cosmosRouteTool(args);
     case "cosmos_textures":
       return cosmosTextures(args);
 
@@ -479,19 +889,32 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.spaceDelete(args.space));
     case "space_scene":
       return onCanvas(args, () => canvasAgent.scene(pick(args, ["type"])));
+    case "space_snapshot":
+      return snapshot(args);
+    case "space_batch":
+      return runBatch(args);
 
     case "block_get":
       return onCanvas(args, () => canvasAgent.blockGet(args.id));
     case "block_create":
       return onCanvas(args, () =>
-        canvasAgent.blockCreate(pick(args, ["type", "x", "y", "w", "h", "text", "markdown", "name", "notePath", "path", "mode", "as", "fontSize", "radius", "color", "textColor", "borderColor", "fillColor", "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide"])),
+        /* schema 里写了的字段，这里就得挨个接住：漏一个不报错，那块会安静地建成空的
+           （第一版就是这样把 parts / light / camera / groundColor 落掉的——五件东西回来是 0 件） */
+        canvasAgent.blockCreate(
+          pick(args, [
+            "type", "x", "y", "w", "h", "text", "markdown", "name", "notePath", "path", "mode", "as",
+            "fontSize", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
+            "paperColor", "cmds", "symbols", "light", "parts", "camera", "groundColor",
+            "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
+          ]),
+        ),
       );
     case "block_update":
       return onCanvas(args, () => canvasAgent.blockUpdate(args.id, pick(args, BLOCK_FIELDS)));
     case "block_delete":
       return onCanvas(args, () => canvasAgent.blockDelete(args.id));
     case "block_duplicate":
-      return onCanvas(args, () => canvasAgent.blockDuplicate(args.id, pick(args, ["dx", "dy"])));
+      return onCanvas(args, () => canvasAgent.blockDuplicate(args.id, pick(args, ["dx", "dy", "space", "x", "y"])));
     case "block_select":
       return onCanvas(args, () => canvasAgent.blockSelect(args.ids, Boolean(args.additive)));
     case "block_layer":
@@ -521,6 +944,20 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.stickyRead(args.id));
     case "sticky_write":
       return onCanvas(args, () => canvasAgent.stickyWrite(args.id, pick(args, ["text", "color", "textColor", "borderColor"])));
+    case "picture_get":
+      return onCanvas(args, () => canvasAgent.pictureGet(args.id));
+    case "picture_draw":
+      return onCanvas(args, () =>
+        canvasAgent.pictureDraw(args.id, pick(args, ["mode", "cmds", "symbols", "ids", "paperColor", "hidden", "light"])),
+      );
+    case "picture_layers":
+      return onCanvas(args, () => canvasAgent.pictureLayers(args.id, pick(args, ["hide", "show"])));
+    case "picture_light":
+      return onCanvas(args, () => canvasAgent.pictureLight(args.id, pick(args, ["angle", "elev", "lit", "dark", "k", "off"])));
+    case "picture_screenshot":
+      return blockScreenshot(args, "picture", "画面");
+    case "scene_screenshot":
+      return blockScreenshot(args, "scene", "场景");
     case "note_read":
       return onCanvas(args, () => canvasAgent.noteRead(args.id));
     case "note_write":
@@ -590,6 +1027,13 @@ export async function runTool(name, rawArgs) {
   const args = rawArgs && typeof rawArgs === "object" ? rawArgs : {};
   try {
     const data = await dispatch(name, args);
+    /* 截图是真图片，不能塞进 JSON 变成一坨 base64 文本——MCP 有 image 这种 content，
+       客户端会把它当图渲染出来，模型才真的「看得见」 */
+    if (data && data.__image) {
+      const content = [{ type: "image", data: data.__image.data, mimeType: data.__image.mimeType }];
+      if (data.note) content.push({ type: "text", text: data.note });
+      return { content, isError: false };
+    }
     const text = typeof data === "string" ? data : JSON.stringify(data ?? {});
     return textResult(text, false);
   } catch (error) {

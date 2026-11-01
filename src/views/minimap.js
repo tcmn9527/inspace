@@ -26,6 +26,8 @@ const TYPE_COLORS = {
   text: "#a8b0bd",
   rect: "#9a9aa6",
   ellipse: "#9a9aa6",
+  picture: "#f0a08c",
+  scene: "#8fb8d8",
 };
 
 let hooks = null;

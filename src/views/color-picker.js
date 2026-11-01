@@ -98,22 +98,19 @@ export function closeColorPicker(commit = true) {
 }
 
 /**
- * 打开取色盘。
+ * 建一块取色板，返回 { el, current, cancel }。
+ * 只负责面板本身：不定位、不挂 document 监听，由调用方决定放在哪、什么时候落库。
  * @param {object} opts
- * @param {number} opts.x 右键位置（面板会贴在这个点附近，并自动收回窗口内）
- * @param {number} opts.y
  * @param {string} opts.value 打开时的颜色；空字符串表示当前就是透明
  * @param {string} [opts.seed] value 为空时取色盘初始停靠的颜色（只影响显示，不改值）
  * @param {string[]} [opts.presets] 预设色块（点一下即用）
- * @param {boolean} [opts.allowNone] 显示透明项，点击后回调空字符串并关闭
+ * @param {boolean} [opts.allowNone] 显示透明项，点击后回调空字符串
  * @param {string} [opts.noneLabel] 透明项的文案（填充用「无填充」，边框用「透明」）
  * @param {boolean} [opts.allowAlpha] 显示透明度滑条，结果带 alpha（空间用）
- * @param {(color: string) => void} [opts.onChange] 实时预览
- * @param {(color: string) => void} [opts.onDone] 关闭时落库
+ * @param {(color: string) => void} [opts.onChange] 每次变化实时回调
+ * @param {() => void} [opts.onNone] 点了「透明」之后的附加动作（独立面板用来关掉自己）
  */
-export function openColorPicker({
-  x = 0,
-  y = 0,
+export function createColorPanel({
   value,
   seed,
   presets = [],
@@ -121,10 +118,8 @@ export function openColorPicker({
   noneLabel = "无填充",
   allowAlpha = false,
   onChange,
-  onDone,
+  onNone,
 } = {}) {
-  closeColorPicker(true); // 旧面板先按「确定」收尾，保证它的变更不会丢
-
   const initialColor = parseColor(value);
   const initial = allowAlpha
     ? withAlpha(initialColor?.hex ?? "", initialColor?.alpha ?? 255)
@@ -319,7 +314,7 @@ export function openColorPicker({
     baseHex = "";
     current = "";
     onChange?.("");
-    closeColorPicker(true);
+    onNone?.();
   });
 
   for (const color of presets) {
@@ -334,37 +329,75 @@ export function openColorPicker({
   }
   presetRow.hidden = presets.length === 0;
 
+  paint();
+  return {
+    el: panel,
+    /* current 是随拖动不断变的局部变量，必须每次现取；快照下来会永远是打开时的颜色 */
+    get current() {
+      return current;
+    },
+    /* Esc 取消：退回打开时的颜色，调用方此时不要落库 */
+    cancel() {
+      current = initial;
+      onChange?.(initial);
+    },
+  };
+}
+
+/**
+ * 独立浮层形态的取色盘：贴在给定坐标上，点外面关掉。
+ * 参数同上，另外 onDone 在关闭时落库、Esc 视为取消。
+ */
+export function openColorPicker({
+  x = 0,
+  y = 0,
+  value,
+  seed,
+  presets = [],
+  allowNone = false,
+  noneLabel = "无填充",
+  allowAlpha = false,
+  onChange,
+  onDone,
+} = {}) {
+  closeColorPicker(true); // 旧面板先按「确定」收尾，保证它的变更不会丢
+
+  const panel = createColorPanel({
+    value,
+    seed,
+    presets,
+    allowNone,
+    noneLabel,
+    allowAlpha,
+    onChange,
+    onNone: () => closeColorPicker(true),
+  });
+  document.body.append(panel.el);
+  const rect = panel.el.getBoundingClientRect();
+  panel.el.style.left = `${clamp(x, 8, window.innerWidth - rect.width - 8)}px`;
+  panel.el.style.top = `${clamp(y, 8, window.innerHeight - rect.height - 8)}px`;
+
   const onDocDown = (e) => {
-    if (!e.composedPath().includes(panel)) closeColorPicker(true);
+    if (!e.composedPath().includes(panel.el)) closeColorPicker(true);
   };
   const onKeyDown = (e) => {
     if (e.key !== "Escape") return;
     e.stopPropagation();
     e.preventDefault();
-    // Esc = 取消：还原成打开时的颜色，不落库
-    current = initial;
-    onChange?.(initial);
+    panel.cancel();
     closeColorPicker(false);
   };
 
-  document.body.append(panel);
-  const rect = panel.getBoundingClientRect();
-  panel.style.left = `${clamp(x, 8, window.innerWidth - rect.width - 8)}px`;
-  panel.style.top = `${clamp(y, 8, window.innerHeight - rect.height - 8)}px`;
-
   open = {
-    panel,
+    panel: panel.el,
     onDone,
     onDocDown,
     onKeyDown,
-    // current 是随拖动不断变的局部变量，必须每次现取；快照下来会永远是打开时的颜色
     get current() {
-      return current;
+      return panel.current;
     },
   };
   // 面板高度会随内容定，定位算完再挂监听，避免开面板那一下就被自己关掉
   document.addEventListener("pointerdown", onDocDown, true);
   document.addEventListener("keydown", onKeyDown, true);
-
-  paint();
 }

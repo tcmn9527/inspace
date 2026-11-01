@@ -266,6 +266,7 @@ body.is-resizing {
 
 .settings-card {
   max-width: 760px;
+  margin-bottom: 14px;
   padding: 18px 20px 16px;
   border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
   border-radius: 10px;
@@ -328,6 +329,108 @@ body.is-resizing {
 
 .settings-error {
   color: var(--danger);
+}
+
+/* 遨游星球：名单一行一颗。行尾的上移/下移/移除平时不出现，也不做按钮外壳——
+   它们是这一行的次级操作，套上边框会和「下载 8K 贴图」那种动作按钮抢层级 */
+.settings-route {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 420px;
+}
+
+.settings-route-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 22%, transparent);
+  font-size: 13px;
+}
+
+.settings-route-item:last-child {
+  border-bottom: none;
+}
+
+.settings-route-index {
+  width: 16px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-route-name {
+  flex: 1 1 auto;
+}
+
+.settings-route-ops {
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.settings-route-item:hover .settings-route-ops,
+.settings-route-item:focus-within .settings-route-ops {
+  opacity: 1;
+}
+
+.settings-route-op {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-route-op:hover,
+.settings-route-op:focus-visible {
+  color: var(--fg);
+}
+
+.settings-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 就地编辑的数字，和空间工具栏里的缩放数字同一套规格：平时只是个数，
+   悬停才有一点底，进编辑才更亮——它不是表单控件，别做成一个空着的输入框 */
+.settings-input {
+  width: 40px;
+  height: 26px;
+  padding: 0 2px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.settings-input[readonly] {
+  cursor: default;
+}
+
+.settings-input:not([readonly]) {
+  cursor: text;
+}
+
+.settings-input:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.settings-input:focus {
+  outline: none;
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
 }
 
 /* ---------- 右键菜单 ---------- */
@@ -394,6 +497,109 @@ body.is-resizing {
   border-radius: 50%;
   border: 1.5px solid color-mix(in srgb, var(--fg) 35%, transparent);
   background: var(--menu-icon-color, transparent);
+}
+
+/* 二级菜单：从父行右边展开，外观跟父菜单一套，只是多压一层 */
+.ctx-submenu {
+  z-index: 51; /* 压在父菜单(#ctx-menu:50)之上 */
+}
+
+/* 行尾箭头只说「这行还有下一级」，不吃指针 */
+.menu-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
+  pointer-events: none;
+}
+
+.menu-arrow svg {
+  display: block;
+}
+
+/* 颜色行尾部：当前色点 + 展开箭头，两个都不吃指针 */
+.menu-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+/* 三级浮层里的取色板：外壳就是菜单本身，里面的色板退回无壳的一块 */
+.color-menu {
+  padding: 6px;
+}
+
+.color-menu .color-pop {
+  position: static;
+  width: 208px;
+  padding: 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 三级浮层里的滑条：一根轨道 + 右侧百分比 */
+.slider-menu {
+  padding: 10px 12px;
+}
+
+.menu-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 168px;
+}
+
+.menu-slider-rail {
+  position: relative;
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  cursor: pointer;
+}
+
+.menu-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.menu-slider-knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg) 65%, transparent);
+  transform: translate(-50%, -50%);
+}
+
+.menu-slider-value {
+  flex: 0 0 auto;
+  width: 30px;
+  font-size: 11px;
+  line-height: 1;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 声音行尾的当前值，滑条一动就刷新 */
+.menu-row-volume {
+  font-size: 11px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--fg) 62%, transparent);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- 取色盘（右键「设置文字颜色 / 设置背景颜色」） ---------- */
@@ -1334,6 +1540,9 @@ body.is-resizing {
   font-size: 14px;
   line-height: 1.75;
   color: var(--fg);
+  /* 全局关了字体合成防界面伪粗体，但中文没有真斜体，markdown 的 *斜体* 会看着和正文一样。
+     这里只放开倾斜合成，字重仍不合成。 */
+  font-synthesis-style: auto;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
 }
@@ -1790,8 +1999,8 @@ body.is-resizing {
   background-color: var(--bg);
 }
 
-/* 宇宙主题的深空背景层：压在空间最底下，块和连线都在它上面 */
-.canvas-cosmos {
+/* 主题背景层（宇宙）：压在空间最底下，块和连线都在它上面 */
+.canvas-backdrop {
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -1800,11 +2009,11 @@ body.is-resizing {
   pointer-events: none;
 }
 
-.canvas-cosmos[hidden] {
+.canvas-backdrop[hidden] {
   display: none;
 }
 
-/* 宇宙主题下纯文字块没有底色，星星会从字后面透出来；给字补一层弱阴影压住 */
+/* 宇宙主题下纯文字块没有底色，背景会从字后面透出来；给字补一层弱阴影压住 */
 [data-theme="cosmos"] .canvas-item-text .canvas-text-body {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.72);
 }
@@ -2016,6 +2225,46 @@ body.is-resizing {
   box-sizing: border-box;
 }
 
+/* 分组容器：只是一层虚线框，不吃布局、不改块自己的边框。
+   框里完全装下的块，在拖动这个框的时候会跟着走。 */
+.canvas-item.is-container {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 46%, transparent);
+  outline-offset: 4px;
+}
+
+.canvas-item.is-container:hover {
+  outline-color: color-mix(in srgb, var(--accent) 78%, transparent);
+}
+
+/* 锁住的块：右上角一枚小锁，所有块统一；不动块自己的边框、底色和圆角。
+   锁图标不吃指针。块自己拖不动，但按住它可以拖整张画布，
+   所以光标给「可抓」而不是普通箭头。内部自带 cursor: move 的拖动头（如电子书头部）
+   也一并改过来，免得指着它还以为能挪这块。 */
+.canvas-item.is-locked,
+.canvas-item.is-locked .canvas-ebook-head {
+  cursor: grab;
+}
+
+/* 真按住拖起来了，锁块上的光标也要跟着进「抓住」状态（父级的 grabbing 被块自己的 cursor 盖住） */
+.canvas-stage.is-panning .canvas-item.is-locked,
+.canvas-stage.is-panning .canvas-item.is-locked .canvas-ebook-head {
+  cursor: grabbing;
+}
+
+.canvas-item.is-locked::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 13px;
+  height: 13px;
+  background: color-mix(in srgb, var(--fg) 62%, transparent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm3 8H9V7a3 3 0 0 1 6 0v3z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm3 8H9V7a3 3 0 0 1 6 0v3z'/%3E%3C/svg%3E") center / contain no-repeat;
+  filter: drop-shadow(0 0 1.5px var(--surface));
+  pointer-events: none;
+}
+
 .canvas-item-rect,
 .canvas-item-ellipse {
   border: 2px solid var(--canvas-border, #9a9a9a);
@@ -2098,6 +2347,139 @@ body.is-resizing {
 .canvas-item-sticky.is-editing .canvas-sticky-body {
   outline: none;
   cursor: text;
+}
+
+/* 画面块：外壳只管边框和圆角，卡片 overflow:hidden 把画面裁进块里。
+   圆角由 js 同步到卡片上，不然裁出来的是直角。 */
+.canvas-item-picture {
+  cursor: default;
+  border: 1px solid var(--canvas-border, #9a9a9a);
+}
+
+.canvas-picture-card {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.canvas-picture-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 场景块：外壳管边框，卡片管裁剪和圆角，view 是 three.js 挂 <canvas> 的宿主。
+   圆角 inherit 而不是再算一遍——块的半径由 js 写在外壳上，继承才不会裁出直角。 */
+.canvas-item-scene {
+  cursor: default;
+  border: 1px solid var(--canvas-border, #9a9a9a);
+}
+
+.canvas-scene-card {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.canvas-scene-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-scene-gl {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-scene-hint {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-scene-hint[hidden] {
+  display: none;
+}
+
+/* 块左缘那条常驻工具条：笔、墨色、笔宽、笔画撤销都在这儿。
+   整条靠 scale(--canvas-inv) 抵消相机缩放，所以块缩到多小它都一样大、点得着，
+   transform-origin 定在贴块那一侧的右上角，缩放时那条边始终贴着块的左缘。 */
+.canvas-picture-tools {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  transform: scale(var(--canvas-inv, 1)) translateX(-6px);
+  transform-origin: 100% 0;
+}
+
+/* 锁住的块不供笔，整条工具条收起 */
+.canvas-picture-tools.is-hidden {
+  display: none;
+}
+
+.canvas-picture-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.canvas-picture-btn:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.canvas-picture-btn.is-active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.canvas-picture-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.canvas-picture-btn:disabled:hover {
+  background: transparent;
+}
+
+/* 墨色就是按钮上那颗点，取色板里一动它跟着变；笔宽直接写数字 */
+.canvas-picture-ink {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--picture-ink, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent);
+}
+
+/* 落笔时指针换成十字，一眼看出这一下是画还是挪块 */
+.canvas-item-picture.is-painting .canvas-picture-svg {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.canvas-picture-preview {
+  pointer-events: none;
 }
 
 /* 笔记块：阅读态直接复用 .notes-body 的 Markdown 排版 */
@@ -2457,8 +2839,8 @@ body.is-resizing {
   user-select: none;
 }
 
-/* 非文本的附件条就一行，垂直居中；文本块和 PDF 块顶格排，好给下面留高度 */
-.canvas-file-card:not(.canvas-file-card-text):not(.canvas-file-card-pdf) {
+/* 非文本的附件条就一行，垂直居中；文本块、PDF 块、DOCX 块、XLSX 块、PPTX 块顶格排，好给下面留高度 */
+.canvas-file-card:not(.canvas-file-card-text):not(.canvas-file-card-pdf):not(.canvas-file-card-docx):not(.canvas-file-card-xlsx):not(.canvas-file-card-pptx) {
   justify-content: center;
 }
 
@@ -2612,6 +2994,11 @@ body.is-resizing {
   /* 轨道留空，露出卡片自己的底色：用户改过背景色也不出现一条白边 */
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+  /* 卡片整体禁选，预览正文单独放开，方便从预览里选中复制文字 */
+  user-select: text;
+  -webkit-user-select: text;
+  /* 正文里是文字：用 I 形光标提示「这里能选」，移动交给头部 */
+  cursor: text;
 }
 
 .canvas-file-card-text {
@@ -2632,6 +3019,354 @@ body.is-resizing {
 .canvas-file-preview.is-failed {
   font-size: 11px;
   line-height: 16px;
+  color: var(--danger);
+}
+
+/* DOCX 块：mammoth 转出来的 HTML 铺在卡片里，超出就自己滚；底色跟卡片走 */
+.canvas-file-docx {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+}
+
+.canvas-file-docx-state {
+  flex: 0 0 auto;
+  padding-top: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+
+.canvas-file-docx-state.is-failed {
+  color: var(--danger);
+}
+
+.canvas-file-docx-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 2px 4px;
+  /* 卡片整体禁选，正文单独放开，方便从预览里复制文字 */
+  user-select: text;
+  -webkit-user-select: text;
+  /* 正文里是文字：用 I 形光标提示「这里能选」，移动交给头部 */
+  cursor: text;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+/* mammoth 输出的语义化 HTML，限定在 DOCX 正文里排版，不污染全局 */
+.canvas-file-docx-body h1,
+.canvas-file-docx-body h2,
+.canvas-file-docx-body h3,
+.canvas-file-docx-body h4,
+.canvas-file-docx-body h5,
+.canvas-file-docx-body h6 {
+  margin: 10px 0 6px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.canvas-file-docx-body h1 { font-size: 18px; }
+.canvas-file-docx-body h2 { font-size: 16px; }
+.canvas-file-docx-body h3 { font-size: 14px; }
+.canvas-file-docx-body h4,
+.canvas-file-docx-body h5,
+.canvas-file-docx-body h6 { font-size: 13px; }
+.canvas-file-docx-body p { margin: 0 0 8px; }
+.canvas-file-docx-body ul,
+.canvas-file-docx-body ol { margin: 0 0 8px; padding-left: 22px; }
+.canvas-file-docx-body li { margin: 2px 0; }
+.canvas-file-docx-body a { color: var(--accent); }
+.canvas-file-docx-body img { max-width: 100%; height: auto; border-radius: 4px; }
+.canvas-file-docx-body table {
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 11px;
+}
+.canvas-file-docx-body th,
+.canvas-file-docx-body td {
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.canvas-file-docx-body blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid color-mix(in srgb, var(--line) 50%, transparent);
+  color: var(--muted);
+}
+.canvas-file-docx-empty { color: var(--muted); }
+
+/* XLSX 块：和 DOCX 同样的「头移内容选」套路，正文换成一张可滚动的表 */
+.canvas-file-xlsx {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* 卡片整体禁选，正文单独放开，方便从预览里复制单元格文字 */
+}
+
+/* 一排工作表标签：点哪个亮哪个，切换显示的表 */
+.canvas-file-xlsx-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+.canvas-file-xlsx-tab {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 1px 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.canvas-file-xlsx-tab.is-active {
+  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.canvas-file-xlsx-state {
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+.canvas-file-xlsx-state.is-failed {
+  color: var(--danger);
+}
+
+/* 正文：可滚动的表区，鼠标是 I 形——和 DOCX 一样，放在这里划选复制、放在头部拖动 */
+.canvas-file-xlsx-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 2px 4px;
+  user-select: text;
+  cursor: text;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+
+.canvas-file-xlsx-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--fg);
+  width: max-content;       /* 列宽跟着内容走，别被压成挤一条 */
+  max-width: 100%;
+}
+.canvas-file-xlsx-table th,
+.canvas-file-xlsx-table td {
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  padding: 3px 8px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;    /* 单元格里的换行留着，别塌成一行 */
+  word-break: break-word;
+}
+.canvas-file-xlsx-table th {
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  font-weight: 600;
+  z-index: 1;
+}
+.canvas-file-xlsx-table td { background: var(--surface); }
+.canvas-file-xlsx-trunc {
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+}
+
+/* PPTX 块：工具栏 + 主舞台（自适应宽度的单页）+ 底部缩略图条 */
+.canvas-file-pptx {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 包裹工具栏/舞台/缩略图的外层：撑满卡片，正文区放开选区，放在这里划选、放在头部拖动 */
+.canvas-file-pptx-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  user-select: text;
+  cursor: text;
+}
+
+/* 翻页工具栏：‹ 第 X / N 张 › */
+.canvas-file-pptx-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 3px 0 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+}
+.canvas-file-pptx-nav {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  width: 24px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.canvas-file-pptx-nav:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.canvas-file-pptx-count {
+  flex: 1 1 auto;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* 主舞台：装着按比例缩放后的那一页，宽度撑满卡片 */
+.canvas-file-pptx-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: 4px 0;
+  /* 预留滚动条槽：滚动条出现/消失不再改变内容宽，免得和缩放重算互相触发 */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+
+/* 缩放包裹层：固定宽（主舞台 100% / 缩略图定宽），内部 96DPI 舞台靠 transform 缩放 */
+.canvas-file-pptx-slidewrap {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.canvas-file-pptx-slide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  background: #ffffff;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--fg) 18%, transparent);
+  overflow: hidden;
+}
+
+/* 文本框：绝对定位、竖排、整体可选中复制 */
+.pptx-textbox {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: 2px 4px;
+  user-select: text;
+  cursor: text;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  color: #000000;
+}
+.pptx-textbox p { margin: 0; line-height: 1.12; }
+.pptx-textbox p + p { margin-top: 2px; }
+.pptx-bullet { padding-left: 1em; position: relative; }
+.pptx-bullet::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+}
+.pptx-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+.pptx-table {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #ffffff;
+  color: #000000;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+.pptx-table th,
+.pptx-table td {
+  border: 1px solid #b0b0b0;
+  padding: 1px 4px;
+  text-align: left;
+  vertical-align: top;
+  overflow: hidden;
+  line-height: 1.1;
+}
+.pptx-table p { margin: 0; }
+
+/* 底部缩略图条：每张缩略图是个定宽缩放页，点哪个跳哪页 */
+.canvas-file-pptx-thumbs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 2px 2px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+.canvas-file-pptx-thumb {
+  flex: 0 0 auto;
+  width: 132px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 4px;
+  background: #ffffff;
+  cursor: pointer;
+  overflow: hidden;
+}
+.canvas-file-pptx-thumb.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.canvas-file-pptx-state {
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+.canvas-file-pptx-state.is-failed {
   color: var(--danger);
 }
 
@@ -2942,6 +3677,7 @@ body.is-resizing {
 }
 
 .canvas-video-toggle,
+.canvas-video-volume,
 .canvas-video-max {
   flex: 0 0 auto;
   display: inline-flex;
@@ -2958,6 +3694,7 @@ body.is-resizing {
 }
 
 .canvas-video-toggle:hover,
+.canvas-video-volume:hover,
 .canvas-video-max:hover {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
   color: var(--accent);
@@ -2969,6 +3706,7 @@ body.is-resizing {
 }
 
 .canvas-video-toggle svg,
+.canvas-video-volume svg,
 .canvas-video-max svg {
   width: 14px;
   height: 14px;
@@ -2996,6 +3734,69 @@ body.is-resizing {
 
 .canvas-video-player.is-fullscreen .canvas-video-max-in {
   display: block;
+}
+
+/* 音量：平时只有一颗喇叭键，滑条悬停才从按钮上方浮出来 */
+.canvas-video-volwrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.canvas-video-vol-off {
+  display: none;
+}
+
+.canvas-video-volwrap.is-muted .canvas-video-vol-on {
+  display: none;
+}
+
+.canvas-video-volwrap.is-muted .canvas-video-vol-off {
+  display: block;
+}
+
+.canvas-video-volpop {
+  position: absolute;
+  z-index: 2;
+  right: -10px;
+  bottom: calc(100% + 8px);
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+.canvas-video-volrail {
+  position: relative;
+  width: 82px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  cursor: pointer;
+}
+
+.canvas-video-volfill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.canvas-video-volknob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg) 65%, transparent);
+  transform: translate(-50%, -50%);
 }
 
 .canvas-video-track {
@@ -3097,24 +3898,34 @@ body.is-resizing {
 }
 
 .canvas-video-player:fullscreen .canvas-video-toggle,
+.canvas-video-player:fullscreen .canvas-video-volume,
 .canvas-video-player:fullscreen .canvas-video-max {
   color: #fff;
   background: rgba(255, 255, 255, 0.16);
 }
 
 .canvas-video-player:fullscreen .canvas-video-toggle:hover,
+.canvas-video-player:fullscreen .canvas-video-volume:hover,
 .canvas-video-player:fullscreen .canvas-video-max:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.32);
 }
 
-.canvas-video-player:fullscreen .canvas-video-rail {
+.canvas-video-player:fullscreen .canvas-video-rail,
+.canvas-video-player:fullscreen .canvas-video-volrail {
   background: rgba(255, 255, 255, 0.3);
 }
 
-.canvas-video-player:fullscreen .canvas-video-knob {
+.canvas-video-player:fullscreen .canvas-video-knob,
+.canvas-video-player:fullscreen .canvas-video-volknob {
   background: #fff;
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-video-player:fullscreen .canvas-video-volpop {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(20, 20, 22, 0.92);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
 }
 
 .canvas-video-player:fullscreen .canvas-video-time,
@@ -3418,6 +4229,12 @@ body.is-resizing {
   pointer-events: auto;
 }
 
+/* 顶栏里只有名字和右侧那一组是「排进去」的：左上角名字、右上角缩放 + 撤销/导出。
+   工具条自己绝对居中，不参与这条流。 */
+.canvas-topbar .canvas-zoom {
+  margin-left: auto;
+}
+
 .canvas-name {
   display: inline-flex;
   align-items: center;
@@ -3537,9 +4354,206 @@ body.is-resizing {
 }
 
 .canvas-page.no-canvas .canvas-tools,
-.canvas-page.no-canvas .canvas-zoom {
+.canvas-page.no-canvas .canvas-zoom,
+.canvas-page.no-canvas .canvas-actions {
   opacity: 0.35;
   pointer-events: none;
+}
+
+/* 撤销 / 重做 / 导出：和缩放条同一套浮层质感，紧挨在它右边 */
+.canvas-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.canvas-act {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.canvas-act:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.canvas-act:active:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+
+/* 到头了就是到头了：灰掉、不吃指针，不给「点了没反应」的错觉 */
+.canvas-act:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.canvas-act-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+
+/* ---------- 搜索面板 ---------- */
+.canvas-search {
+  position: absolute;
+  z-index: 6;
+  top: 58px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100% - 32px));
+  max-height: min(60vh, 460px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.44);
+  transform: translateX(-50%);
+  overflow: hidden;
+}
+
+.canvas-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  color: var(--muted);
+}
+
+.canvas-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.canvas-search-input::placeholder {
+  color: var(--muted);
+}
+
+.canvas-search-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-search-results {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+/* 分隔线挂在这儿而不是输入行上：只有下面真有东西的时候才画。
+   刚唤出面板、或者输入还是空的时候列表里一个节点都没有，
+   此时整块收起来，免得留一条没有下文的横线加一截空白。 */
+.canvas-search-results:empty {
+  display: none;
+}
+
+.canvas-search-results:not(:empty) {
+  border-top: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.canvas-search-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.canvas-search-row.is-active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.canvas-search-badge {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.canvas-search-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.canvas-search-title {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-search-text {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-search-row mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 46%, transparent);
+  color: var(--fg);
+}
+
+.canvas-search-empty {
+  margin: 0;
+  padding: 14px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 搜索定位到的那一块：边框亮一下，告诉用户「就是它」 */
+.canvas-item.is-found {
+  animation: canvas-found 1.4s ease-out;
+}
+
+@keyframes canvas-found {
+  0%,
+  40% {
+    box-shadow: 0 0 0 3px var(--accent), 0 0 26px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 
 /* 左下角坐标条：选中面板的左上角 X/Y，样式跟右下角缩放条同一路子（浮层控件） */
@@ -3712,6 +4726,35 @@ body.is-resizing {
   font-size: 12px;
   transform: translateX(-50%);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+}
+
+/* 一句回执（导出完成之类）：从底部浮起来，几秒后自己退场 */
+.canvas-toast {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  bottom: 56px;
+  max-width: min(620px, calc(100% - 32px));
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+}
+
+.canvas-toast.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 /* 取色盘：无填充 */

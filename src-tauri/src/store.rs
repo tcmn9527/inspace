@@ -166,12 +166,16 @@ pub fn data_reveal(state: tauri::State<'_, StoreState>) -> Result<(), String> {
 }
 
 /// 弹系统目录选择框，只负责选，不动任何数据；搬不搬由前端问完再定。
+/* 同 canvas 的选取框：阻塞调用要在线程池里等，且有主窗口挂着才不会盖出原生标题栏 */
 #[tauri::command]
-pub fn data_pick_root(app: tauri::AppHandle) -> Option<String> {
-    /* 系统对话框会阻塞，别在锁里等它，不然其它命令陪着一块儿卡 */
+pub async fn data_pick_root(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Option<String> {
     app.dialog()
         .file()
         .set_title("选择数据文件夹")
+        .set_parent(&window)
         .blocking_pick_folder()
         .and_then(|picked| picked.into_path().ok())
         .map(|path| path.to_string_lossy().to_string())

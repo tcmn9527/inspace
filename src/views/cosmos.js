@@ -60,12 +60,17 @@ const EARTH_NEAR_LAPS = 1.5;
 /* 上轨不是瞬移：离到 1.8 倍轨道半径就开始收，头几秒仍然带着「往里飞」的动量，
    切向速度慢慢加进来，走成螺旋，免得背景流动一帧之内从「往前」换成「横着绕」 */
 const ORBIT_ENTER_K = 1.8;
-/* 星体一颗一颗沿航线摆：第一颗在多远、往后每颗隔多远。
-   按巡航 150 算，追上下一颗要四到八分钟 */
-const FIRST_MIN = 34000;
-const FIRST_RANGE = 14000;
-const GAP_MIN = 26000;
-const GAP_RANGE = 18000;
+/* 星体一颗一颗沿航线摆，隔多远由用户在设置页定的「几分钟遇到一颗」换算成世界距离：
+   按巡航 150 单位/秒算，三分钟就是两万七。名单和间隔都存在 localStorage，
+   设置页和 MCP 走同一个写入口。 */
+const ROUTE_KEY = "workbench.cosmosRoute";
+const PACE_KEY = "workbench.cosmosMinutes";
+const DEFAULT_ORDER = ["earth", "moon", "mars", "jupiter", "saturn"];
+const DEFAULT_MINUTES = 3;
+const MINUTES_MIN = 1;
+const MINUTES_MAX = 10;
+/* 间隔的随机幅度：每次都差这么多，别把星体摆成等距的电线杆 */
+const GAP_JITTER = 0.35;
 const SPAWN_LATERAL = 5200;
 const SPAWN_VERTICAL = 3200;
 /* 直接点名的那颗（MCP goto）不该让人先飞五分钟才看到 */
@@ -74,7 +79,8 @@ const GOTO_DIST = ENGAGE + 2000;
    接着自然走「逼近→进轨」，一两秒就开始绕，不至于凭空插进绕飞状态 */
 const WARP_R = 2.5;
 const MAX_BODIES = 8;
-/* 前方常备几颗，镜头里同时只画一颗，但下一颗得已经在路上 */
+/* 前方最多常备几颗，镜头里同时只画一颗，但下一颗得已经在路上。
+   间隔拉大时按 FAR 折算，实际备得更少——不然第三颗跑到远裁剪面外，会被反复回收重生 */
 const KEEP_AHEAD = 3;
 
 /* 远处那颗还没胀大成面的星：屏幕半径这么小就当一枚会眨的亮星画，
@@ -123,7 +129,6 @@ const PLANET_DEFS = {
     tilt: 0.41,
     brightness: 0.92,
     size: [170, 220],
-    weight: 0.08,
   },
   moon: {
     name: "月球",
@@ -132,7 +137,6 @@ const PLANET_DEFS = {
     tilt: 0.12,
     brightness: 0.95,
     size: [90, 150],
-    weight: 0.32,
   },
   mars: {
     name: "火星",
@@ -141,7 +145,6 @@ const PLANET_DEFS = {
     tilt: 0.44,
     brightness: 0.9,
     size: [150, 210],
-    weight: 0.24,
   },
   jupiter: {
     name: "木星",
@@ -150,7 +153,6 @@ const PLANET_DEFS = {
     tilt: 0.05,
     brightness: 0.9,
     size: [250, 330],
-    weight: 0.22,
   },
   saturn: {
     name: "土星",
@@ -159,11 +161,56 @@ const PLANET_DEFS = {
     tilt: 0.47,
     brightness: 0.9,
     size: [230, 310],
-    weight: 0.14,
     ring: true,
   },
 };
 const TYPES = Object.keys(PLANET_DEFS);
+
+/* ---------- 航线名单与遭遇间隔 ----------
+   名单是循环的：走完一轮从头再走，所以地球也能每轮遇到一次；
+   间隔说「几分钟遇到一颗」，换算成世界距离交给 nextSpawnDistance。
+   两个值都存在 localStorage，设置页和 MCP 都走 cosmosRouteSet 这一个口子。 */
+
+const ROUTE = {
+  order: parseOrder(readStored(ROUTE_KEY)),
+  minutes: parseMinutes(readStored(PACE_KEY)),
+};
+
+function readStored(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* 隐私模式之类写不进去，这次改了只在当次飞行里有效 */
+  }
+}
+
+/* 只认这五种，重复的去掉；一个都不剩就退回默认——航线不能没有星可飞 */
+function parseOrder(raw) {
+  const list = String(raw ?? "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => TYPES.includes(item));
+  const unique = [...new Set(list)];
+  return unique.length ? unique : [...DEFAULT_ORDER];
+}
+
+/* 没存过（null）和空着都算默认：Number(null) 和 Number("") 都是 0，
+   不先把空串挡掉会被夹成下限的 1 分钟 */
+function parseMinutes(raw) {
+  const text = String(raw ?? "").trim();
+  if (!text) return DEFAULT_MINUTES;
+  const value = Number(text);
+  if (!Number.isFinite(value)) return DEFAULT_MINUTES;
+  return clamp(Math.round(value), MINUTES_MIN, MINUTES_MAX);
+}
 
 const TEX_NAMES = [
   "earth-day",
@@ -294,6 +341,70 @@ export function cosmosFlight() {
     /* hi = 本机下好了几张 8K；resident = 此刻躺在显存里的几张，空的就是在用内置 2K */
     textures: { hi: state.pack ? state.pack.size : 0, resident: [...state.hi.keys()] },
   };
+}
+
+/* 航线名单和遭遇间隔：设置页读这一份、写也从这一份走，MCP 用的是同一个口子，
+   所以 agent 改完，用户在设置页能当场看到一样的值 */
+export function cosmosRoute() {
+  return {
+    order: [...ROUTE.order],
+    minutes: ROUTE.minutes,
+    range: [MINUTES_MIN, MINUTES_MAX],
+    types: TYPES.map((type) => ({ type, name: PLANET_DEFS[type].name })),
+  };
+}
+
+export function cosmosRouteSet(order, minutes) {
+  const before = ROUTE.order.join(",");
+  if (order !== undefined && order !== null) ROUTE.order = parseOrder([].concat(order).join(","));
+  if (minutes !== undefined && minutes !== null) ROUTE.minutes = parseMinutes(minutes);
+  writeStored(ROUTE_KEY, ROUTE.order.join(","));
+  writeStored(PACE_KEY, String(ROUTE.minutes));
+  if (ROUTE.order.join(",") !== before) requeuePending();
+  /* 设置页正开着时也让它跟着重画：agent 从 MCP 改的，用户要当场看见 */
+  window.dispatchEvent(new CustomEvent("cosmos-route-changed"));
+  return cosmosRoute();
+}
+
+/* 名单换了，把还没长成球的那些按新名单从头排一遍。
+   正在绕的、已经在画面上成面的都不动：换类型等于换半径和贴图，那是一帧之内的跳变；
+   还只是一枚亮星的远处那颗可以悄悄换，屏幕上也看不出它换了。
+   排队指针跟着挪，所以改完下一个遇到的就是名单第一颗，不用等前方备着的几颗走完。 */
+function requeuePending() {
+  const f = state.flight;
+  /* 第一帧还没跑时算不出焦距，判不了谁只是枚亮点；那会儿屏幕上也还空着 */
+  if (!f || !state.proj) return;
+  const pending = f.bodies
+    .filter((b) => b !== f.focus && !b.visited)
+    .sort((a, b) => vecLen(vecSub(a.pos, f.pos)) - vecLen(vecSub(b.pos, f.pos)));
+  let i = 0;
+  for (const b of pending) {
+    const type = ROUTE.order[i % ROUTE.order.length];
+    /* 换完还是亮星才允许换：木星最小的一颗换到地球能胀到 2.8 倍，
+       近处那颗会当场从一枚点闪成一张面，那是用户盯着的方向 */
+    if (!stillFlare(b, f, type)) break;
+    retypeBody(b, type);
+    i += 1;
+  }
+  f.queue = i;
+}
+
+function stillFlare(b, f, becomes) {
+  const d = vecLen(vecSub(b.pos, f.pos));
+  if (d < 1) return false;
+  /* 换类型等于换大小，按新档的最大半径判：木星最小那颗换成地球能胀到 2.8 倍 */
+  const r = Math.max(b.r, PLANET_DEFS[becomes].size[1]);
+  return (r / d) * state.proj.focal < FLARE_MAX_PX;
+}
+
+function retypeBody(b, type) {
+  if (b.type === type) return;
+  const def = PLANET_DEFS[type];
+  b.type = type;
+  const [lo, hi] = def.size;
+  b.r = lo + b.rnd() * (hi - lo);
+  /* 倾角也得跟着换：土星的环按倾角张开，留着木星的 0.05 就成一条压扁的线 */
+  b.tilt = def.tilt + (b.rnd() - 0.5) * 0.3;
 }
 
 const ACTION_HINTS =
@@ -680,12 +791,13 @@ function resetFlight() {
     orbit: null,
     paused: false,
     travelled: 0,
-    earthUsed: false,
+    /* 名单走到哪儿了：新空间从第一颗重新开始 */
+    queue: 0,
     wanderPhase: rnd() * Math.PI * 2,
     bodies: [],
   };
   state.nextBodyId = 1;
-  for (let i = 0; i < KEEP_AHEAD; i++) spawnBody();
+  for (let i = 0; i < keepAhead(); i++) spawnBody();
   updateDust(true, 0);
 }
 
@@ -1025,26 +1137,24 @@ function recycleBodies(f) {
     if (vecDot(vecSub(b.pos, f.pos), f.route) > b.r) aheadCount++;
   }
   let guard = 0;
-  while (aheadCount < KEEP_AHEAD && f.bodies.length < MAX_BODIES && guard < 12) {
+  while (aheadCount < keepAhead() && f.bodies.length < MAX_BODIES && guard < 12) {
     spawnBody();
     aheadCount++;
     guard++;
   }
 }
 
-function chooseType(f) {
-  let roll = f.rnd();
-  for (const type of TYPES) {
-    const def = PLANET_DEFS[type];
-    /* 地球一个空间只出现一次，重复会一眼看穿 */
-    if (type === "earth" && f.earthUsed) continue;
-    roll -= def.weight;
-    if (roll <= 0) {
-      if (type === "earth") f.earthUsed = true;
-      return type;
-    }
-  }
-  return "moon";
+/* 前方常备几颗：间隔越大备得越少，免得最远那颗跑到远裁剪面外被反复回收重生 */
+function keepAhead() {
+  return clamp(Math.floor((FAR * 0.75) / gapBase()), 1, KEEP_AHEAD);
+}
+
+/* 名单是循环的：走完一轮从头再走，所以地球也能每轮遇到一次 */
+function nextType(f) {
+  const order = ROUTE.order;
+  const type = order[f.queue % order.length];
+  f.queue += 1;
+  return type;
 }
 
 /* straight：正摆在航线轴上，给 goto 用，免得目标歪到够不着 */
@@ -1083,16 +1193,24 @@ function nextSpawnDistance(f) {
     const ahead = vecDot(vecSub(b.pos, f.pos), f.route);
     if (ahead > frontier) frontier = ahead;
   }
-  if (!frontier) return FIRST_MIN + f.rnd() * FIRST_RANGE;
-  return frontier + GAP_MIN + f.rnd() * GAP_RANGE;
+  if (!frontier) return gapDistance(f);
+  return frontier + gapDistance(f);
 }
 
-function spawnBody(straight) {
+/* 用户说的是分钟，世界距离按巡航速度换算 */
+function gapBase() {
+  return CRUISE * ROUTE.minutes * 60;
+}
+
+function gapDistance(f) {
+  const jitter = 1 - GAP_JITTER / 2 + f.rnd() * GAP_JITTER;
+  return gapBase() * jitter;
+}
+
+function spawnBody() {
   const f = state.flight;
-  if (!f) return null;
-  if (!straight && f.bodies.length >= MAX_BODIES) return null;
-  const dist = straight ? GOTO_DIST : nextSpawnDistance(f);
-  const body = makeBody(f, chooseType(f), !!straight, dist);
+  if (!f || f.bodies.length >= MAX_BODIES) return null;
+  const body = makeBody(f, nextType(f), false, nextSpawnDistance(f));
   f.bodies.push(body);
   return body;
 }

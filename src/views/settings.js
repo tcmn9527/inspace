@@ -8,6 +8,8 @@
    因为这时候他没有任何事可干——音轨转 AAC 是空间里点播放时顺手做的。 */
 
 import { choiceDialog, confirmDialog, progressDialog } from "./dialog.js";
+import { currentTheme } from "./theme.js";
+import { cosmosRoute, cosmosRouteSet } from "./cosmos.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -70,6 +72,12 @@ export function initSettings() {
   ui.cosmosCancel = document.querySelector("#settings-cosmos-cancel");
   ui.cosmosClear = document.querySelector("#settings-cosmos-clear");
   ui.cosmosError = document.querySelector("#settings-cosmos-error");
+  ui.routeCard = document.querySelector("#settings-route-card");
+  ui.routeList = document.querySelector("#settings-route-list");
+  ui.routeAdd = document.querySelector("#settings-route-add");
+  ui.routeField = document.querySelector("#settings-route-field");
+  ui.routeMinutes = document.querySelector("#settings-route-minutes");
+  ui.routeStatus = document.querySelector("#settings-route-status");
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -83,6 +91,7 @@ export function initSettings() {
   ui.cosmosClear.addEventListener("click", clearCosmosTextures);
   setupMoveEvents();
   setupCosmosEvents();
+  setupRoute();
 }
 
 function setupMoveEvents() {
@@ -108,6 +117,8 @@ export async function refreshSettings() {
   refreshFfmpeg();
   refreshMcp();
   refreshCosmos();
+  paintRouteCard();
+  renderRoute();
 }
 
 function sameDir(a, b) {
@@ -456,7 +467,8 @@ function paintCosmos() {
   ui.cosmosDir.hidden = s.empty;
   ui.cosmosDir.textContent = s.dir;
   ui.cosmosClear.hidden = s.empty;
-  ui.cosmosUpgrade.hidden = downloading;
+  /* 七张齐了就没有可下的了，只留「清除」；下载按钮只在还缺东西时出现 */
+  ui.cosmosUpgrade.hidden = downloading || s.complete;
   ui.cosmosCancel.hidden = !downloading;
   if (downloading) return;
   if (s.complete) {
@@ -541,4 +553,133 @@ async function clearCosmosTextures() {
   } catch (error) {
     showCosmosError(String(error));
   }
+}
+
+/* ---------- 遨游星球 ---------- */
+
+/* 名单和间隔都存在 cosmos.js 那一侧（localStorage），这里只是它的界面：
+   点一下就写回并立刻重排前方那些还只是亮点的星体，不放「保存」。 */
+
+function renderRoute() {
+  const route = cosmosRoute();
+  const nameOf = new Map(route.types.map((t) => [t.type, t.name]));
+  /* 真的在编辑时才不盖用户敲的字（agent 从 MCP 改值也会重画这张卡） */
+  const editing = document.activeElement === ui.routeMinutes && !ui.routeMinutes.readOnly;
+  if (!editing) ui.routeMinutes.value = String(route.minutes);
+  ui.routeList.textContent = "";
+  route.order.forEach((type, i) => {
+    const item = document.createElement("li");
+    item.className = "settings-route-item";
+    const index = document.createElement("span");
+    index.className = "settings-route-index";
+    index.textContent = String(i + 1);
+    const name = document.createElement("span");
+    name.className = "settings-route-name";
+    name.textContent = nameOf.get(type) || type;
+    const ops = document.createElement("span");
+    ops.className = "settings-route-ops";
+    /* 首行没有上移、末行没有下移、只剩一颗时不许移除：没有意义的操作干脆不出现 */
+    const wanted = [
+      i > 0 && ["up", "上移"],
+      i < route.order.length - 1 && ["down", "下移"],
+      route.order.length > 1 && ["remove", "移除"],
+    ].filter(Boolean);
+    for (const [op, text] of wanted) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "settings-route-op";
+      button.dataset.op = op;
+      button.dataset.index = String(i);
+      button.textContent = text;
+      ops.append(button);
+    }
+    item.append(index, name, ops);
+    ui.routeList.append(item);
+  });
+  ui.routeAdd.textContent = "";
+  for (const t of route.types) {
+    if (route.order.includes(t.type)) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "notes-btn";
+    button.dataset.add = t.type;
+    button.textContent = `加入${t.name}`;
+    ui.routeAdd.append(button);
+  }
+  ui.routeAdd.hidden = !ui.routeAdd.childElementCount;
+}
+
+function setupRoute() {
+  ui.routeList.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-op]");
+    if (!button) return;
+    const order = cosmosRoute().order;
+    const i = Number(button.dataset.index);
+    if (button.dataset.op === "remove") {
+      order.splice(i, 1);
+    } else {
+      const j = button.dataset.op === "up" ? i - 1 : i + 1;
+      if (j < 0 || j >= order.length) return;
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    commitRoute(order, null, "名单已更新");
+  });
+  ui.routeAdd.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-add]");
+    if (!button) return;
+    commitRoute([...cosmosRoute().order, button.dataset.add], null, "名单已更新");
+  });
+  /* 平时只是个数，双击才进编辑、失焦就存：单击和滚轮都不该误改飞行时间。
+     越界由 cosmos.js 那边夹好再回填，敲的不是数字就回显当前值、不写。 */
+  ui.routeField.addEventListener("dblclick", () => {
+    ui.routeMinutes.readOnly = false;
+    ui.routeMinutes.focus();
+    ui.routeMinutes.select();
+  });
+  ui.routeMinutes.addEventListener("blur", () => {
+    if (ui.routeMinutes.readOnly) return;
+    ui.routeMinutes.readOnly = true;
+    const raw = ui.routeMinutes.value.trim();
+    /* 清空或敲了非数字：回显当前值，不写——Number("") 是 0，会被夹成下限 1 */
+    if (!raw || !Number.isFinite(Number(raw))) {
+      renderRoute();
+      return;
+    }
+    const route = commitRoute(null, raw);
+    showRouteStatus(`下一颗约 ${route.minutes} 分钟后遇到`);
+  });
+  ui.routeMinutes.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.target.blur();
+    } else if (event.key === "Escape") {
+      event.target.value = String(cosmosRoute().minutes);
+      event.target.readOnly = true;
+      event.target.blur();
+    }
+  });
+  document.addEventListener("themechange", paintRouteCard);
+  /* 值是从 cosmos.js 那一侧改的（MCP 也走那儿），卡片跟着重画 */
+  window.addEventListener("cosmos-route-changed", renderRoute);
+}
+
+function commitRoute(order, minutes, status) {
+  const route = cosmosRouteSet(order, minutes);
+  if (status) showRouteStatus(status);
+  return route;
+}
+
+/* 这条航线只在宇宙主题下有意义，切走主题就整张卡收掉 */
+function paintRouteCard() {
+  ui.routeCard.hidden = currentTheme() !== "cosmos";
+}
+
+let routeStatusTimer = 0;
+
+function showRouteStatus(message) {
+  clearTimeout(routeStatusTimer);
+  ui.routeStatus.textContent = message;
+  ui.routeStatus.hidden = false;
+  routeStatusTimer = setTimeout(() => {
+    ui.routeStatus.hidden = true;
+  }, 3000);
 }

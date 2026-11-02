@@ -27,6 +27,9 @@ tools/libclang/
 tools/sdcpp/
 tools/downloads/
 
+# 上游源码现编出来的静态库（build.rs 的固定缓存，一个多 GB，纯产物）
+tools/sdcpp-cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

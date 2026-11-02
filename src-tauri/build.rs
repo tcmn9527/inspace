@@ -12,19 +12,43 @@ fn main() {
    node scripts/prepare-libclang.mjs（bindgen 要的 libclang.dll），
    并且走 npm run dev / npm run build —— scripts/msvc-env.mjs 负责把
    cl.exe、Ninja、CMake、INCLUDE/LIB、CUDA_PATH、LIBCLANG_PATH 注进环境。 */
+
+/// 引擎产物的固定目录（仓库根下的 tools/sdcpp-cache）。故意不跟 cargo 的 OUT_DIR 走：
+/// cargo 把「类型检查」和「真编译」算成两种 metadata，各分一份 build 目录，跟着 OUT_DIR
+/// 走就是把同一套 383 MB 的静态库编两遍——实测一次十几分钟，两轮就是二十几分钟。
+const ENGINE_CACHE: &str = "sdcpp-cache";
+/// 配置指纹。内容对不上就整目录清掉重编，不用人记着清（见 CACHE_README）。
+const STAMP_FILE: &str = "sdcpp-build.stamp";
+
+const CACHE_README: &str = r#"## 生图引擎的现编缓存
+
+build.rs 把 `../sdcpp` 的上游源码用 CMake + Ninja 编在这儿，Rust 那头直接链这些 .lib。
+
+放在仓库里的固定路径（而不是 cargo 的 OUT_DIR）是有意的：cargo 的 check 和 build 是两个
+不同的 build 目录，跟着走就得把同一套静态库编两遍，一次十几分钟。
+
+换 CUDA 大版本（12.x → 13 这种）时，这棵树里的旧对象不能再吃新 toolkit。这一条不用人记着：
+build.rs 每次把「上游 pin + CUDA 开关 + CUDA_PATH + 计算能力 + target + 全部 cmake 定义」
+写成 `sdcpp-build.stamp`，对不上就自己把这目录清掉重编。
+
+真碰上编不过，或者只是想腾出这一个多 GB，整目录删掉就行，下次构建自动重来。
+纯产物，别手改，也别入库（.gitignore 里已经挡了）。
+"#;
+
 fn build_engine() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo 会给 CARGO_MANIFEST_DIR"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("cargo 会给 OUT_DIR"));
-    let sd_root = manifest
+    let repo_root = manifest
         .parent()
         .expect("src-tauri 的上一层就是仓库根")
-        .join("tools")
-        .join("sdcpp");
+        .to_path_buf();
+    let sd_root = repo_root.join("tools").join("sdcpp");
     let header = sd_root.join("include").join("stable-diffusion.h");
+    let pin_path = sd_root.join(".pin");
 
-    // 只有版本换了（.pin 变了）或这份 build.rs 改了才重编 C++；
+    // 只有版本换了（.pin 变了）或这份 build.rs 改了才重跑；
     // 平时改一行前端，不该再等十几分钟的 cl.exe。
-    println!("cargo:rerun-if-changed={}", sd_root.join(".pin").display());
+    println!("cargo:rerun-if-changed={}", pin_path.display());
 
     if !header.exists() {
         panic!(
@@ -39,37 +63,29 @@ fn build_engine() {
 
     generate_bindings(&header, &sd_root, &out_dir);
 
+    let cache = repo_root.join("tools").join(ENGINE_CACHE);
+    let stamp = cache.join(STAMP_FILE);
+    /* 指纹文件自己也算一个重跑条件：手动删了它就等于「这棵树我不要了」，
+       下一次构建会重跑 build.rs 而不是拿旧指纹去对已经不存在的产物 */
+    println!("cargo:rerun-if-changed={}", stamp.display());
+
+    let defines = cmake_defines(cuda, msvc);
+    let signature = engine_signature(&sd_root, &defines, cuda, msvc, &target);
+    prepare_cache_dir(&cache, &stamp, &signature);
+
     let mut cfg = cmake::Config::new(&sd_root);
-    cfg.out_dir(out_dir.join("sdcpp-build"))
-        .profile("Release")
-        .define("CMAKE_BUILD_TYPE", "Release")
-        // webp/webm/cutlass 都是 submodule，按 zip 取的包里是空的目录，
-        // 开着会 FATAL_ERROR；生图面板也用不上（落块走前端 canvas 编码）。
-        .define("SD_BUILD_SHARED_LIBS", "OFF")
-        .define("SD_BUILD_EXAMPLES", "OFF")
-        .define("SD_WEBP", "OFF")
-        .define("SD_WEBM", "OFF")
-        .define("GGML_OPENMP", "OFF")
-        .define("SD_USE_UPSTREAM_GGML", "OFF")
-        .define("SD_CUDA_CUTLASS_PATH", "");
+    cfg.out_dir(cache.join("cmake")).profile("Release");
     if msvc {
         // 不靠 vcvars：msvc-env.mjs 已经把 cl.exe 和 INCLUDE/LIB 塞进环境了。
-        cfg.generator("Ninja")
-            .define("CMAKE_C_COMPILER", "cl.exe")
-            .define("CMAKE_CXX_COMPILER", "cl.exe")
-            // 模型实现的单个编译单元很大，默认 4096 个 section 会顶不住。
-            .define("CMAKE_CXX_FLAGS", "'/bigobj'");
+        cfg.generator("Ninja");
     }
-    if cuda {
-        println!("cargo:rerun-if-env-changed=CUDA_PATH");
-        println!("cargo:rerun-if-env-changed=CUDA_COMPUTE_CAP");
-        cfg.define("SD_CUDA", "ON");
-        // 不给的话 ggml 会按 CUDA 版本凑一串架构轮流编，89 之外的纯浪费十几分钟。
-        let arch = env::var("CUDA_COMPUTE_CAP").unwrap_or_else(|_| "89".into());
-        cfg.define("CMAKE_CUDA_ARCHITECTURES", format!("{arch}-real"));
+    for (key, value) in &defines {
+        cfg.define(key, value);
     }
 
     let dst = cfg.build();
+    write_if_changed(&stamp, &signature);
+    write_if_changed(&cache.join("README.md"), CACHE_README);
 
     /* 静态库之间互相引用（stable-diffusion 用 ggml/onig/utf8proc…），
        少链一个就是 unresolved。CMake 装到哪、装了几个不由我们定，
@@ -82,7 +98,11 @@ fn build_engine() {
         println!("cargo:rustc-link-lib=static={name}");
     }
     if found.is_empty() {
-        panic!("{} 里一个 .lib 都没有，C++ 那侧八成没编出来", dst.display());
+        panic!(
+            "{} 里一个 .lib 都没有，C++ 那侧八成没编出来\n（实在不行就把 {} 整个删了重来）",
+            dst.display(),
+            cache.display()
+        );
     }
 
     if cuda {
@@ -97,10 +117,82 @@ fn build_engine() {
     }
 
     println!(
-        "cargo:warning=生图引擎：{} 个静态库（CUDA {}）",
+        "cargo:warning=生图引擎：{} 个静态库（CUDA {}，缓存 {}）",
         found.len(),
-        if cuda { "开" } else { "关" }
+        if cuda { "开" } else { "关" },
+        cache.display()
     );
+}
+
+/// 喂给 cmake 的定义项，同时拼成缓存指纹：改任何一条，那棵树自己就作废重编。
+/// 返回 (键, 值)，值是 String 是为了把 env 里读来的拼进去。
+fn cmake_defines(cuda: bool, msvc: bool) -> Vec<(String, String)> {
+    let mut defines = vec![
+        ("CMAKE_BUILD_TYPE".to_string(), "Release".to_string()),
+        // webp/webm/cutlass 都是 submodule，按 zip 取的包里是空的目录，
+        // 开着会 FATAL_ERROR；生图面板也用不上（落块走前端 canvas 编码）。
+        ("SD_BUILD_SHARED_LIBS".to_string(), "OFF".to_string()),
+        ("SD_BUILD_EXAMPLES".to_string(), "OFF".to_string()),
+        ("SD_WEBP".to_string(), "OFF".to_string()),
+        ("SD_WEBM".to_string(), "OFF".to_string()),
+        ("GGML_OPENMP".to_string(), "OFF".to_string()),
+        ("SD_USE_UPSTREAM_GGML".to_string(), "OFF".to_string()),
+        ("SD_CUDA_CUTLASS_PATH".to_string(), String::new()),
+    ];
+    if msvc {
+        defines.push(("CMAKE_C_COMPILER".to_string(), "cl.exe".to_string()));
+        defines.push(("CMAKE_CXX_COMPILER".to_string(), "cl.exe".to_string()));
+        // 模型实现的单个编译单元很大，默认 4096 个 section 会顶不住。
+        defines.push(("CMAKE_CXX_FLAGS".to_string(), "'/bigobj'".to_string()));
+    }
+    if cuda {
+        println!("cargo:rerun-if-env-changed=CUDA_PATH");
+        println!("cargo:rerun-if-env-changed=CUDA_COMPUTE_CAP");
+        defines.push(("SD_CUDA".to_string(), "ON".to_string()));
+        // 不给的话 ggml 会按 CUDA 版本凑一串架构轮流编，89 之外的纯浪费十几分钟。
+        let arch = env::var("CUDA_COMPUTE_CAP").unwrap_or_else(|_| "89".into());
+        defines.push(("CMAKE_CUDA_ARCHITECTURES".to_string(), format!("{arch}-real")));
+    }
+    defines
+}
+
+/// 变了就得重编的那些东西：上游版本、CUDA 开关和 toolkit、目标三元组、全部 cmake 定义。
+/// 特意不含 build.rs 自己——改行注释不该赔十几分钟的 cl.exe。
+fn engine_signature(sd_root: &PathBuf, defines: &[(String, String)], cuda: bool, msvc: bool, target: &str) -> String {
+    let pin = fs::read_to_string(sd_root.join(".pin"))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "没有 .pin".to_string());
+    // CUDA_PATH 长末段就是版本号（…\CUDA\v12.8），换大版本这里必变
+    let toolkit = env::var("CUDA_PATH")
+        .ok()
+        .and_then(|p| PathBuf::from(p).file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| if cuda { "CUDA_PATH 没设".to_string() } else { "-".to_string() });
+    let mut sig = format!("upstream={pin}\ncuda={cuda}\nmsvc={msvc}\ntoolkit={toolkit}\ntarget={target}\n");
+    for (key, value) in defines {
+        sig.push_str(&format!("{key}={value}\n"));
+    }
+    sig
+}
+
+/// 对不上指纹就把整棵树端掉。留着旧对象只会链出半新半旧的引擎，或者直接 FATAL_ERROR。
+fn prepare_cache_dir(cache: &PathBuf, stamp: &PathBuf, signature: &str) {
+    let fresh = fs::read_to_string(stamp).map(|old| old == signature).unwrap_or(false);
+    if !cache.exists() || fresh {
+        fs::create_dir_all(cache).unwrap_or_else(|e| panic!("建不了引擎缓存目录 {}：{e}", cache.display()));
+        return;
+    }
+    println!("cargo:warning=生图引擎缓存的配置变了（换过 CUDA 大版本就是这个），整棵清掉重编");
+    fs::remove_dir_all(cache)
+        .unwrap_or_else(|e| panic!("清不掉旧的引擎缓存 {}：{e}\n手动删掉这个目录再跑一次。", cache.display()));
+    fs::create_dir_all(cache).unwrap_or_else(|e| panic!("建不了引擎缓存目录 {}：{e}", cache.display()));
+}
+
+/// 同样的内容不重写：文件一动，cargo 就以为 build.rs 的输出变了，白重编一轮。
+fn write_if_changed(path: &PathBuf, content: &str) {
+    if fs::read_to_string(path).is_ok_and(|existing| existing == content) {
+        return;
+    }
+    fs::write(path, content).unwrap_or_else(|e| panic!("写不了 {}: {e}", path.display()));
 }
 
 fn generate_bindings(header: &PathBuf, sd_root: &PathBuf, out_dir: &PathBuf) {

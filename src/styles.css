@@ -2405,6 +2405,151 @@ body.is-resizing {
   display: none;
 }
 
+/* 生图面板：外壳管边框和圆角（和画面/场景同一套），卡片上半截取景、下半截写提示词。
+   取景窗那块底就是「等这一张」的地方：逐步预览一行行铺上来，成品到了整张换下去。 */
+.canvas-item-gen {
+  cursor: default;
+  border: 1px solid var(--canvas-border, #9a9a9a);
+}
+
+.canvas-gen-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--surface);
+}
+
+.canvas-gen-stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--bg));
+}
+
+.canvas-gen-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.canvas-gen-image[hidden] {
+  display: none;
+}
+
+/* 那句话浮在取景窗下沿：出图过程中它是唯一在动的字，别把图挤走 */
+.canvas-gen-hint {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--canvas-muted, #8b8b8b);
+  pointer-events: none;
+}
+
+.canvas-gen-hint[hidden] {
+  display: none;
+}
+
+.canvas-gen-hint.is-error {
+  color: var(--danger);
+}
+
+.canvas-gen-bar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+}
+
+.canvas-gen-prompt {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 18px;
+  resize: none;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+.canvas-gen-prompt:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+.canvas-gen-prompt::placeholder {
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-gen-prompt:disabled {
+  opacity: 0.5;
+}
+
+.canvas-gen-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* 两颗钮照弹层里那套规格：开始走强调色，落块是描边次要钮 */
+.canvas-gen-run,
+.canvas-gen-place {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.canvas-gen-place:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.canvas-gen-run {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.canvas-gen-run:hover {
+  background: color-mix(in srgb, var(--accent) 82%, var(--fg));
+}
+
+.canvas-gen-run:disabled,
+.canvas-gen-place:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
 /* 块左缘那条常驻工具条：笔、墨色、笔宽、笔画撤销都在这儿。
    整条靠 scale(--canvas-inv) 抵消相机缩放，所以块缩到多小它都一样大、点得着，
    transform-origin 定在贴块那一侧的右上角，缩放时那条边始终贴着块的左缘。 */

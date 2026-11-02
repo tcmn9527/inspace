@@ -5,6 +5,8 @@ import { renderMarkdown } from "./markdown.js";
 import { isCancelled, openPdf, pdfPageSize, pdfProblem, renderPdfPage } from "./canvas-pdf.js";
 /* 只 import 我自己那层薄壳：three.js 本体是 scene3d 里第一次有场景块进屏幕才动态拉的 */
 import { syncScene } from "./scene3d.js";
+/* 生图面板的显示层：出图在 Rust 那边，这儿只把这一轮的状态画出来 */
+import { syncGen } from "./genpanel.js";
 
 export const DEFAULT_BORDER = "#9a9a9a";
 /* 矩形/椭圆的边框宽度，跟样式表里 .canvas-item-rect/.canvas-item-ellipse 的 2px 对齐 */
@@ -102,6 +104,25 @@ export const SCENE_MAX_SIZE = 20000;
 /* 一件东西的轮廓点数上限：挤成棱柱要三角剖分，一个圆取到百来个点就够了，
    再多只是把三角剖分和撤销栈一起拖慢 */
 export const SCENE_MAX_POLY_POINTS = 200;
+/* 生图面板：一块本地出图的取景窗。出图一张要 30 秒，所以这块的重点是「等得明白」——
+   面板上只摆提示词框和一颗开始，其余参数走默认，agent 想改直接写块字段。 */
+export const GEN_MIN_WIDTH = 320;
+export const GEN_MIN_HEIGHT = 360;
+export const GEN_DEFAULT_WIDTH = 420;
+export const GEN_DEFAULT_HEIGHT = 560;
+/* 提示词给到 4000 字：够写一整段画面描述，又不至于把这份内容文件当笔记使 */
+export const GEN_TEXT_MAX = 4000;
+export const GEN_IMAGE_MIN = 256;
+export const GEN_IMAGE_MAX = 2048;
+/* 引擎要 32 的倍数，差一个就整条调度错位 */
+export const GEN_IMAGE_STEP = 32;
+export const GEN_IMAGE_DEFAULT = 1024;
+export const GEN_STEPS_MIN = 1;
+export const GEN_STEPS_MAX = 100;
+export const GEN_STEPS_DEFAULT = 20;
+export const GEN_CFG_MIN = 1.0;
+export const GEN_CFG_MAX = 20.0;
+export const GEN_CFG_DEFAULT = 6.0;
 /* 每类面板拖角缩放的地板：拉到这里就不动了，免得块缩成看不见内容的一小坨 */
 export const AUDIO_MIN_WIDTH = 160;
 export const AUDIO_MIN_HEIGHT = 64;
@@ -463,6 +484,32 @@ function normalizeBlock(raw) {
       z: layerOf(raw),
     };
   }
+  if (type === "gen") {
+    return {
+      ...base,
+      x: num(raw.x),
+      y: num(raw.y),
+      w: Math.max(GEN_MIN_WIDTH, num(raw.w, GEN_DEFAULT_WIDTH)),
+      h: Math.max(GEN_MIN_HEIGHT, num(raw.h, GEN_DEFAULT_HEIGHT)),
+      prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, GEN_TEXT_MAX) : "",
+      negative: typeof raw.negative === "string" ? raw.negative.slice(0, GEN_TEXT_MAX) : "",
+      imageW: snapGenSize(num(raw.imageW, GEN_IMAGE_DEFAULT)),
+      imageH: snapGenSize(num(raw.imageH, GEN_IMAGE_DEFAULT)),
+      steps: Math.round(clamp(num(raw.steps, GEN_STEPS_DEFAULT), GEN_STEPS_MIN, GEN_STEPS_MAX)),
+      cfg: clamp(num(raw.cfg, GEN_CFG_DEFAULT), GEN_CFG_MIN, GEN_CFG_MAX),
+      /* -1 在引擎里是「每张换一个」的哨兵；认不出别的数一律退回它 */
+      seed: Number.isFinite(raw.seed) && raw.seed >= 0 ? Math.trunc(raw.seed) : -1,
+      /* 最近那一张，记的是 <空间>/images/ 里的相对路径；还没出过图是空串 */
+      src: typeof raw.src === "string" ? raw.src : "",
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
+      borderWidth: Math.min(
+        BORDER_MAX_WIDTH,
+        Math.max(0, Math.round(num(raw.borderWidth, CARD_DEFAULT_BORDER_WIDTH))),
+      ),
+      radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),
+      z: layerOf(raw),
+    };
+  }
   return null;
 }
 
@@ -496,6 +543,13 @@ export function toPersisted(item) {
   if (item.type === "scene") {
     /* 同理：一件东西的底面就有一圈坐标点，那份东西列表只认 scenes/<块id>.json */
     const { parts, ...rest } = item;
+    return rest;
+  }
+  if (item.type === "gen") {
+    /* 同理：提示词和参数只认 genpanels/<块id>.json。
+       出的那张图不在里面——它和 img 块一样是 images/ 里的真文件，路径记在块上，
+       删块、复制才有个统一的按引用清的办法 */
+    const { prompt, negative, imageW, imageH, steps, cfg, seed, ...rest } = item;
     return rest;
   }
   return item;
@@ -759,6 +813,35 @@ export function makeScene(x, y, w = SCENE_DEFAULT_WIDTH, h = SCENE_DEFAULT_HEIGH
     camera: null,
     light: null,
     groundColor: "",
+    borderColor: DEFAULT_BORDER,
+    borderWidth: CARD_DEFAULT_BORDER_WIDTH,
+    radius: CARD_DEFAULT_RADIUS,
+  };
+}
+
+/* 出图尺寸贴到 32 的倍数上：引擎的 latent 按 8 下采样、再 2×2 合块，差一个数整条调度就错位。 */
+export function snapGenSize(value) {
+  const clamped = clamp(Math.round(value), GEN_IMAGE_MIN, GEN_IMAGE_MAX);
+  return Math.round(clamped / GEN_IMAGE_STEP) * GEN_IMAGE_STEP;
+}
+
+/* 生图面板：刚建出来没图，提示词也空着——等用户在框里写第一句。 */
+export function makeGen(x, y, w = GEN_DEFAULT_WIDTH, h = GEN_DEFAULT_HEIGHT) {
+  return {
+    id: newId(),
+    type: "gen",
+    x,
+    y,
+    w,
+    h,
+    prompt: "",
+    negative: "",
+    imageW: GEN_IMAGE_DEFAULT,
+    imageH: GEN_IMAGE_DEFAULT,
+    steps: GEN_STEPS_DEFAULT,
+    cfg: GEN_CFG_DEFAULT,
+    seed: -1,
+    src: "",
     borderColor: DEFAULT_BORDER,
     borderWidth: CARD_DEFAULT_BORDER_WIDTH,
     radius: CARD_DEFAULT_RADIUS,
@@ -2538,6 +2621,39 @@ export function createItemElement(item, mediaSrc, options = {}) {
     hint.textContent = "场景加载中…";
     view.append(hint);
     card.append(view);
+    el.append(card);
+  } else if (item.type === "gen") {
+    /* 上面是取景窗、下面是提示词和一颗开始。出图要几十秒，这一上半截就是给「等」留的。 */
+    const card = document.createElement("div");
+    card.className = "canvas-gen-card";
+    const stage = document.createElement("div");
+    stage.className = "canvas-gen-stage";
+    const image = document.createElement("img");
+    image.className = "canvas-gen-image";
+    image.draggable = false;
+    image.alt = "";
+    const hint = document.createElement("p");
+    hint.className = "canvas-gen-hint";
+    stage.append(image, hint);
+    const bar = document.createElement("div");
+    bar.className = "canvas-gen-bar";
+    const prompt = document.createElement("textarea");
+    prompt.className = "canvas-gen-prompt";
+    prompt.placeholder = "写下你想看的东西";
+    prompt.rows = 3;
+    prompt.spellcheck = false;
+    const actions = document.createElement("div");
+    actions.className = "canvas-gen-actions";
+    const run = document.createElement("button");
+    run.type = "button";
+    run.className = "canvas-gen-run";
+    const place = document.createElement("button");
+    place.type = "button";
+    place.className = "canvas-gen-place";
+    place.textContent = "落块";
+    actions.append(run, place);
+    bar.append(prompt, actions);
+    card.append(stage, bar);
     el.append(card);
   } else if (item.type === "file") {
     el.append(createFileCard(item, options));
@@ -6178,6 +6294,16 @@ export function syncItemElement(el, item) {
     el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
     el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
     syncSceneElement(el, item);
+    return;
+  }
+
+  if (item.type === "gen") {
+    el.style.width = `${item.w}px`;
+    el.style.height = `${item.h}px`;
+    el.style.borderColor = item.borderColor || "transparent";
+    el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
+    el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
+    syncGen(el, item);
     return;
   }
 

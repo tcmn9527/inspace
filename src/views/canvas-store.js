@@ -110,6 +110,15 @@ export const readScene = (id, itemId) => invoke("canvas_read_scene", { id, itemI
 export const writeScene = (id, itemId, parts) =>
   invoke("canvas_write_scene", { id, itemId, parts: parts || [] });
 export const deleteScene = (id, itemId) => invoke("canvas_delete_scene", { id, itemId });
+/* 生图面板的提示词和参数，一块一份，住在 <空间>/genpanels/<块id>.json。
+   出的那张图不在这里——它落在 images/ 里，路径记在块上，和图片块同一套规矩。 */
+export const readGen = (id, itemId) => invoke("canvas_read_gen", { id, itemId });
+export const writeGen = (id, itemId, content) => invoke("canvas_write_gen", { id, itemId, content });
+export const deleteGen = (id, itemId) => invoke("canvas_delete_gen", { id, itemId });
+/* 出图引擎：一次只出一张，进度和成品走事件（gen-progress / gen-preview / gen-done / gen-failed） */
+export const genStatus = () => invoke("gen_status");
+export const genStart = (req) => invoke("gen_start", { req });
+export const genCancel = () => invoke("gen_cancel");
 /* 复制块时把源块那份文件再拷一份进目标空间，返回新的相对路径；
    引用态那块也照样收：从它记的原文件路径拷，粘出来的块从此自己带一份 */
 export const duplicateMedia = (id, itemId, toId) =>

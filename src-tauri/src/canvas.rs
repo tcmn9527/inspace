@@ -12,6 +12,7 @@
 //!     notes/        笔记块的内容，一块一个 <块id>.md，图片副本在同名的 <块id>/ 目录里
 //!     pictures/     画面块的绘制指令和素材表，一块一个 <块id>.json
 //!     scenes/       场景块里的东西，一块一个 <块id>.json
+//!     genpanels/    生图面板的提示词和参数，一块一个 <块id>.json（出的图在 images/）
 //!
 //! 删除空间时整个文件夹进系统回收站。
 //!
@@ -52,6 +53,8 @@ const NOTE_DIR: &str = "notes";
 const STICKY_DIR: &str = "stickies";
 const PICTURE_DIR: &str = "pictures";
 const SCENE_DIR: &str = "scenes";
+/// 生图面板的内容，一块一个 <块id>.json。出的图本身落在 images/ 里，这儿只记提示词和参数。
+const GENPANEL_DIR: &str = "genpanels";
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 const BAD_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
@@ -685,7 +688,7 @@ fn media_url(
 
 /// 块 id 是前端生成的一层名字，被拿来当文件名，所以先过一遍：不许有点、斜杠、冒号、控制字符。
 /// 便签和笔记的文件名直接用它，写之前都必须过这里。
-fn check_item_id(raw: &str) -> Result<String, String> {
+pub(crate) fn check_item_id(raw: &str) -> Result<String, String> {
     let id = raw.trim();
     let valid = !id.is_empty()
         && id != "."
@@ -727,6 +730,14 @@ fn picture_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
 fn scene_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
     Ok(dir
         .join(SCENE_DIR)
+        .join(format!("{}.json", check_item_id(item_id)?)))
+}
+
+/// 生图面板的内容：<空间>/genpanels/<块id>.json。
+/// 提示词和参数是这块自己要记住的话，items.json 只留位置和边框。
+fn gen_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
+    Ok(dir
+        .join(GENPANEL_DIR)
         .join(format!("{}.json", check_item_id(item_id)?)))
 }
 
@@ -1544,6 +1555,90 @@ pub fn canvas_delete_scene(
         recycle_path(&path).map_err(|e| format!("删除场景失败：{e}"))?;
     }
     prune_empty(&dir.join(SCENE_DIR));
+    Ok(())
+}
+
+// ---------- 生图面板的内容 ----------
+
+/// 一块面板的提示词最长多少字：比一句提示词宽裕，但绝不让一份文件变成文章。
+const GEN_TEXT_MAX: usize = 4000;
+
+fn gen_text(raw: &Value, key: &str, max: usize) -> String {
+    raw.get(key)
+        .and_then(Value::as_str)
+        .map(|text| text.chars().take(max).collect())
+        .unwrap_or_default()
+}
+
+fn gen_int(raw: &Value, key: &str, fallback: i64, lo: i64, hi: i64) -> i64 {
+    raw.get(key)
+        .and_then(Value::as_f64)
+        .map(|value| value.round().clamp(lo as f64, hi as f64) as i64)
+        .unwrap_or(fallback)
+}
+
+/// 只收这一份文件该收的字段：坏数据在这儿挡一次，读回来的就永远是能用的。
+/// 出图状态（第几步、忙不忙）不落盘——那是这一轮运行时的东西，重开空间该回到「上次那张」。
+fn gen_of(raw: &Value) -> Value {
+    json!({
+        "prompt": gen_text(raw, "prompt", GEN_TEXT_MAX),
+        "negative": gen_text(raw, "negative", GEN_TEXT_MAX),
+        "imageW": gen_int(raw, "imageW", 1024, 256, 2048),
+        "imageH": gen_int(raw, "imageH", 1024, 256, 2048),
+        "steps": gen_int(raw, "steps", 20, 1, 100),
+        "cfg": raw
+            .get("cfg")
+            .and_then(Value::as_f64)
+            .map(|value| value.clamp(1.0, 20.0))
+            .unwrap_or(6.0),
+        "seed": gen_int(raw, "seed", -1, -1, i64::MAX as i64),
+        "updatedAt": now_ms(),
+    })
+}
+
+/// 这块面板的内容文件；还没落过盘返回 null，由前端拿块上残留的那份补写一次。
+#[tauri::command]
+pub fn canvas_read_gen(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Option<Value>, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = gen_file(&dir, &item_id)?;
+    read_json(&path).map(|value| value.map(|raw| gen_of(&raw)))
+}
+
+#[tauri::command]
+pub fn canvas_write_gen(
+    id: String,
+    item_id: String,
+    content: Value,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Value, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = gen_file(&dir, &item_id)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建生图目录失败：{e}"))?;
+    }
+    let value = gen_of(&content);
+    write_json_compact(&path, &value)?;
+    Ok(value)
+}
+
+/// 删掉一块面板：那份内容文件进系统回收站。
+/// 出的那张图不归这儿管——它已经落在 images/ 里，由 images 那套按引用清。
+#[tauri::command]
+pub fn canvas_delete_gen(
+    id: String,
+    item_id: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    let dir = resolve_dir(&state, &id)?;
+    let path = gen_file(&dir, &item_id)?;
+    if path.is_file() {
+        recycle_path(&path).map_err(|e| format!("删除生图面板失败：{e}"))?;
+    }
+    prune_empty(&dir.join(GENPANEL_DIR));
     Ok(())
 }
 

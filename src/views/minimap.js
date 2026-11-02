@@ -28,6 +28,7 @@ const TYPE_COLORS = {
   ellipse: "#9a9aa6",
   picture: "#f0a08c",
   scene: "#8fb8d8",
+  gen: "#d8a8cf",
 };
 
 let hooks = null;

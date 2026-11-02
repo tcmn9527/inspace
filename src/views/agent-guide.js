@@ -187,7 +187,7 @@ region 三选一：all 整张画布（默认，看整体构图）、viewport 用
     title: "块",
     body: `## 块（9 个工具）
 
-块类型：text（画布文字）、rect（矩形）、ellipse（椭圆）、line（线）、arrow（箭头）、sticky（便签）、note（Markdown 笔记卡）、image、audio、video、file（附件/PDF/文本文件卡）、ebook、connector（连线）。
+块类型：text（画布文字）、rect（矩形）、ellipse（椭圆）、line（线）、arrow（箭头）、sticky（便签）、note（Markdown 笔记卡）、image、audio、video、file（附件/PDF/文本文件卡）、ebook、connector（连线）、picture（矢量画面，见「画面块」一章）、scene（真 3D 场景，字段见 block_create / block_update 的 parts / camera / light）、gen（生图面板，见「生图面板」一章）。
 
 ### block_get
 单块摘要，不切页之外没有副作用。
@@ -703,6 +703,38 @@ off:true 关掉，画面回到没有光的原样（和没做这功能时逐字�
 
 画面块是矢量：块缩到多小都锐利，导出和截图同样锐利。文字是 op:"text" 指令，不是 HTML，
 不要拿 text 块往画面上叠。`,
+  },
+  {
+    id: "gen",
+    title: "生图面板",
+    body: `## 生图面板：写一句话出一张图（5 个工具）
+
+### 先有一块
+block_create {type:"gen", x, y, w, h, prompt, imageW, imageH, steps, cfg, seed}。
+面板上只摆一个提示词框和一颗「开始」，出图尺寸 / 步数 / 贴合度 / 种子没有控件——想调就调块上这几个字段，
+gen_run 和 block_update 都收这七个。默认 1024×1024、20 步、cfg 6、seed -1。
+
+### gen_run：一条命令出一张
+gen_run {id, prompt} 默认等到出完再回（本机一张约 30 秒）。返回里 phase 回到 idle、seconds 是这一张花了多久，
+src 是这张图在这个空间 images/ 里的相对路径。
+- 头一次跑（或者闲过五分钟引擎自己放掉之后）要从盘上读十来 GB 权重，那一两分钟也算在同一个等待里；
+  timeout 别压太小，默认 300 秒，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问。
+- 引擎一次只吃一张。别的面板正占着它会直接报回「引擎正被 xxx 占着」，先 gen_cancel 或者等它完事。
+- 想边跑边干别的就 wait:false 只起一轮，之后看 phase。
+- 同一张要复现就给正数 seed；-1 是每张换一个。
+- 这一步不进批量：一次一张、每张几十秒，排在批量里没有意义。
+
+### 出完看一眼
+gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一帧逐步预览。
+词写得对不对、构图偏不偏，在这儿看比读字段可靠；和画面块、场景块一样，改完先看再接着做。
+
+### 要另摆一块才 gen_place
+面板上那张不会自己变成图片块。gen_place {id} 在面板右边落一块独立图片块：是复制不是搬走，
+面板接着显示它那张、也接着能改词重出，两份 PNG 各自独立，删一块不动另一块。
+
+### 权重不在盘上
+gen_status 的 missing 非空就是这台机器还没备好模型文件，报回 modelsDir 和缺的文件名给用户，
+让他自己下到那个目录——别自己去下载，也别改路径。`,
   },
   {
     id: "playback",

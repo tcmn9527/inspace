@@ -19,6 +19,14 @@ import { createMarkdownEditor } from "./markdown-editor.js";
 import { openMenu, closeMenu, isMenuOpen } from "./menu.js";
 import { renderMarkdown } from "./markdown.js";
 import { disposeScene, setSceneCameraScale } from "./scene3d.js";
+import {
+  dropGenRun,
+  genBusyId,
+  genRunOf,
+  isGenBusy,
+  patchGenRun,
+  syncGen,
+} from "./genpanel.js";
 import { openVideoHelp } from "./video-help.js";
 import { createHistory } from "./history.js";
 import { createExporter, QUALITY, DEFAULT_QUALITY } from "./export.js";
@@ -35,6 +43,15 @@ import {
   EBOOK_DEFAULT_WIDTH,
   EBOOK_MIN_HEIGHT,
   EBOOK_MIN_WIDTH,
+  GEN_CFG_MAX,
+  GEN_CFG_MIN,
+  GEN_DEFAULT_HEIGHT,
+  GEN_DEFAULT_WIDTH,
+  GEN_MIN_HEIGHT,
+  GEN_MIN_WIDTH,
+  GEN_STEPS_MAX,
+  GEN_STEPS_MIN,
+  GEN_TEXT_MAX,
   FILE_MIN_HEIGHT,
   FILE_MIN_WIDTH,
   NOTE_DEFAULT_HEIGHT,
@@ -75,6 +92,7 @@ import {
   makeConnector,
   makeEbook,
   makeFile,
+  makeGen,
   makeImage,
   makeLine,
   makeNote,
@@ -105,6 +123,7 @@ import {
   renderPictureCmd,
   routeConnectorPreview,
   setPictureMedia,
+  snapGenSize,
   stretchEbookPage,
   syncConnectorElement,
   syncItemElement,
@@ -168,6 +187,7 @@ const RESIZE_MIN = {
   note: { w: NOTE_MIN_WIDTH, h: NOTE_MIN_HEIGHT },
   picture: { w: PICTURE_MIN_WIDTH, h: PICTURE_MIN_HEIGHT },
   scene: { w: SCENE_MIN_WIDTH, h: SCENE_MIN_HEIGHT },
+  gen: { w: GEN_MIN_WIDTH, h: GEN_MIN_HEIGHT },
 };
 const STICKY_BG_PRESETS = ["#bfa648", "#a6bf47", "#47bfb4", "#e5e1d6", "#aab0b5", "#262626"];
 const STICKY_TEXT_PRESETS = ["#000000", "#ffffff", "#4c4c4c", "#9e9e9e"];
@@ -280,6 +300,10 @@ function applyHistory(snap) {
     } else if (item.type === "scene") {
       const held = scenePartsBank.get(item.id);
       if (held) item.parts = held;
+    } else if (item.type === "gen") {
+      /* 提示词和参数在快照里有、在 items.json 里没有：撤销完把这块自己那份文件追平，
+         不然重开空间看到的是撤销之前写的那句 */
+      persistGen(item);
     }
   }
   for (const id of [...selectedIds]) if (!findItem(id)) selectedIds.delete(id);
@@ -869,6 +893,7 @@ export function initCanvas() {
   document.addEventListener("keydown", onKeyDown);
   setupFileDrop();
   setupVideoCopyEvents();
+  setupGenEvents();
   initMinimap({
     getCamera: () => (current ? current.camera : null),
     getStageSize: () => ({ w: ui.stage.clientWidth, h: ui.stage.clientHeight }),
@@ -1109,6 +1134,8 @@ async function loadImages() {
   const wanted = new Map();
   for (const item of current.items) {
     if (item.type === "image" && item.src) wanted.set(item.src, Boolean(item.linked));
+    /* 生图面板最近出的那张也是 images/ 里的真文件，同一张表里取地址 */
+    else if (item.type === "gen" && item.src) wanted.set(item.src, false);
     else if (item.type === "picture") {
       for (const one of collectPictureImageSrcs(item.cmds, item.symbols)) wanted.set(one.src, one.linked);
     }
@@ -1607,6 +1634,7 @@ function addItemElement(item) {
   if (item.type === "text") item.h = el.offsetHeight;
   if (item.type === "note") hydrateNoteImages(item, el);
   if (item.type === "picture") attachPictureTools(el, item);
+  if (item.type === "gen") attachGenPanel(el, item);
   return el;
 }
 
@@ -2400,6 +2428,7 @@ function startDraw(e) {
   if (tool === "rect" || tool === "ellipse") item = makeBox(tool, start.x, start.y, start.x, start.y);
   else if (tool === "picture") item = makePicture(start.x, start.y, 0, 0);
   else if (tool === "scene") item = makeScene(start.x, start.y, 0, 0);
+  else if (tool === "gen") item = makeGen(start.x, start.y, 0, 0);
   else if (tool === "line" || tool === "arrow") item = makeLine(tool, start.x, start.y, start.x, start.y);
   else if (tool === "text") item = makeText(start.x, start.y, 40);
   if (!item) {
@@ -2590,7 +2619,13 @@ function onWindowPointerMove(e) {
       item.y2 = point.y;
     }
   } else if (drag.kind === "draw") {
-    if (item.type === "rect" || item.type === "ellipse" || item.type === "picture" || item.type === "scene") {
+    if (
+      item.type === "rect" ||
+      item.type === "ellipse" ||
+      item.type === "picture" ||
+      item.type === "scene" ||
+      item.type === "gen"
+    ) {
       item.x = Math.min(drag.start.x, point.x);
       item.y = Math.min(drag.start.y, point.y);
       item.w = Math.max(1, Math.abs(dx));
@@ -2779,6 +2814,12 @@ function settlePointerUp(e) {
     if (item.type === "scene") {
       item.w = Math.max(SCENE_MIN_WIDTH, item.w);
       item.h = Math.max(SCENE_MIN_HEIGHT, item.h);
+      syncItemElement(itemEls.get(item.id), item);
+    }
+    /* 生图面板同理：地板是给上面那块取景窗留的，再小就没法看正在长的图 */
+    if (item.type === "gen") {
+      item.w = Math.max(GEN_MIN_WIDTH, item.w);
+      item.h = Math.max(GEN_MIN_HEIGHT, item.h);
       syncItemElement(itemEls.get(item.id), item);
     }
     scheduleItemsSave();
@@ -3715,6 +3756,25 @@ function deleteItems(ids) {
         },
       );
     }
+    if (item.type === "gen") {
+      clearTimeout(genTimers.get(item.id));
+      genTimers.delete(item.id);
+      /* 这一轮的运行态（第几步、预览图）跟着块走：不留，否则「一次一张」会被一块已经不存在的图卡住 */
+      dropGenRun(item.id);
+      const genId = item.id;
+      deferFileDelete(
+        canvasId,
+        () => current.items.some((other) => other.id === genId),
+        () => void store.deleteGen(canvasId, genId).catch(() => {}),
+      );
+      /* 出的那张图没人指着才回收：落块落出去的那张图片块还用它，撤回来两边都还在 */
+      if (item.src) {
+        const { src } = item;
+        deferFileDelete(canvasId, () => srcInUse(src), () => {
+          void store.deleteCanvasImage(canvasId, src, false).catch(() => {});
+        });
+      }
+    }
     if (item.type === "note") {
       const prefix = `notes/${item.id}/`;
       for (const key of [...noteImageCache.keys()]) {
@@ -3954,6 +4014,7 @@ let stickyTimers = new Map(); // 块 id -> 还没落盘的写盘定时器
 let noteTimers = new Map();
 let pictureTimers = new Map();
 let sceneTimers = new Map();
+let genTimers = new Map();
 /* 块 id -> 那份笔画。全局撤销快照不含 cmds（见 captureHistory），回放之后要从现在还活着的
    这份旁表里接回去；删掉的块也先留一份，等那条撤销记录被挤出栈、文件真进回收站了才放手。 */
 const pictureCmdBank = new Map();
@@ -4048,6 +4109,32 @@ function persistScene(item) {
   });
 }
 
+/* 面板写的那句话和那几个参数只认 genpanels/<块id>.json 那一份。
+   和画面/场景不一样：这几个字段在撤销快照里是有的（captureHistory 只摘 cmds 和 parts），
+   所以这里故意不调 history.touch()——回放完直接调这一句把文件追平就够了。
+   出的那张图不在这一份里：它和 img 块一样是 images/ 里的真文件，路径记在块上。 */
+function persistGen(item) {
+  if (!current || item.type !== "gen") return;
+  const canvasId = current.meta.id;
+  scheduleContentWrite(genTimers, item.id, () => {
+    const target = current && current.meta.id === canvasId ? findItem(item.id) : null;
+    if (!target) return;
+    store.writeGen(canvasId, item.id, genContentOf(target)).catch(showError);
+  });
+}
+
+function genContentOf(item) {
+  return {
+    prompt: item.prompt || "",
+    negative: item.negative || "",
+    imageW: item.imageW,
+    imageH: item.imageH,
+    steps: item.steps,
+    cfg: item.cfg,
+    seed: item.seed,
+  };
+}
+
 /* 切空间、重命名、退出页面前把还没写完的正文补上，最后一次编辑不至于丢掉 */
 async function flushBlockContents() {
   const canvasId = current?.meta.id;
@@ -4056,11 +4143,13 @@ async function flushBlockContents() {
     ...[...noteTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "note" })),
     ...[...pictureTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "picture" })),
     ...[...sceneTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "scene" })),
+    ...[...genTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "gen" })),
   ];
   stickyTimers.clear();
   noteTimers.clear();
   pictureTimers.clear();
   sceneTimers.clear();
+  genTimers.clear();
   if (!canvasId) return;
   await Promise.all(
     pending.map(({ timer, itemId, kind }) => {
@@ -4071,6 +4160,7 @@ async function flushBlockContents() {
       if (kind === "note") return store.writeNoteText(canvasId, itemId, item.source || "").catch(showError);
       if (kind === "picture")
         return store.writePicture(canvasId, itemId, item.cmds || [], item.symbols || {}).catch(showError);
+      if (kind === "gen") return store.writeGen(canvasId, itemId, genContentOf(item)).catch(showError);
       return store.writeScene(canvasId, itemId, item.parts || []).catch(showError);
     }),
   );
@@ -4089,7 +4179,8 @@ async function loadBlockContents() {
           item.type === "sticky" ||
           (item.type === "note" && !item.linked) ||
           item.type === "picture" ||
-          item.type === "scene",
+          item.type === "scene" ||
+          item.type === "gen",
       )
       .map(async (item) => {
         try {
@@ -4129,6 +4220,22 @@ async function loadBlockContents() {
             scenePartsBank.set(item.id, item.parts || []);
             return;
           }
+          if (item.type === "gen") {
+            /* 提示词和参数只认这一份文件：读不到就按块上现在那份补写一次 */
+            const file = await store.readGen(canvasId, item.id);
+            if (file) {
+              item.prompt = file.prompt;
+              item.negative = file.negative;
+              item.imageW = snapGenSize(file.imageW);
+              item.imageH = snapGenSize(file.imageH);
+              item.steps = Math.min(GEN_STEPS_MAX, Math.max(GEN_STEPS_MIN, file.steps));
+              item.cfg = Math.min(GEN_CFG_MAX, Math.max(GEN_CFG_MIN, file.cfg));
+              item.seed = Number.isFinite(file.seed) && file.seed >= -1 ? Math.trunc(file.seed) : -1;
+            } else {
+              await store.writeGen(canvasId, item.id, genContentOf(item));
+            }
+            return;
+          }
           const text = await store.readNoteText(canvasId, item.id);
           if (text === null || text === undefined) {
             await store.writeNoteText(canvasId, item.id, item.source || "");
@@ -4141,6 +4248,216 @@ async function loadBlockContents() {
       }),
   );
   return broken;
+}
+
+/* ---------- 生图面板 ----------
+   上半截取景、下半截一句提示词加一颗按钮。出图发生在 Rust 那边的一根工作线程里，
+   这儿只负责起一轮和收事件；面板上不摆「保存」——图一落成就自己进 images/，
+   点「落块」才在外面另摆一张独立图片块。 */
+
+const GEN_PLACE_GAP = 24;
+
+/* 这个路径还有谁指着（独立图片块、别的面板各算一个）：回收旧图之前问一句 */
+const srcInUse = (src) => Boolean(current) && current.items.some((other) => other.src === src);
+
+function attachGenPanel(el, item) {
+  const bar = el.querySelector(".canvas-gen-bar");
+  const prompt = el.querySelector(".canvas-gen-prompt");
+  const runButton = el.querySelector(".canvas-gen-run");
+  const placeButton = el.querySelector(".canvas-gen-place");
+  if (!bar || !prompt || !runButton || !placeButton) return;
+  /* 提示词框和按钮上的按下不能变成拖整块：整条在 pointerdown 上截住 */
+  bar.addEventListener("pointerdown", (e) => e.stopPropagation());
+  prompt.addEventListener("input", () => {
+    const target = findItem(item.id);
+    if (!target) return;
+    target.prompt = prompt.value.slice(0, GEN_TEXT_MAX);
+    persistGen(target);
+  });
+  prompt.addEventListener("keydown", (e) => {
+    /* 回车这一下是发出去，换行要按 Shift+Enter：框就三行高，写一句话用不着回车 */
+    if (e.key !== "Enter" || e.shiftKey) return;
+    e.preventDefault();
+    runOrStopGen(item.id);
+  });
+  runButton.addEventListener("click", () => runOrStopGen(item.id));
+  placeButton.addEventListener("click", () => placeGenImage(item.id));
+  /* 上一张出的图跟着块一起回来：运行态记的是「这一轮」，重开空间时从 images/ 里接上 */
+  const run = genRunOf(item.id);
+  if (run.phase === "idle" && !run.imageUrl && !run.previewUrl && item.src) {
+    patchGenRun(item.id, { imageUrl: imageCache.get(item.src) || "" });
+  }
+  syncGen(el, item);
+}
+
+function refreshGenPanel(id) {
+  const item = findItem(id);
+  const el = itemEls.get(id);
+  if (item && el) syncGen(el, item);
+}
+
+/* 这一轮没出成：把上一次那张接回来显示。文件还在盘上，取景窗不该空着。 */
+function keepLastGenImage(id) {
+  const item = findItem(id);
+  patchGenRun(id, { imageUrl: item && item.src ? imageCache.get(item.src) || "" : "" });
+}
+
+function runOrStopGen(id) {
+  const item = findItem(id);
+  if (!item || item.type !== "gen" || item.locked) return;
+  const run = genRunOf(id);
+  if (run.phase === "loading" || run.phase === "running") {
+    void stopGen(id);
+    return;
+  }
+  /* 一次一张：别的块在出图就按不动（syncGen 里已经禁用了，这儿再挡一道） */
+  if (isGenBusy()) return;
+  if (!(item.prompt || "").trim()) {
+    showError("先写一句提示词");
+    return;
+  }
+  patchGenRun(id, {
+    phase: "loading",
+    step: 0,
+    steps: item.steps,
+    previewUrl: "",
+    imageUrl: "",
+    error: "",
+  });
+  refreshGenPanel(id);
+  store.genStart({
+    block: item.id,
+    prompt: item.prompt.trim(),
+    negative: item.negative || "",
+    width: item.imageW,
+    height: item.imageH,
+    steps: item.steps,
+    cfg: item.cfg,
+    seed: item.seed,
+  }).catch((error) => {
+    const text = String(error?.message || error || "出图失败");
+    if (genRunOf(id).phase === "canceled" || text === "已取消") {
+      patchGenRun(id, { phase: "canceled" });
+    } else {
+      patchGenRun(id, { phase: "failed", error: text });
+      keepLastGenImage(id);
+    }
+    refreshGenPanel(id);
+  });
+}
+
+async function stopGen(id) {
+  /* 点了就是停了，先按画面判；后端那边走它的硬取消，不用这儿等 */
+  patchGenRun(id, { phase: "canceled" });
+  refreshGenPanel(id);
+  await store.genCancel().catch(() => {});
+}
+
+async function placeGenImage(id) {
+  const item = findItem(id);
+  const run = genRunOf(id);
+  if (!item || !item.src || run.phase === "loading" || run.phase === "running" || !current) return null;
+  const canvasId = current.meta.id;
+  try {
+    /* 落块是复制不是搬走：面板接着显示它那张，图片块自己带一份文件，
+       删哪一块都不该把另一块清空 */
+    const rel = await store.duplicatePictureImage(canvasId, item.src, false, canvasId);
+    if (!current || current.meta.id !== canvasId) return null;
+    const url = imageCache.get(rel) || (await store.imageUrl(canvasId, rel, false).catch(() => ""));
+    imageCache.set(rel, url || null);
+    const size = await imageSize(url || run.imageUrl);
+    const fit = fitImageSize(size.width, size.height);
+    return placeBlock(makeImage(item.x + item.w + GEN_PLACE_GAP, item.y, fit.w, fit.h, rel));
+  } catch (error) {
+    showError(error);
+    return null;
+  }
+}
+
+async function onGenDone(payload) {
+  const item = findItem(payload.block);
+  if (!item) {
+    dropGenRun(payload.block);
+    return;
+  }
+  const dataUrl = payload.dataUrl || "";
+  patchGenRun(payload.block, {
+    phase: dataUrl ? "idle" : "failed",
+    step: payload.steps || item.steps,
+    seconds: payload.seconds || 0,
+    previewUrl: "",
+    imageUrl: dataUrl,
+    error: dataUrl ? "" : "出图失败：结果是空的",
+  });
+  refreshGenPanel(payload.block);
+  if (!dataUrl) {
+    keepLastGenImage(payload.block);
+    refreshGenPanel(payload.block);
+    return;
+  }
+  const canvasId = current?.meta.id;
+  const comma = dataUrl.indexOf(",");
+  if (!canvasId || comma < 0) return;
+  try {
+    const rel = await store.saveCanvasImage(canvasId, dataUrl.slice(comma + 1), "png");
+    if (!current || current.meta.id !== canvasId) return;
+    const target = findItem(payload.block);
+    if (!target) {
+      void store.deleteCanvasImage(canvasId, rel, false).catch(() => {});
+      return;
+    }
+    const old = target.src;
+    target.src = rel;
+    imageCache.set(rel, dataUrl);
+    /* 上一张没人指着了才回收：跟删块同一套，等这条撤销记录挤出栈才真进回收站 */
+    if (old && old !== rel) {
+      deferFileDelete(canvasId, () => srcInUse(old), () => {
+        void store.deleteCanvasImage(canvasId, old, false).catch(() => {});
+      });
+    }
+    scheduleItemsSave();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function setupGenEvents() {
+  const listen = window.__TAURI__?.event?.listen;
+  if (!listen) return;
+  const on = (name, handler) => {
+    Promise.resolve(listen(name, (event) => handler(event?.payload))).catch(() => {});
+  };
+  on("gen-progress", (payload) => {
+    if (!payload || !findItem(payload.block)) return;
+    patchGenRun(payload.block, { phase: "running", step: payload.step, steps: payload.steps });
+    refreshGenPanel(payload.block);
+  });
+  on("gen-preview", (payload) => {
+    if (!payload || !findItem(payload.block)) return;
+    patchGenRun(payload.block, {
+      phase: "running",
+      step: payload.step,
+      steps: payload.steps,
+      previewUrl: payload.dataUrl || "",
+    });
+    refreshGenPanel(payload.block);
+  });
+  on("gen-done", (payload) => {
+    if (payload) void onGenDone(payload);
+  });
+  on("gen-failed", (payload) => {
+    if (!payload) return;
+    if (!findItem(payload.block)) {
+      dropGenRun(payload.block);
+      return;
+    }
+    patchGenRun(payload.block, {
+      phase: payload.canceled ? "canceled" : "failed",
+      error: payload.error || "",
+    });
+    keepLastGenImage(payload.block);
+    refreshGenPanel(payload.block);
+  });
 }
 
 /* ---------- 画面块：块内工具条与手绘 ----------
@@ -5212,6 +5529,25 @@ async function landBlock(item, fromId, sourceId) {
     return true;
   }
 
+  if (item.type === "gen") {
+    /* 面板出的那张图跟着块落一份自己的副本：删原块不该把粘出来的那块一起清空。
+       这条命令就是「把源空间 images/ 里的那个文件拷进目标空间」，画面块也用同一份 */
+    if (item.src) {
+      const rel = await store
+        .duplicatePictureImage(fromId, item.src, false, canvasId)
+        .catch(() => "");
+      if (rel) {
+        item.src = rel;
+        try {
+          imageCache.set(rel, await store.imageUrl(canvasId, rel, false));
+        } catch {
+          imageCache.set(rel, null);
+        }
+      }
+    }
+    return true;
+  }
+
   if (!MEDIA_TYPES.has(item.type) || !item.src) return true;
   const copied = await store.duplicateMedia(fromId, sourceId, canvasId).catch(showError);
   if (!copied?.rel) return false;
@@ -6203,6 +6539,7 @@ function placeBlock(item) {
   if (item.type === "note") persistNote(item);
   if (item.type === "picture") persistPicture(item);
   if (item.type === "scene") persistScene(item);
+  if (item.type === "gen") persistGen(item);
   return item;
 }
 
@@ -6549,6 +6886,28 @@ function agentSummary(item) {
       camera: item.camera || null,
       light: item.light || null,
       groundColor: item.groundColor || "",
+      borderColor: item.borderColor,
+      borderWidth: item.borderWidth,
+      radius: item.radius,
+    };
+  }
+  if (item.type === "gen") {
+    /* 这一轮的相位在这儿一并报：等一张图的时候 agent 得问得出「还在跑」 */
+    const run = genRunOf(item.id);
+    return {
+      ...base,
+      prompt: item.prompt || "",
+      negative: item.negative || "",
+      imageW: item.imageW,
+      imageH: item.imageH,
+      steps: item.steps,
+      cfg: item.cfg,
+      seed: item.seed,
+      src: item.src || "",
+      phase: run.phase,
+      step: run.step,
+      seconds: run.phase === "idle" ? run.seconds : 0,
+      error: run.phase === "failed" ? run.error || "" : "",
       borderColor: item.borderColor,
       borderWidth: item.borderWidth,
       radius: item.radius,
@@ -6980,6 +7339,24 @@ async function agentCreateBlock(spec = {}) {
     return agentSummary(placeBlock(item));
   }
 
+  if (type === "gen") {
+    const w = Math.max(GEN_MIN_WIDTH, numOr(spec.w, GEN_DEFAULT_WIDTH));
+    const h = Math.max(GEN_MIN_HEIGHT, numOr(spec.h, GEN_DEFAULT_HEIGHT));
+    const at = agentPlacePoint(w, h, spec);
+    const item = withLock(makeGen(at.x, at.y, w, h));
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    if (spec.borderWidth !== undefined) {
+      item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
+    }
+    if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
+    applyGenFields(item, spec);
+    const placed = placeBlock(item);
+    /* 提示词和参数归 genpanels/ 那份文件管，建完就得落盘：只等 scheduleItemsSave 的话，
+       items.json 里根本没有这几个字段 */
+    persistGen(placed);
+    return agentSummary(placed);
+  }
+
   if (type === "note") {
     const w = Math.max(NOTE_MIN_WIDTH, numOr(spec.w, NOTE_DEFAULT_WIDTH));
     const h = Math.max(NOTE_MIN_HEIGHT, numOr(spec.h, NOTE_DEFAULT_HEIGHT));
@@ -7201,7 +7578,7 @@ function agentSetLayer(id, direction) {
 }
 
 /* 边框宽度/圆角按块类型认：连线和不带边框外观的音视频、电子书不接 */
-const BORDER_WIDTH_KINDS = new Set(["text", "rect", "ellipse", "image", "sticky", "note", "file", "picture", "scene"]);
+const BORDER_WIDTH_KINDS = new Set(["text", "rect", "ellipse", "image", "sticky", "note", "file", "picture", "scene", "gen"]);
 
 async function agentUpdateBlock(id, patch = {}) {
   const item = agentRequireItem(id);
@@ -7339,6 +7716,8 @@ async function agentUpdateBlock(id, patch = {}) {
     if (got.why) throw new Error(got.why);
     item.light = got.light;
   }
+  /* 生图面板的参数也在这条路上改：改完单独落那份文件，和画面块一个规矩 */
+  if (item.type === "gen" && applyGenFields(item, patch)) persistGen(item);
   if (el) syncItemElement(el, item);
   if (geometry) {
     updateSelection();
@@ -7801,6 +8180,128 @@ function agentPictureLight(id, patch = {}) {
   };
 }
 
+/* ---------- 生图面板（agent） ----------
+   引擎一次只吃一张，所以「现在能不能开始」看的不是这一块，而是 genBusyId() 那一个 id。
+   gen_run 默认把这一趟等完：出图半分钟，比分几次去问相位省事；
+   头一次跑还要先把权重读进来，那一两分钟也在同一个等待里。 */
+
+function agentGenOf(id) {
+  const item = agentRequireItem(id);
+  if (item.type !== "gen") throw new Error("这不是生图面板");
+  return item;
+}
+
+/* 出图参数只认块上这几个字段：给了才改，认不出的数收成最接近的合法值。
+   尺寸得贴到 32 的倍数上（snapGenSize），步数、cfg、seed 的区间和建块时同一套。 */
+function applyGenFields(item, spec = {}) {
+  let touched = false;
+  if (spec.prompt !== undefined) {
+    item.prompt = String(spec.prompt).slice(0, GEN_TEXT_MAX);
+    touched = true;
+  }
+  if (spec.negative !== undefined) {
+    item.negative = String(spec.negative).slice(0, GEN_TEXT_MAX);
+    touched = true;
+  }
+  if (Number.isFinite(Number(spec.imageW))) {
+    item.imageW = snapGenSize(Number(spec.imageW));
+    touched = true;
+  }
+  if (Number.isFinite(Number(spec.imageH))) {
+    item.imageH = snapGenSize(Number(spec.imageH));
+    touched = true;
+  }
+  if (Number.isFinite(Number(spec.steps))) {
+    item.steps = clamp(Math.round(Number(spec.steps)), GEN_STEPS_MIN, GEN_STEPS_MAX);
+    touched = true;
+  }
+  if (Number.isFinite(Number(spec.cfg))) {
+    item.cfg = clamp(Number(spec.cfg), GEN_CFG_MIN, GEN_CFG_MAX);
+    touched = true;
+  }
+  if (spec.seed !== undefined) {
+    /* -1 是「每张换一个」的哨兵，别的认不出的数也退回它 */
+    const want = Number(spec.seed);
+    item.seed = Number.isFinite(want) && want >= -1 ? Math.trunc(want) : -1;
+    touched = true;
+  }
+  return touched;
+}
+
+async function agentGenStatus() {
+  agentRequireSpace();
+  const engine = await store.genStatus();
+  return {
+    loaded: Boolean(engine.loaded),
+    busyBlock: genBusyId() || null,
+    modelsDir: engine.modelsDir || "",
+    missing: Array.isArray(engine.missing) ? engine.missing : [],
+    idleMinutes: engine.idleMinutes || 0,
+    panels: current.items.filter((item) => item.type === "gen").map(agentSummary),
+  };
+}
+
+/* 等到这一轮出完、失败或取消。运行态是事件写回来的，这儿只能轮询着读。 */
+async function waitGenRun(id, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const run = genRunOf(id);
+    if (run.phase !== "loading" && run.phase !== "running") return run;
+    if (Date.now() > deadline) return run;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+async function agentGenRun(id, patch = {}) {
+  const item = agentGenOf(id);
+  /* 锁拦改不拦看，但这一趟既改字段又发任务：先看锁，不许把提示词写进一块锁着的面板 */
+  if (item.locked) throw new Error("这块已锁定，先解锁再出图");
+  const busy = genBusyId();
+  if (busy && busy !== item.id) {
+    throw new Error(`引擎正被生图面板 ${busy} 占着，一次只出一张`);
+  }
+  /* 改字段和发出去是同一次调用：先落到块上，出图取的就是块上这一份 */
+  if (applyGenFields(item, patch)) {
+    persistGen(item);
+    const el = itemEls.get(item.id);
+    if (el) syncItemElement(el, item);
+    scheduleItemsSave();
+  }
+  if (!busy) runOrStopGen(item.id);
+  agentHighlight([item.id], 1600);
+  if (patch.wait === false) return { ...agentSummary(item), waited: false };
+  const seconds = Math.min(600, Math.max(1, numOr(patch.timeout, 300)));
+  const run = await waitGenRun(item.id, seconds * 1000);
+  const still = findItem(item.id);
+  if (!still) throw new Error(`生图面板 ${item.id} 已经不在这块空间里了`);
+  return {
+    ...agentSummary(still),
+    waited: true,
+    timedOut: run.phase === "loading" || run.phase === "running",
+  };
+}
+
+function agentGenCancel() {
+  const busy = genBusyId();
+  if (!busy) return { canceled: false, note: "现在没有在出图" };
+  void stopGen(busy);
+  return { canceled: true, block: busy };
+}
+
+/* 把最近那张落成一块独立图片块：面板留着继续改词重出，图片块自己带一份文件 */
+async function agentGenPlace(id) {
+  const item = agentGenOf(id);
+  if (!item.src) throw new Error("这块还没出过图，先 gen_run");
+  const run = genRunOf(item.id);
+  if (run.phase === "loading" || run.phase === "running") {
+    throw new Error("正在出图，等这一张跑完再落块");
+  }
+  const placed = await placeGenImage(item.id);
+  if (!placed) throw new Error("没能落块：那张图的文件读不出来，具体原因弹在界面右下角了");
+  agentRevealBlock(placed.id);
+  return agentSummary(placed);
+}
+
 function agentNoteOf(id) {
   const item = agentRequireItem(id);
   if (item.type !== "note") throw new Error("这不是笔记块");
@@ -8143,6 +8644,10 @@ export const canvasAgent = {
   pictureDraw: agentPictureDraw,
   pictureLayers: agentPictureLayers,
   pictureLight: agentPictureLight,
+  genStatus: agentGenStatus,
+  genRun: agentGenRun,
+  genCancel: agentGenCancel,
+  genPlace: agentGenPlace,
   noteRead: agentNoteRead,
   noteWrite: agentNoteWrite,
   fileRead: agentFileRead,

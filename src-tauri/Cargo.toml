@@ -14,8 +14,16 @@ edition = "2024"
 name = "inspace_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# 关掉就没 CUDA，纯 CPU 也能出图（慢一个数量级）。开发机一律默认开。
+default = ["cuda"]
+cuda = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# 生图引擎的 C++ 侧：CMake 现编上游源码，bindgen 现场生成绑定
+cmake = "0.1"
+bindgen = "0.71"
 
 [dependencies]
 # protocol-asset：把磁盘上的视频变成 <video> 能按 Range 读的地址，
@@ -45,6 +53,11 @@ quick-xml = "0.42"
 # bundled：自带 SQLite 源码，不依赖系统 SQLite。
 # 关掉默认特性（cache/hashlink/wasm 等），只留用得到的那部分。
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+# 生图面板的引擎：不用 crates.io 的 diffusion-rs（它封的源码载不动 Qwen-Image 2.1 权重），
+# 源码由 scripts/prepare-sdcpp.mjs 取到 tools/sdcpp，build.rs 现场编成静态库链进来。
+# cuda 特性关掉就是纯 CPU。
+# 只开 png：出图和逐步预览都要把 RGBA 编成 PNG 推给前端。
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

@@ -3,8 +3,10 @@ mod cosmos;
 mod db;
 mod ebook;
 mod ffmpeg;
+mod imagegen;
 mod mcp;
 mod notes;
+pub mod sdcpp; // 引擎绑定：examples 和后续的生图面板都从这里进
 mod store;
 
 use std::sync::Arc;
@@ -36,11 +38,13 @@ pub fn run() {
                 data_root.clone(),
                 dir.join(store::LEGACY_CANVAS_DIR),
             )?);
-            app.manage(data_root);
+            app.manage(data_root.clone());
             // 视频拷贝是后台线程在跑，用 Arc 包一层才既能在命令里读、又能挪进线程
             app.manage(Arc::new(canvas::VideoCopyJobs::default()));
             // 8K 贴图包的下载同样在后台线程跑，取消只改这份共享标志
             app.manage(Arc::new(cosmos::CosmosJobs::default()));
+            // 生图引擎：一个常驻 sd_ctx，一次只出一张，空闲几分钟自己放掉
+            app.manage(imagegen::init(data_root.clone()));
             // 换数据目录的搬运同理：进度在后台线程报，停止只改标志
             app.manage(Arc::new(store::RootMoveJobs::default()));
             app.manage(db_state);
@@ -129,6 +133,9 @@ pub fn run() {
             canvas::canvas_read_scene,
             canvas::canvas_write_scene,
             canvas::canvas_delete_scene,
+            canvas::canvas_read_gen,
+            canvas::canvas_write_gen,
+            canvas::canvas_delete_gen,
             canvas::canvas_reveal_block,
             canvas::canvas_duplicate_media,
             canvas::canvas_duplicate_picture_image,
@@ -168,6 +175,9 @@ pub fn run() {
             cosmos::cosmos_tex_cancel,
             cosmos::cosmos_tex_reset,
             cosmos::cosmos_tex_read,
+            imagegen::gen_status,
+            imagegen::gen_start,
+            imagegen::gen_cancel,
             canvas::canvas_reveal,
             canvas::canvas_image_data,
             canvas::canvas_export_save,

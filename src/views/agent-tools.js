@@ -226,6 +226,21 @@ const SCENE_CAMERA = {
   },
 };
 
+/* 生图面板那七个字段：面板上只摆提示词框和一颗按钮，尺寸/步数/贴合度/种子没有控件，
+   只有这条通道能改——和画面块的光、场景块的机位是同一个约定。
+   建块和改块共用一份，漏一个不报错、那块会安静地建成默认值。 */
+const GEN_PROPS = {
+  prompt: { type: "string", description: "生图面板的提示词（这一张要什么）" },
+  negative: { type: "string", description: "生图面板的负向提示词（不想要什么）" },
+  imageW: { type: "number", description: "出图宽，256~2048，自己贴到 32 的倍数，默认 1024" },
+  imageH: { type: "number", description: "出图高，同上" },
+  steps: { type: "number", description: "步数 1~100，默认 20" },
+  cfg: { type: "number", description: "提示词贴合度 1~20，默认 6" },
+  seed: { type: "number", description: "种子；-1 每张换一个，给正数才能复现同一张" },
+};
+
+const GEN_KEYS = Object.keys(GEN_PROPS);
+
 const def = (name, description, properties = {}, required = []) => ({
   name,
   description,
@@ -343,7 +358,7 @@ const TOOL_DEFS = [
   ),
   def("block_get", "看单个块的摘要。", { id: ID }, ["id"]),
   def("block_create", "在空间里新建一块。坐标不给就落在视野中央、连续创建自动错开。", {
-    type: { type: "string", description: "text/rect/ellipse/line/arrow/sticky/note/picture/scene/image/audio/video/file/ebook/connector" },
+    type: { type: "string", description: "text/rect/ellipse/line/arrow/sticky/note/picture/scene/gen/image/audio/video/file/ebook/connector" },
     x: X, y: Y, w: W, h: H,
     text: { type: "string", description: "文字块/便签的正文" },
     markdown: { type: "string", description: "笔记块的 Markdown 正文" },
@@ -367,6 +382,7 @@ const TOOL_DEFS = [
     parts: SCENE_PARTS,
     camera: SCENE_CAMERA,
     groundColor: { type: "string", description: "场景块的地面颜色，如 #9a917d；空串用默认那档灰" },
+    ...GEN_PROPS,
     x2: { type: "number", description: "线段终点的世界 x" },
     y2: { type: "number", description: "线段终点的世界 y" },
     shape: { type: "string", enum: ["curve", "elbow"], description: "连线的走线方式" },
@@ -378,7 +394,7 @@ const TOOL_DEFS = [
     to: { type: "string", description: "连线的终点块 id" },
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"], description: "连线从起点的哪条边出去" },
   }, ["type"]),
-  def("block_update", "改一块的位置、尺寸、颜色或正文。只传要改的字段。画面块也能在这儿整幅换指令（cmds），但改几条不如用 picture_draw 按号追加、删。", {
+  def("block_update", "改一块的位置、尺寸、颜色或正文。只传要改的字段。画面块也能在这儿整幅换指令（cmds），但改几条不如用 picture_draw 按号追加、删。生图面板的提示词和出图参数也能在这儿改，但那只是改块上的字，要真出一张得用 gen_run。", {
     id: ID, x: X, y: Y, w: W, h: H,
     x2: { type: "number", description: "线段终点 x" },
     y2: { type: "number", description: "线段终点 y" },
@@ -412,6 +428,7 @@ const TOOL_DEFS = [
     light: PICTURE_LIGHT,
     cmds: PICTURE_CMDS,
     symbols: PICTURE_SYMBOLS,
+    ...GEN_PROPS,
   }, ["id"]),
   def("block_delete", "删除一块；挂在它身上的连线一起删。", { id: ID }, ["id"]),
   def("block_duplicate", "复制一块（媒体文件会真拷一份副本），默认落在原块右下 24px。给 space 就复制到那个空间（会切过去），垫在画面里的位图也一并拷进那个空间。", {
@@ -510,6 +527,25 @@ const TOOL_DEFS = [
     id: ID,
     ...(PICTURE_LIGHT.properties || {}),
     off: { type: "boolean", description: "true 就是关掉这块的光，回到没有光的原样" },
+  }, ["id"]),
+  def("gen_status", "问出图引擎现在什么状况：权重进没进内存、哪一块生图面板正占着它、要用的那几个文件在不在盘上、空闲多久自动放掉。顺带把这块空间里每一面生图面板的摘要都列出来（提示词、参数、相位、最近那张的相对路径）。"),
+  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个空间的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。", {
+    id: ID,
+    prompt: { type: "string", description: "这一张要什么，一句话到一段话" },
+    negative: { type: "string", description: "不想要什么" },
+    imageW: { type: "number", description: "出图宽，256~2048，自己贴到 32 的倍数，默认 1024" },
+    imageH: { type: "number", description: "出图高，同上" },
+    steps: { type: "number", description: "步数 1~100，默认 20" },
+    cfg: { type: "number", description: "提示词贴合度 1~20，默认 6" },
+    seed: { type: "number", description: "种子；-1 每张换一个，给正数才能同一张复现" },
+    wait: { type: "boolean", description: "false 只起一轮就返回（马上拿 phase 判断），默认 true 等到出完" },
+    timeout: { type: "number", description: "等多少秒，默认 300，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问" },
+  }, ["id"]),
+  def("gen_cancel", "掐掉正在出的那一张。载入权重那几分钟也能停（那边一出来看到取消标志就自己收）。没有图在跑返回 canceled:false。"),
+  def("gen_place", "把一块生图面板最近出的那张落成一块独立图片块，落在面板右边。落出去的是复制：面板接着显示它那张、也接着能改词重出，图片块自己带一份文件，删哪一块都不影响另一块。", { id: ID }, ["id"]),
+  def("gen_screenshot", "看一块生图面板现在是什么样，返回一张 PNG——取景窗里就是最近那张成品，正在跑的时候是逐步预览的那一帧。比 space_snapshot 近得多，改完提示词、出了图想确认画面对不对，调它。", {
+    id: ID,
+    maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
   }, ["id"]),
   def("note_read", "读笔记块的 Markdown 正文。", { id: ID }, ["id"]),
   def("note_write", "写笔记块的 Markdown 正文；引用外部 .md 的块会把正文写回原文件。", {
@@ -644,6 +680,7 @@ const BLOCK_FIELDS = [
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
   "cmds", "symbols", "paperColor", "hidden", "light",
   "parts", "camera", "groundColor",
+  ...GEN_KEYS,
 ];
 
 async function appState() {
@@ -779,7 +816,7 @@ async function snapshot(args) {
 async function blockScreenshot(args, type, label) {
   await ensureView("canvas");
   const block = canvasAgent.blockGet(args.id);
-  if (block.type !== type) throw new Error(`这不是${label}块`);
+  if (block.type !== type) throw new Error(`这不是${label}`);
   const pad = 2;
   const shot = await canvasAgent.snapshot({
     region: {
@@ -791,18 +828,32 @@ async function blockScreenshot(args, type, label) {
     maxSide: args.maxSide || 1200,
   });
   const perPixel = shot.region.w / shot.width;
+  /* 这块「装了多少东西」每种块说法不一样，都得报：出图的这一张、画图的几百条指令、场景的几件东西 */
+  const inside =
+    type === "picture"
+      ? `${block.cmds} 条指令`
+      : type === "scene"
+        ? `${block.parts} 件东西`
+        : block.phase === "loading" || block.phase === "running"
+          ? `这一张跑到第 ${block.step} / ${block.steps} 步`
+          : block.src
+            ? `最近一张是 ${block.src}`
+            : "还没出过图";
   return {
     __image: { data: shot.data, mimeType: "image/png" },
     note:
-      `${label}块 ${block.id}：${shot.width}×${shot.height}，覆盖世界坐标 x ${shot.region.x}~${shot.region.x + shot.region.w}、` +
-      `y ${shot.region.y}~${shot.region.y + shot.region.h}；块内 ${type === "picture" ? `${block.cmds} 条指令` : `${block.parts} 件东西`}。` +
+      `${label} ${block.id}：${shot.width}×${shot.height}，覆盖世界坐标 x ${shot.region.x}~${shot.region.x + shot.region.w}、` +
+      `y ${shot.region.y}~${shot.region.y + shot.region.h}；块内 ${inside}。` +
       `换算块内画面坐标：x = ${(shot.region.x - block.x).toFixed(0)} + 图上横向像素 × ${perPixel.toFixed(2)}，y 同理。`,
   };
 }
 
 /* 批量里只放画布上的块操作。切空间、换主题、写笔记这些会跳页或者把撤销栈搅乱，
-   混进来「一次撤销全退」就不成立了，所以按白名单放行 */
-const BATCH_ALLOWED = /^(block_|connector_|sticky_|picture_|scene_|note_read$|note_write$|file_import$|pdf_goto$|ebook_goto$|camera_)/;
+   混进来「一次撤销全退」就不成立了，所以按白名单放行。
+   生图那一头只放看和落块：gen_run 一次只吃一张、一批排三十秒一张没意义，gen_cancel 掐的是唯一那一张，
+   都不该藏在批量里。 */
+const BATCH_ALLOWED =
+  /^(block_|connector_|sticky_|picture_|scene_|gen_(status$|screenshot$|place$)|note_read$|note_write$|file_import$|pdf_goto$|ebook_goto$|camera_)/;
 
 /* 一项的结果只留 id 和类型：200 项把完整摘要都塞回去，这个回复会大到没法看 */
 function briefResult(data) {
@@ -905,6 +956,7 @@ async function dispatch(name, args) {
             "type", "x", "y", "w", "h", "text", "markdown", "name", "notePath", "path", "mode", "as",
             "fontSize", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
             "paperColor", "cmds", "symbols", "light", "parts", "camera", "groundColor",
+            ...GEN_KEYS,
             "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
           ]),
         ),
@@ -955,9 +1007,22 @@ async function dispatch(name, args) {
     case "picture_light":
       return onCanvas(args, () => canvasAgent.pictureLight(args.id, pick(args, ["angle", "elev", "lit", "dark", "k", "off"])));
     case "picture_screenshot":
-      return blockScreenshot(args, "picture", "画面");
+      return blockScreenshot(args, "picture", "画面块");
     case "scene_screenshot":
-      return blockScreenshot(args, "scene", "场景");
+      return blockScreenshot(args, "scene", "场景块");
+    case "gen_status":
+      return onCanvas(args, () => canvasAgent.genStatus());
+    case "gen_run":
+      /* wait / timeout 也走 pick：wait:false 是「只起一轮就回」，不能当成没给 */
+      return onCanvas(args, () =>
+        canvasAgent.genRun(args.id, pick(args, [...GEN_KEYS, "wait", "timeout"])),
+      );
+    case "gen_cancel":
+      return onCanvas(args, () => canvasAgent.genCancel());
+    case "gen_place":
+      return onCanvas(args, () => canvasAgent.genPlace(args.id));
+    case "gen_screenshot":
+      return blockScreenshot(args, "gen", "生图面板");
     case "note_read":
       return onCanvas(args, () => canvasAgent.noteRead(args.id));
     case "note_write":

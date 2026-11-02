@@ -33,6 +33,7 @@ const TYPE_LABEL = {
   arrow: "箭头",
   picture: "画面",
   scene: "场景",
+  gen: "生图面板",
 };
 
 const escapeHtml = (text) =>
@@ -66,6 +67,8 @@ function describeBlock(item) {
   if (item.type === "note") return { title: item.name || "笔记卡", body: item.source || "" };
   if (item.type === "connector") return { title: item.label || "连线", body: item.label || "" };
   if (item.type === "image") return { title: "图片", body: "" };
+  /* 面板能搜的就是那句提示词：出来的图还没变成文字 */
+  if (item.type === "gen") return { title: (item.prompt || "").split("\n")[0] || "生图面板", body: item.prompt || "" };
   return { title: item.name || TYPE_LABEL[item.type] || item.type, body: item.name || "" };
 }
 

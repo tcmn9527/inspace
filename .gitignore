@@ -20,6 +20,13 @@ target/
 src-tauri/resources/components/ffmpeg/*
 !src-tauri/resources/components/ffmpeg/README.md
 
+# bindgen 用的 libclang.dll，跑 scripts/prepare-libclang.mjs 现取，不入库
+tools/libclang/
+
+# 生图引擎的上游源码，跑 scripts/prepare-sdcpp.mjs 现取，不入库
+tools/sdcpp/
+tools/downloads/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

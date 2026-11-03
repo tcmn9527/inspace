@@ -30,6 +30,7 @@ import {
 import { openVideoHelp } from "./video-help.js";
 import { createHistory } from "./history.js";
 import { createExporter, QUALITY, DEFAULT_QUALITY } from "./export.js";
+import { rasterize, toPngDataUrl } from "./raster.js";
 import * as store from "./canvas-store.js";
 import {
   AUDIO_DEFAULT_HEIGHT,
@@ -49,8 +50,11 @@ import {
   GEN_DEFAULT_WIDTH,
   GEN_MIN_HEIGHT,
   GEN_MIN_WIDTH,
+  GEN_MODES,
   GEN_STEPS_MAX,
   GEN_STEPS_MIN,
+  GEN_STRENGTH_MAX,
+  GEN_STRENGTH_MIN,
   GEN_TEXT_MAX,
   FILE_MIN_HEIGHT,
   FILE_MIN_WIDTH,
@@ -175,6 +179,9 @@ const CONNECTABLE = new Set([
   "note",
   "file",
   "ebook",
+  /* 生图面板也上名单：选中要看得见那四个圈的记号，
+     而且它的输入图本来就靠连线进来（P2 才吃这条线） */
+  "gen",
 ]);
 /* 每类面板拖角缩放的地板，和 canvas-items 里 normalizeItem 的取值口径一致：
    播放器、附件条这类排版固定的块也能拉角，只是不许拉小到控件看不见 */
@@ -1519,6 +1526,8 @@ function refreshConnectors() {
   for (const item of current.items) {
     if (item.type === "connector") syncConnector(item);
   }
+  /* 连线一改，面板的进料就换了答案 */
+  refreshGenFeeds();
 }
 
 function addItemElement(item) {
@@ -4132,6 +4141,8 @@ function genContentOf(item) {
     steps: item.steps,
     cfg: item.cfg,
     seed: item.seed,
+    mode: item.mode,
+    strength: item.strength,
   };
 }
 
@@ -4231,6 +4242,11 @@ async function loadBlockContents() {
               item.steps = Math.min(GEN_STEPS_MAX, Math.max(GEN_STEPS_MIN, file.steps));
               item.cfg = Math.min(GEN_CFG_MAX, Math.max(GEN_CFG_MIN, file.cfg));
               item.seed = Number.isFinite(file.seed) && file.seed >= -1 ? Math.trunc(file.seed) : -1;
+              /* 老文件里没有这两个字段：按「看连线自己定」和上游默认改动幅度接上 */
+              item.mode = GEN_MODES.includes(file.mode) ? file.mode : "auto";
+              item.strength = Number.isFinite(file.strength)
+                ? Math.min(1, Math.max(0, file.strength))
+                : item.strength;
             } else {
               await store.writeGen(canvasId, item.id, genContentOf(item));
             }
@@ -4287,19 +4303,81 @@ function attachGenPanel(el, item) {
   if (run.phase === "idle" && !run.imageUrl && !run.previewUrl && item.src) {
     patchGenRun(item.id, { imageUrl: imageCache.get(item.src) || "" });
   }
-  syncGen(el, item);
+  syncGen(el, item, genFeedOf(item));
 }
 
 function refreshGenPanel(id) {
   const item = findItem(id);
   const el = itemEls.get(id);
-  if (item && el) syncGen(el, item);
+  if (item && el) syncGen(el, item, genFeedOf(item));
+}
+
+/* 面板上那一行进料提示：接了几张、这一张会按哪档走。
+   连线一改就有新答案，所以 refreshConnectors 末尾统一刷一遍。 */
+function genFeedOf(item) {
+  const sources = genInputItems(item);
+  const mode = genModeFor(item, sources.length);
+  const LABELS = { t2i: "文生图", i2i: "图生图", edit: "参考图编辑" };
+  return { mode, label: LABELS[mode] || mode, count: sources.length };
+}
+
+function refreshGenFeeds() {
+  if (!current) return;
+  for (const item of current.items) {
+    if (item.type === "gen") refreshGenPanel(item.id);
+  }
 }
 
 /* 这一轮没出成：把上一次那张接回来显示。文件还在盘上，取景窗不该空着。 */
 function keepLastGenImage(id) {
   const item = findItem(id);
   patchGenRun(id, { imageUrl: item && item.src ? imageCache.get(item.src) || "" : "" });
+}
+
+/* 面板的进料口就是连线：谁用线连到这块，谁就是输入图。
+   一条线 = 拿那张当底图重绘，多条线 = 几张一起当参考图。
+   块上明写了 t2i / i2i / edit 才盖掉这个推断——画风锚点那种「只有一张、
+   但它是参考图不是底图」就得明写。 */
+function genInputItems(item) {
+  const out = [];
+  for (const link of current?.items || []) {
+    if (link.type !== "connector" || link.to?.item !== item.id) continue;
+    const source = findItem(link.from?.item);
+    if (source && source.id !== item.id && !out.includes(source)) out.push(source);
+  }
+  return out;
+}
+
+function genModeFor(item, count) {
+  const stated = item.mode && item.mode !== "auto" ? item.mode : "";
+  if (stated) return stated;
+  if (!count) return "t2i";
+  return count === 1 ? "i2i" : "edit";
+}
+
+/* 一块东西画成引擎能吃的 PNG。图片块和面板自己那张都在 images/ 里，读字节就行；
+   画面块是矢量，走导出那套光栅化。场景块这一版还不吃——three.js 抓帧是另一件事。 */
+async function genInputPng(item) {
+  const space = current?.meta?.id;
+  if (!space) throw new Error("没有打开的空间");
+  if (item.type === "image" || (item.type === "gen" && item.src)) {
+    return toPngDataUrl(await store.imageData(space, item.src, Boolean(item.linked)));
+  }
+  if (item.type === "picture") {
+    const svg = itemEls.get(item.id)?.querySelector(".canvas-picture-svg");
+    if (!svg) throw new Error("那块画面还没画出来");
+    const clone = svg.cloneNode(true);
+    /* 序列化出去的 SVG 不认外面的 CSS，尺寸得写死在它身上：
+       不然浏览器按默认的 300×150 摆，画布直接糊成一团 */
+    const scale = Math.min(2, Math.max(1, 1024 / Math.max(1, item.w, item.h)));
+    const pxW = Math.max(32, Math.round(item.w * scale));
+    const pxH = Math.max(32, Math.round(item.h * scale));
+    clone.setAttribute("width", String(pxW));
+    clone.setAttribute("height", String(pxH));
+    const canvas = await rasterize(clone, pxW, pxH, "#ffffff");
+    return canvas.toDataURL("image/png");
+  }
+  throw new Error(`「${item.type}」这块当不了输入图`);
 }
 
 function runOrStopGen(id) {
@@ -4325,24 +4403,50 @@ function runOrStopGen(id) {
     error: "",
   });
   refreshGenPanel(id);
-  store.genStart({
-    block: item.id,
-    prompt: item.prompt.trim(),
-    negative: item.negative || "",
-    width: item.imageW,
-    height: item.imageH,
-    steps: item.steps,
-    cfg: item.cfg,
-    seed: item.seed,
-  }).catch((error) => {
+  void startGenRun(item);
+}
+
+async function startGenRun(item) {
+  const id = item.id;
+  const fail = (text) => {
+    patchGenRun(id, { phase: "failed", error: text });
+    keepLastGenImage(id);
+    refreshGenPanel(id);
+  };
+  let body;
+  try {
+    const sources = genInputItems(item);
+    const mode = genModeFor(item, sources.length);
+    /* 一张一张取，别攒：一张就是几 MB 的 base64，同时来几张没意义 */
+    const images = [];
+    if (mode !== "t2i") {
+      for (const source of sources) images.push(await genInputPng(source));
+    }
+    body = {
+      block: id,
+      prompt: item.prompt.trim(),
+      negative: item.negative || "",
+      width: item.imageW,
+      height: item.imageH,
+      steps: item.steps,
+      cfg: item.cfg,
+      seed: item.seed,
+      mode,
+      strength: item.strength,
+      images,
+    };
+  } catch (error) {
+    fail(String(error?.message || error || "输入图取不出来"));
+    return;
+  }
+  store.genStart(body).catch((error) => {
     const text = String(error?.message || error || "出图失败");
     if (genRunOf(id).phase === "canceled" || text === "已取消") {
       patchGenRun(id, { phase: "canceled" });
-    } else {
-      patchGenRun(id, { phase: "failed", error: text });
-      keepLastGenImage(id);
+      refreshGenPanel(id);
+      return;
     }
-    refreshGenPanel(id);
+    fail(text);
   });
 }
 
@@ -6894,6 +6998,7 @@ function agentSummary(item) {
   if (item.type === "gen") {
     /* 这一轮的相位在这儿一并报：等一张图的时候 agent 得问得出「还在跑」 */
     const run = genRunOf(item.id);
+    const feed = genFeedOf(item);
     return {
       ...base,
       prompt: item.prompt || "",
@@ -6903,6 +7008,10 @@ function agentSummary(item) {
       steps: item.steps,
       cfg: item.cfg,
       seed: item.seed,
+      /* 出图那一档：mode 是块上写的（auto=看连线），feed 是这次真会走的 */
+      mode: item.mode || "auto",
+      strength: item.strength,
+      feed,
       src: item.src || "",
       phase: run.phase,
       step: run.step,
@@ -8225,6 +8334,18 @@ function applyGenFields(item, spec = {}) {
     item.seed = Number.isFinite(want) && want >= -1 ? Math.trunc(want) : -1;
     touched = true;
   }
+  if (spec.mode !== undefined) {
+    const want = String(spec.mode).trim().toLowerCase();
+    if (!GEN_MODES.includes(want)) throw new Error(`mode 只认 ${GEN_MODES.join(" / ")}`);
+    item.mode = want;
+    touched = true;
+  }
+  if (spec.strength !== undefined) {
+    const want = Number(spec.strength);
+    if (!Number.isFinite(want)) throw new Error("strength 得是个 0~1 的数");
+    item.strength = clamp(want, 0, 1);
+    touched = true;
+  }
   return touched;
 }
 
@@ -8236,7 +8357,9 @@ async function agentGenStatus() {
     busyBlock: genBusyId() || null,
     modelsDir: engine.modelsDir || "",
     missing: Array.isArray(engine.missing) ? engine.missing : [],
-    idleMinutes: engine.idleMinutes || 0,
+    dit: engine.dit || "",
+    encoder: engine.encoder || "",
+    idleSeconds: engine.idleSeconds || 0,
     panels: current.items.filter((item) => item.type === "gen").map(agentSummary),
   };
 }

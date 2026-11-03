@@ -44,7 +44,7 @@ pub fn run() {
             // 8K 贴图包的下载同样在后台线程跑，取消只改这份共享标志
             app.manage(Arc::new(cosmos::CosmosJobs::default()));
             // 生图引擎：一个常驻 sd_ctx，一次只出一张，空闲几分钟自己放掉
-            app.manage(imagegen::init(data_root.clone()));
+            app.manage(imagegen::init(data_root.clone(), &db_state));
             // 换数据目录的搬运同理：进度在后台线程报，停止只改标志
             app.manage(Arc::new(store::RootMoveJobs::default()));
             app.manage(db_state);
@@ -176,6 +176,11 @@ pub fn run() {
             cosmos::cosmos_tex_reset,
             cosmos::cosmos_tex_read,
             imagegen::gen_status,
+            imagegen::gen_models,
+            imagegen::gen_models_set,
+            imagegen::gen_models_dir_pick,
+            imagegen::gen_models_dir_set,
+            imagegen::gen_models_reveal,
             imagegen::gen_start,
             imagegen::gen_cancel,
             canvas::canvas_reveal,

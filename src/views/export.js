@@ -13,6 +13,9 @@
  *     再补一份当前主题的 CSS 变量（:root 对外层文档有效，对 SVG 里的根不生效）。
  */
 
+/* SVG 光栅化和 base64 这两条抽到 raster.js 了：生图面板取输入图走同一份实现 */
+import { bytesToBase64, rasterize } from "./raster.js";
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 /* 留白：块的边框和便签的阴影不至于被切在边上 */
@@ -66,15 +69,6 @@ function concatBytes(parts) {
     at += part.length;
   }
   return out;
-}
-
-function bytesToBase64(bytes) {
-  let binary = "";
-  const step = 0x8000;
-  for (let i = 0; i < bytes.length; i += step) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + step));
-  }
-  return btoa(binary);
 }
 
 function base64ToBytes(data) {
@@ -376,31 +370,6 @@ export function createExporter({
     foreign.append(host);
     svg.append(foreign);
     return { svg, background };
-  }
-
-  async function rasterize(svg, pxW, pxH, background) {
-    const markup = new XMLSerializer().serializeToString(svg);
-    /* 必须是 data: URL，不能用 URL.createObjectURL。
-       blob: 载入的 SVG 只要里头有 <foreignObject>，Chromium 就把它当成跨源资源，
-       drawImage 之后画布直接被污染，toDataURL 抛 SecurityError
-       （实测：同样的图换成 data: 就干净）。base64 比 encodeURIComponent 省，
-       中文按 UTF-8 走字节，不会一格三膨胀。 */
-    const url = `data:image/svg+xml;base64,${bytesToBase64(new TextEncoder().encode(markup))}`;
-    const image = new Image();
-    await new Promise((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("画不出来：这块内容太大了，或者里面有取不到的图"));
-      image.src = url;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(pxW));
-    canvas.height = Math.max(1, Math.round(pxH));
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = background || "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    /* SVG 自身的像素尺寸就是目标尺寸，这里 1:1 贴上去，不会再糊一层 */
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas;
   }
 
   /* 把 slice 这块世界区域画成一张画布，内部按 TILE 分片。

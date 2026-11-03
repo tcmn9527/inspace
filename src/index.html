@@ -395,17 +395,13 @@
                 <path d="M5.2 13.4c1.6-3.4 3-1.2 4.3-3.1 1.2-1.8 2.5.9 4.2-1.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
               </svg>
             </button>
-            <button class="canvas-tool" type="button" data-tool="scene" title="画布：拖一块场景出来，里面的坐标是地上的，东西能立起来">
+            <!-- 场景块故意不给工具栏入口：里面的东西目前只能由 agent 摆（block_create type:"scene"），已落块的照常渲染 -->
+            <button class="canvas-tool" type="button" data-tool="gen" title="文生图：拖一块面板出来，写一句提示词就能出一张图">
               <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <path d="M10 3.6 15.6 6.8 15.6 13.2 10 16.4 4.4 13.2 4.4 6.8 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" />
-                <path d="M4.4 6.8 10 10 15.6 6.8 M10 10 10 16.4" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" />
-              </svg>
-            </button>
-            <button class="canvas-tool" type="button" data-tool="gen" title="画布：拖一块生图面板出来，写一句提示词就能出一张图">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <rect x="3" y="3.4" width="14" height="10.4" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none" />
-                <path d="M6.2 17.2h7.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
-                <path d="M10 6.1 10.9 8.3 13.1 9.2 10.9 10.1 10 12.3 9.1 10.1 6.9 9.2 9.1 8.3 Z" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linejoin="round" />
+                <path d="M10.4 2.3c.5.6.8 1.3.8 2.1" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" />
+                <path d="M4.2 7.1c3.7-.7 8-.7 11.6 0" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
+                <path d="M12.4 8.1c-.6 3-2.7 5.9-6.5 8.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
+                <path d="M7.6 9c1.4 2.9 3.6 5.3 6.9 7.2" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" />
               </svg>
             </button>
             <button class="canvas-tool" id="canvas-insert-image" type="button" title="插入本地图片">
@@ -773,6 +769,22 @@
             <button class="notes-btn" id="settings-cosmos-clear" type="button" hidden>清除 8K 贴图</button>
           </div>
           <p class="settings-error" id="settings-cosmos-error" hidden></p>
+        </div>
+        <div class="settings-card" id="settings-gen-card">
+          <p class="settings-title">生图模型</p>
+          <p class="settings-hint" id="settings-gen-hint" hidden>
+            模型文件都放在下面这个文件夹里，扔进去就能用。点「检测模型」看这台机器装得下哪一档、还缺哪几个文件。
+          </p>
+          <p class="settings-status" id="settings-gen-status"></p>
+          <span class="settings-path" id="settings-gen-dir"></span>
+          <div class="settings-gen-detail" id="settings-gen-detail" hidden></div>
+          <div class="settings-actions">
+            <button class="notes-btn" id="settings-gen-check" type="button">检测模型</button>
+            <button class="notes-btn" id="settings-gen-reveal" type="button">打开模型文件夹</button>
+            <button class="notes-btn" id="settings-gen-dir-pick" type="button">换个目录</button>
+            <button class="notes-btn" id="settings-gen-dir-reset" type="button" hidden>恢复默认位置</button>
+          </div>
+          <p class="settings-error" id="settings-gen-error" hidden></p>
         </div>
         <div class="settings-card" id="settings-mcp-card">
           <p class="settings-title">Agent 连接（MCP）</p>

@@ -56,20 +56,36 @@ function hintText(run, item) {
   return "写下提示词，点开始";
 }
 
-export function syncGen(el, item) {
+export function syncGen(el, item, feed) {
   const run = genRunOf(item.id);
   const image = el.querySelector(".canvas-gen-image");
   const hint = el.querySelector(".canvas-gen-hint");
+  const feedLine = el.querySelector(".canvas-gen-feed");
   const prompt = el.querySelector(".canvas-gen-prompt");
   const runButton = el.querySelector(".canvas-gen-run");
   const placeButton = el.querySelector(".canvas-gen-place");
   if (!image || !hint || !prompt || !runButton || !placeButton) return;
+
+  /* 进料那一行：接了图才说话；明写了要图却一根线都没接，也说一句（不然点了才报错） */
+  if (feedLine) {
+    const count = feed?.count || 0;
+    const text = count
+      ? `接了 ${count} 张输入图 · ${feed.label}`
+      : feed && feed.mode !== "t2i"
+        ? `${feed.label} · 还没把图连进来`
+        : "";
+    feedLine.hidden = !text;
+    feedLine.textContent = text;
+  }
 
   const busy = run.phase === "loading" || run.phase === "running";
   /* 逐步预览先垫上，成品到了才换下来——两张都不在的时候这块是空的 */
   const shown = run.imageUrl || run.previewUrl;
   image.hidden = !shown;
   if (shown && image.getAttribute("src") !== shown) image.setAttribute("src", shown);
+  /* 预览帧本来就一两百像素，按自身尺寸摆就是张邮票漂在空取景窗里；拉满这一格
+     才看得出是同一张图在逐渐变清晰。成品到了再按成品的尺寸铺。 */
+  image.classList.toggle("is-preview", Boolean(shown) && !run.imageUrl);
   el.classList.toggle("has-image", Boolean(shown));
 
   const text = hintText(run, item);

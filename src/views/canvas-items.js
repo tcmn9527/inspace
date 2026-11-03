@@ -123,6 +123,14 @@ export const GEN_STEPS_DEFAULT = 20;
 export const GEN_CFG_MIN = 1.0;
 export const GEN_CFG_MAX = 20.0;
 export const GEN_CFG_DEFAULT = 6.0;
+/* 出图那一档：auto 是「看连线自己定」——没接图就文生图，接一张当底图，接多张当参考。
+   明写 t2i / i2i / edit 才能盖掉这个推断（画风锚点那种「只有一张但它是参考图」就得明写）。 */
+export const GEN_MODES = ["auto", "t2i", "i2i", "edit"];
+export const GEN_MODE_DEFAULT = "auto";
+/* 图生图改多少：0 原样、1 全改。默认跟上游 sd_img_gen_params_init 的 0.75 一致 */
+export const GEN_STRENGTH_MIN = 0;
+export const GEN_STRENGTH_MAX = 1;
+export const GEN_STRENGTH_DEFAULT = 0.75;
 /* 每类面板拖角缩放的地板：拉到这里就不动了，免得块缩成看不见内容的一小坨 */
 export const AUDIO_MIN_WIDTH = 160;
 export const AUDIO_MIN_HEIGHT = 64;
@@ -499,6 +507,8 @@ function normalizeBlock(raw) {
       cfg: clamp(num(raw.cfg, GEN_CFG_DEFAULT), GEN_CFG_MIN, GEN_CFG_MAX),
       /* -1 在引擎里是「每张换一个」的哨兵；认不出别的数一律退回它 */
       seed: Number.isFinite(raw.seed) && raw.seed >= 0 ? Math.trunc(raw.seed) : -1,
+      mode: GEN_MODES.includes(raw.mode) ? raw.mode : GEN_MODE_DEFAULT,
+      strength: clamp(num(raw.strength, GEN_STRENGTH_DEFAULT), GEN_STRENGTH_MIN, GEN_STRENGTH_MAX),
       /* 最近那一张，记的是 <空间>/images/ 里的相对路径；还没出过图是空串 */
       src: typeof raw.src === "string" ? raw.src : "",
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
@@ -841,6 +851,8 @@ export function makeGen(x, y, w = GEN_DEFAULT_WIDTH, h = GEN_DEFAULT_HEIGHT) {
     steps: GEN_STEPS_DEFAULT,
     cfg: GEN_CFG_DEFAULT,
     seed: -1,
+    mode: GEN_MODE_DEFAULT,
+    strength: GEN_STRENGTH_DEFAULT,
     src: "",
     borderColor: DEFAULT_BORDER,
     borderWidth: CARD_DEFAULT_BORDER_WIDTH,
@@ -2637,6 +2649,10 @@ export function createItemElement(item, mediaSrc, options = {}) {
     stage.append(image, hint);
     const bar = document.createElement("div");
     bar.className = "canvas-gen-bar";
+    /* 这一行只报「这张会怎么出」：接了几张输入图、走的哪一档。没接图就不占地方 */
+    const feed = document.createElement("p");
+    feed.className = "canvas-gen-feed";
+    feed.hidden = true;
     const prompt = document.createElement("textarea");
     prompt.className = "canvas-gen-prompt";
     prompt.placeholder = "写下你想看的东西";
@@ -2652,7 +2668,7 @@ export function createItemElement(item, mediaSrc, options = {}) {
     place.className = "canvas-gen-place";
     place.textContent = "落块";
     actions.append(run, place);
-    bar.append(prompt, actions);
+    bar.append(feed, prompt, actions);
     card.append(stage, bar);
     el.append(card);
   } else if (item.type === "file") {

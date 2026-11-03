@@ -1592,6 +1592,18 @@ fn gen_of(raw: &Value) -> Value {
             .map(|value| value.clamp(1.0, 20.0))
             .unwrap_or(6.0),
         "seed": gen_int(raw, "seed", -1, -1, i64::MAX as i64),
+        /* 出图那一档和改动幅度：认不出的一律回 auto / 0.75，
+           别把写错的字符串原样存回去，下次读出来还是错的 */
+        "mode": raw
+            .get("mode")
+            .and_then(Value::as_str)
+            .filter(|value| matches!(*value, "auto" | "t2i" | "i2i" | "edit"))
+            .unwrap_or("auto"),
+        "strength": raw
+            .get("strength")
+            .and_then(Value::as_f64)
+            .map(|value| value.clamp(0.0, 1.0))
+            .unwrap_or(0.75),
         "updatedAt": now_ms(),
     })
 }

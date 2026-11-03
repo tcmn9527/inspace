@@ -78,6 +78,15 @@ export function initSettings() {
   ui.routeField = document.querySelector("#settings-route-field");
   ui.routeMinutes = document.querySelector("#settings-route-minutes");
   ui.routeStatus = document.querySelector("#settings-route-status");
+  ui.genHint = document.querySelector("#settings-gen-hint");
+  ui.genStatus = document.querySelector("#settings-gen-status");
+  ui.genDir = document.querySelector("#settings-gen-dir");
+  ui.genDetail = document.querySelector("#settings-gen-detail");
+  ui.genCheck = document.querySelector("#settings-gen-check");
+  ui.genReveal = document.querySelector("#settings-gen-reveal");
+  ui.genDirPick = document.querySelector("#settings-gen-dir-pick");
+  ui.genDirReset = document.querySelector("#settings-gen-dir-reset");
+  ui.genError = document.querySelector("#settings-gen-error");
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -89,6 +98,10 @@ export function initSettings() {
   ui.cosmosUpgrade.addEventListener("click", upgradeCosmosTextures);
   ui.cosmosCancel.addEventListener("click", cancelCosmosTextures);
   ui.cosmosClear.addEventListener("click", clearCosmosTextures);
+  ui.genCheck.addEventListener("click", runGenCheck);
+  ui.genReveal.addEventListener("click", revealGenDir);
+  ui.genDirPick.addEventListener("click", pickGenDir);
+  ui.genDirReset.addEventListener("click", () => setGenDir(null));
   setupMoveEvents();
   setupCosmosEvents();
   setupRoute();
@@ -117,6 +130,7 @@ export async function refreshSettings() {
   refreshFfmpeg();
   refreshMcp();
   refreshCosmos();
+  refreshGen();
   paintRouteCard();
   renderRoute();
 }
@@ -553,6 +567,274 @@ async function clearCosmosTextures() {
   } catch (error) {
     showCosmosError(String(error));
   }
+}
+
+/* ---------- 生图模型 ---------- */
+
+/* 权重四件：VAE 和视觉投影跟模型一对一、没得挑，DiT 和文本编码器各有量化档。
+   打开设置只读一行状态（gen_status 不探测，随时可读）；点「检测模型」才摊开整块结论：
+   这台机器的内存和盘装得下哪一档 → 建议哪一档 → 还缺哪几个文件、去哪儿下 →
+   目录里真有的文件摊成两列让他直接选。列文件比造「低/中/高」那种预设诚实：
+   下了什么就看到什么，体积摆在右手边自己权衡。 */
+let genState = null;
+let genModels = null;
+let genChecked = false;
+let genBusy = false;
+
+function showGenError(message) {
+  ui.genError.textContent = message;
+  ui.genError.hidden = !message;
+}
+
+function lockGen(on) {
+  genBusy = on;
+  for (const button of [ui.genCheck, ui.genReveal, ui.genDirPick, ui.genDirReset]) {
+    button.disabled = on;
+  }
+  ui.genCheck.textContent = on ? "检测中…" : genChecked ? "重新检测" : "检测模型";
+}
+
+async function refreshGen() {
+  showGenError("");
+  /* 每次打开设置都从「收起」开始：健康态就一行状态加一个目录，摊开是他自己点出来的 */
+  genChecked = false;
+  try {
+    genState = await invoke("gen_status");
+  } catch (error) {
+    genState = null;
+    ui.genStatus.textContent = "模型状态读取失败";
+    ui.genDir.textContent = "";
+    ui.genDetail.hidden = true;
+    ui.genHint.hidden = true;
+    ui.genDirReset.hidden = true;
+    lockGen(false);
+    showGenError(String(error));
+    return;
+  }
+  paintGen();
+}
+
+function paintGen() {
+  const s = genState;
+  if (!s) return;
+  ui.genStatus.textContent = s.missing.length
+    ? `缺 ${s.missing.length} 个模型文件，出图起不来：${s.missing.join("、")}`
+    : `当前 ${s.dit} + ${s.encoder}`;
+  ui.genDir.textContent = s.modelsDir;
+  /* 「往里扔文件就行」这句只在还缺东西时才需要说 */
+  ui.genHint.hidden = !s.missing.length;
+  ui.genDirReset.hidden = s.dirIsDefault;
+  ui.genCheck.textContent = genChecked ? "重新检测" : "检测模型";
+  ui.genDetail.hidden = !(genChecked && genModels);
+  if (genChecked && genModels) renderGenDetail();
+}
+
+async function runGenCheck() {
+  if (genBusy) return;
+  lockGen(true);
+  showGenError("");
+  try {
+    genModels = await invoke("gen_models");
+    genChecked = true;
+    /* 检测顺带把状态行也刷新了：换档、换目录之后的缺件情况在这儿一次看到 */
+    genState = await invoke("gen_status").catch(() => genState);
+  } catch (error) {
+    showGenError(String(error));
+  } finally {
+    lockGen(false);
+  }
+  paintGen();
+}
+
+function genText(text, className) {
+  const p = document.createElement("p");
+  p.className = className;
+  p.textContent = text;
+  return p;
+}
+
+function genSpan(text, className) {
+  const span = document.createElement("span");
+  span.className = className;
+  span.textContent = text;
+  return span;
+}
+
+function mbText(mb) {
+  return mb ? `${(mb / 1024).toFixed(1)} GB` : "认不到";
+}
+
+function renderGenDetail() {
+  const m = genModels;
+  const box = ui.genDetail;
+  box.replaceChildren();
+  box.append(
+    genText(
+      `显卡 ${m.machine.gpu || "没认到"} · 显存 ${mbText(m.machine.vramMb)} · 内存空闲 ${mbText(
+        m.machine.ramAvailMb,
+      )} · 这个盘还剩 ${mbText(m.machine.dirFreeMb)}`,
+      "settings-gen-line",
+    ),
+  );
+  box.append(genText(m.advice, "settings-gen-line is-advice"));
+  const lacking = m.needed.filter((row) => !row.present && !row.optional);
+  if (lacking.length) {
+    box.append(genText(`这几个文件还没有，下好扔进上面那个文件夹就行：`, "settings-gen-line is-title"));
+    box.append(genNeededBlock(m));
+    box.append(genText("画图模型的量化档，从省内存到费内存：", "settings-gen-line is-title"));
+    box.append(genTierBlock(m));
+  }
+  if (m.dit.length || m.encoder.length) {
+    box.append(genText("目录里已经有这些，点一个当场记下，下一次出图生效：", "settings-gen-line is-title"));
+    const cols = document.createElement("div");
+    cols.className = "settings-gen-cols";
+    cols.append(genColumn("画图模型", "dit"), genColumn("文本编码器", "encoder"));
+    const fixed = document.createElement("p");
+    fixed.className = "settings-gen-fixed";
+    fixed.textContent = `跟着模型定死：${
+      m.fixed.map((file) => `${file.name}（${formatBytes(file.bytes)}）`).join(" · ") ||
+      "这目录里还没有 VAE 和视觉投影"
+    }`;
+    cols.append(fixed);
+    box.append(cols);
+  } else {
+    box.append(genText("这个目录里还没有可选的模型档：先把上面那几个文件放进去。", "settings-gen-line"));
+  }
+}
+
+/* 下载清单的字节数取仓库里的真数，和本地文件大小无关——这一栏说的是「该下什么」。 */
+function genNeededBlock(m) {
+  const wrap = document.createElement("div");
+  wrap.className = "settings-gen-files";
+  for (const row of m.needed) {
+    const line = document.createElement("div");
+    line.className = `settings-gen-file${row.present ? "" : " is-missing"}`;
+    line.append(
+      genSpan(row.role, "settings-gen-role"),
+      genSpan(row.name, "settings-gen-name"),
+      genSpan(formatBytes(row.bytes), "settings-gen-size"),
+      genSpan(row.present ? "已有" : row.optional ? "缺（可先不下）" : "缺", "settings-gen-state"),
+    );
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "settings-gen-link";
+    link.textContent = "下载页";
+    link.addEventListener("click", async () => {
+      try {
+        await invoke("plugin:opener|open_url", { url: row.page });
+      } catch {
+        showGenError("打不开这个链接（系统浏览器调用失败）");
+      }
+    });
+    line.append(link);
+    wrap.append(line);
+  }
+  return wrap;
+}
+
+function genTierBlock(m) {
+  const wrap = document.createElement("div");
+  wrap.className = "settings-gen-files";
+  for (const tier of m.tiers) {
+    const line = document.createElement("div");
+    line.className = `settings-gen-file${tier.recommended ? " is-recommended" : ""}`;
+    line.append(
+      genSpan(tier.name, "settings-gen-name"),
+      genSpan(formatBytes(tier.bytes), "settings-gen-size"),
+    );
+    if (tier.recommended) line.append(genSpan("这台机器建议", "settings-gen-state"));
+    if (tier.present) line.append(genSpan("已在目录里", "settings-gen-state"));
+    wrap.append(line);
+  }
+  return wrap;
+}
+
+function slotOf(kind) {
+  return kind === "dit"
+    ? { list: genModels.dit, current: genModels.currentDit }
+    : { list: genModels.encoder, current: genModels.currentEncoder };
+}
+
+function genColumn(title, kind) {
+  const { list, current } = slotOf(kind);
+  const col = document.createElement("div");
+  col.className = "settings-gen-col";
+  const head = document.createElement("p");
+  head.className = "settings-gen-col-title";
+  head.textContent = list.length ? title : `${title}：一个都没有`;
+  col.append(head);
+  for (const file of list) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "settings-gen-opt";
+    if (file.name === current) row.classList.add("is-current");
+    const name = document.createElement("span");
+    name.className = "settings-gen-name";
+    name.textContent = file.name;
+    const size = document.createElement("span");
+    size.className = "settings-gen-size";
+    size.textContent = formatBytes(file.bytes);
+    row.append(name, size);
+    row.addEventListener("click", () => pickGenModel(kind, file.name));
+    col.append(row);
+  }
+  return col;
+}
+
+async function pickGenModel(kind, name) {
+  if (genBusy || !genModels || slotOf(kind).current === name) return;
+  lockGen(true);
+  showGenError("");
+  try {
+    genModels = await invoke("gen_models_set", kind === "dit" ? { dit: name } : { encoder: name });
+    genState = await invoke("gen_status").catch(() => genState);
+  } catch (error) {
+    showGenError(String(error));
+  } finally {
+    lockGen(false);
+  }
+  paintGen();
+}
+
+async function revealGenDir() {
+  if (genBusy) return;
+  showGenError("");
+  try {
+    await invoke("gen_models_reveal");
+  } catch (error) {
+    showGenError(String(error));
+  }
+}
+
+/* 换目录是「选完就认」，不弹确认也不留保存按钮：挑的时候已经看清是哪个文件夹了。
+   换完直接摊开检测结果——新目录里有没有东西，这一眼就是要给他的答复。 */
+async function setGenDir(dir) {
+  if (genBusy) return;
+  lockGen(true);
+  showGenError("");
+  try {
+    genModels = await invoke("gen_models_dir_set", { dir });
+    genState = await invoke("gen_status").catch(() => genState);
+    genChecked = true;
+  } catch (error) {
+    showGenError(String(error));
+  } finally {
+    lockGen(false);
+  }
+  paintGen();
+}
+
+async function pickGenDir() {
+  if (genBusy) return;
+  showGenError("");
+  let picked = null;
+  try {
+    picked = await invoke("gen_models_dir_pick");
+  } catch (error) {
+    showGenError(String(error));
+    return;
+  }
+  if (picked) await setGenDir(picked);
 }
 
 /* ---------- 遨游星球 ---------- */

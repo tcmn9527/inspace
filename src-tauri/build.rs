@@ -31,6 +31,9 @@ build.rs 把 `../sdcpp` 的上游源码用 CMake + Ninja 编在这儿，Rust 那
 build.rs 每次把「上游 pin + CUDA 开关 + CUDA_PATH + 计算能力 + target + 全部 cmake 定义」
 写成 `sdcpp-build.stamp`，对不上就自己把这目录清掉重编。
 
+编到一半 Ctrl+C、关机都不用管：指纹在开编之前就落好了，ninja 记着哪些对象真编完了，
+下次 `npm run dev` 接着往下编。
+
 真碰上编不过，或者只是想腾出这一个多 GB，整目录删掉就行，下次构建自动重来。
 纯产物，别手改，也别入库（.gitignore 里已经挡了）。
 "#;
@@ -65,13 +68,17 @@ fn build_engine() {
 
     let cache = repo_root.join("tools").join(ENGINE_CACHE);
     let stamp = cache.join(STAMP_FILE);
-    /* 指纹文件自己也算一个重跑条件：手动删了它就等于「这棵树我不要了」，
-       下一次构建会重跑 build.rs 而不是拿旧指纹去对已经不存在的产物 */
+    /* 指纹文件自己也算一个重跑条件：整棵缓存删掉时指纹跟着没了，cargo 就重跑 build.rs，
+       而不是拿上一轮的链接参数去指已经不存在的 .lib */
     println!("cargo:rerun-if-changed={}", stamp.display());
 
     let defines = cmake_defines(cuda, msvc);
     let signature = engine_signature(&sd_root, &defines, cuda, msvc, &target);
     prepare_cache_dir(&cache, &stamp, &signature);
+    /* 指纹在开编之前就落盘：cmake 一跑十几分钟，中途 Ctrl+C、断电、关机都不该把已经编出来的
+       那几百个对象判成「配置对不上、清掉重编」。续编的账由 ninja 自己记。 */
+    write_if_changed(&stamp, &signature);
+    write_if_changed(&cache.join("README.md"), CACHE_README);
 
     let mut cfg = cmake::Config::new(&sd_root);
     cfg.out_dir(cache.join("cmake")).profile("Release");
@@ -84,8 +91,6 @@ fn build_engine() {
     }
 
     let dst = cfg.build();
-    write_if_changed(&stamp, &signature);
-    write_if_changed(&cache.join("README.md"), CACHE_README);
 
     /* 静态库之间互相引用（stable-diffusion 用 ggml/onig/utf8proc…），
        少链一个就是 unresolved。CMake 装到哪、装了几个不由我们定，
@@ -174,16 +179,15 @@ fn engine_signature(sd_root: &PathBuf, defines: &[(String, String)], cuda: bool,
     sig
 }
 
-/// 对不上指纹就把整棵树端掉。留着旧对象只会链出半新半旧的引擎，或者直接 FATAL_ERROR。
+/// 指纹只对「配置变了」这一件事负责：对不上就把整棵树端掉——留着旧对象只会链出半新半旧的
+/// 引擎，或者直接 FATAL_ERROR。指纹不在（首次构建，或上一轮 cmake 被中断在半道）不动树：
+/// 谁真编完了由 ninja 的 .ninja_log 记账，清掉整棵等于白赔十几分钟。
 fn prepare_cache_dir(cache: &PathBuf, stamp: &PathBuf, signature: &str) {
-    let fresh = fs::read_to_string(stamp).map(|old| old == signature).unwrap_or(false);
-    if !cache.exists() || fresh {
-        fs::create_dir_all(cache).unwrap_or_else(|e| panic!("建不了引擎缓存目录 {}：{e}", cache.display()));
-        return;
+    if cache.exists() && fs::read_to_string(stamp).is_ok_and(|old| old != signature) {
+        println!("cargo:warning=生图引擎缓存的配置变了（换过 CUDA 大版本就是这个），整棵清掉重编");
+        fs::remove_dir_all(cache)
+            .unwrap_or_else(|e| panic!("清不掉旧的引擎缓存 {}：{e}\n手动删掉这个目录再跑一次。", cache.display()));
     }
-    println!("cargo:warning=生图引擎缓存的配置变了（换过 CUDA 大版本就是这个），整棵清掉重编");
-    fs::remove_dir_all(cache)
-        .unwrap_or_else(|e| panic!("清不掉旧的引擎缓存 {}：{e}\n手动删掉这个目录再跑一次。", cache.display()));
     fs::create_dir_all(cache).unwrap_or_else(|e| panic!("建不了引擎缓存目录 {}：{e}", cache.display()));
 }
 

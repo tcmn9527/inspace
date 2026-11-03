@@ -237,9 +237,20 @@ const GEN_PROPS = {
   steps: { type: "number", description: "步数 1~100，默认 20" },
   cfg: { type: "number", description: "提示词贴合度 1~20，默认 6" },
   seed: { type: "number", description: "种子；-1 每张换一个，给正数才能复现同一张" },
+  mode: {
+    type: "string",
+    enum: ["auto", "t2i", "i2i", "edit"],
+    description:
+      "出图那一档。auto（默认）看连线自己定：没接图=文生图，接一张=图生图，接多张=参考图编辑。" +
+      "只有「一张参考图而不是底图」这种要明写 edit（画风锚点就是这种）；一张也不接却想文生图，明写 t2i 盖掉连线。",
+  },
+  strength: { type: "number", description: "图生图改多少，0~1，默认 0.75：小=贴着原图改，大=只留个大概" },
 };
 
 const GEN_KEYS = Object.keys(GEN_PROPS);
+
+/* 换档只认这两个槽位；pace 是每张工具都带的装饰参数，不能当档位传下去 */
+const GEN_MODEL_KEYS = ["dit", "encoder"];
 
 const def = (name, description, properties = {}, required = []) => ({
   name,
@@ -528,8 +539,13 @@ const TOOL_DEFS = [
     ...(PICTURE_LIGHT.properties || {}),
     off: { type: "boolean", description: "true 就是关掉这块的光，回到没有光的原样" },
   }, ["id"]),
-  def("gen_status", "问出图引擎现在什么状况：权重进没进内存、哪一块生图面板正占着它、要用的那几个文件在不在盘上、空闲多久自动放掉。顺带把这块空间里每一面生图面板的摘要都列出来（提示词、参数、相位、最近那张的相对路径）。"),
-  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个空间的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。", {
+  def("gen_status", "问出图引擎现在什么状况：权重进没进内存、哪一块生图面板正占着它、要用的那几个文件在不在盘上、当前用的是哪一档（dit / encoder）、空闲多久自动放掉。顺带把这块空间里每一面生图面板的摘要都列出来（提示词、参数、那一档 mode 和改动幅度 strength、进料 feed={mode,label,count} 说清这次真会走哪档、接了几张输入图、相位、最近那张的相对路径）。"),
+  def("gen_models", "检测出图模型这一整套的现状，一次全给：模型目录（modelsDir，用户在设置页定的，可能在数据根之外）+ 目录里可换的两列文件（dit 画图模型、encoder 文本编码器，各带字节数，小的在前）+ fixed 两件跟着模型定死的 + 当前选的档 + missing 缺哪些 + machine 这台机器的数字（显卡名、显存、内存总量与空闲、该盘剩余）+ advice 为什么建议某一档 + needed 建议那一套要放的四个文件（名字、字节数、下载页、在不在盘上，视觉投影标 optional）+ tiers 全部量化档。头一次调用会探显卡，稍慢一两秒。这是引擎级的全局配置，和当前空间无关。"),
+  def("gen_models_set", "换出图档位：dit / encoder 各给一个模型文件夹里的文件名，没给的槽位不动。选了立刻落库并放掉已载入的权重——下一次出图按新档重新载入，头一次会慢一两分钟。正在出图时换不了（先 gen_cancel 或等这张跑完）。文件名必须是 gen_models 扫出来的那一个，且不能跨槽位（拿编码器当 DiT 会报回）。模型目录不由这条工具改：要挪地方是用户在设置页「换个目录」。", {
+    dit: { type: "string", description: "画图模型文件名，取自 gen_models 的 dit 列" },
+    encoder: { type: "string", description: "文本编码器文件名，取自 gen_models 的 encoder 列" },
+  }),
+  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个空间的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。", {
     id: ID,
     prompt: { type: "string", description: "这一张要什么，一句话到一段话" },
     negative: { type: "string", description: "不想要什么" },
@@ -538,6 +554,12 @@ const TOOL_DEFS = [
     steps: { type: "number", description: "步数 1~100，默认 20" },
     cfg: { type: "number", description: "提示词贴合度 1~20，默认 6" },
     seed: { type: "number", description: "种子；-1 每张换一个，给正数才能同一张复现" },
+    mode: {
+      type: "string",
+      enum: ["auto", "t2i", "i2i", "edit"],
+      description: "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑",
+    },
+    strength: { type: "number", description: "图生图改多少 0~1，默认 0.75" },
     wait: { type: "boolean", description: "false 只起一轮就返回（马上拿 phase 判断），默认 true 等到出完" },
     timeout: { type: "number", description: "等多少秒，默认 300，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问" },
   }, ["id"]),
@@ -796,6 +818,43 @@ function cosmosRouteTool(args) {
   return { ...route, note: "当前不是宇宙主题；名单已存下，切过去就按这条航线飞" };
 }
 
+/* 档位和航线同理：引擎级的全局配置，不为它把用户从当前空间拽走。
+   这一个还带机器规格和本机建议档，所以缺文件时能把「该下什么」直接说清楚。 */
+async function genModelsTool() {
+  const models = await invoke("gen_models");
+  const advised = models.tiers.find((tier) => tier.recommended)?.name || models.currentDit;
+  const lacking = models.needed.filter((row) => !row.present && !row.optional);
+  if (lacking.length) {
+    const want = lacking.map((row) => `${row.name}（${row.role}）`).join("、");
+    return {
+      ...models,
+      note:
+        `模型目录 ${models.modelsDir} 里还缺 ${lacking.length} 件：${want}。这台机器的建议档是 ${advised}，` +
+        "文件名、字节数、下载页都在 needed 里，量化档对照表在 tiers 里——把这些报给用户，" +
+        "下载和「换个目录」都是他在设置页做的事，你别代劳。",
+    };
+  }
+  if (models.missing.length) {
+    return {
+      ...models,
+      note: `当前档位缺文件：${models.missing.join("、")}；换一档用 gen_models_set，或让用户把文件放回 ${models.modelsDir}`,
+    };
+  }
+  const advice = advised === models.currentDit ? "本机建议档就是当前这档" : `这台机器装得下更大的：建议 ${advised}`;
+  return { ...models, note: `两列（dit / encoder）里挑一档，gen_models_set 换。${advice}` };
+}
+
+async function genModelsSetTool(args) {
+  if (!args.dit && !args.encoder) throw new Error("dit 和 encoder 至少给一个，不然没什么可换");
+  const models = await invoke("gen_models_set", args);
+  return {
+    ...models,
+    note:
+      `已记下：画图模型 ${models.currentDit}、编码器 ${models.currentEncoder}。` +
+      "载入的权重已放掉，下一次出图按新档重新读盘，头一次会慢一两分钟",
+  };
+}
+
 /* 截图不改任何数据，所以不走 pace 那一拍；但要先把画布页切出来，不然取不到 DOM */
 async function snapshot(args) {
   await ensureView("canvas");
@@ -1010,6 +1069,10 @@ async function dispatch(name, args) {
       return blockScreenshot(args, "picture", "画面块");
     case "scene_screenshot":
       return blockScreenshot(args, "scene", "场景块");
+    case "gen_models":
+      return genModelsTool();
+    case "gen_models_set":
+      return genModelsSetTool(pick(args, GEN_MODEL_KEYS));
     case "gen_status":
       return onCanvas(args, () => canvasAgent.genStatus());
     case "gen_run":

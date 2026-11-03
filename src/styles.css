@@ -331,6 +331,161 @@ body.is-resizing {
   color: var(--danger);
 }
 
+/* 生图档位：两列真文件，文件名在左、体积在右。当前那一档用左边一条光带标出来，
+   不动文件名自己的颜色——他得看清选中的到底是哪个文件。名字宁可折行也不截尾，
+   截掉尾巴就正好把 Q4_K / Q6_K 这种区别档名的部分丢了。 */
+.settings-gen-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 18px;
+  margin-top: 12px;
+  max-width: 640px;
+}
+
+.settings-gen-col {
+  min-width: 0;
+}
+
+.settings-gen-col-title {
+  margin: 0 0 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.settings-gen-opt {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px 5px 10px;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 18%, transparent);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-gen-col .settings-gen-opt:last-of-type {
+  border-bottom: none;
+}
+
+.settings-gen-opt:hover {
+  background: color-mix(in srgb, var(--line) 8%, transparent);
+}
+
+.settings-gen-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-gen-size {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-gen-opt.is-current::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.settings-gen-fixed {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 检测结论：只有点了「检测模型」才摊开的一整块，用一条分隔线和上面的状态行分开。
+   里面从上到下是「这台机器什么状况 → 建议哪档 → 缺的文件下哪儿 → 目录里能选谁」。 */
+.settings-gen-detail {
+  margin-top: 12px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 30%, transparent);
+}
+
+.settings-gen-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 建议那句是这块的主角，用主文字色；机器数字是它的依据，退回次要色 */
+.settings-gen-line.is-advice {
+  color: var(--fg);
+}
+
+.settings-gen-line.is-title {
+  margin-top: 12px;
+  font-size: 11px;
+}
+
+.settings-gen-files {
+  display: grid;
+  gap: 1px;
+  margin-top: 4px;
+  max-width: 640px;
+}
+
+.settings-gen-file {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 18%, transparent);
+  border-left: 2px solid transparent;
+  font-size: 12px;
+}
+
+/* 建议那一档用左边一条光带标出来，跟档位选择器同一个记号；
+   每行都留了同样宽的透明边，标不标都不会把文字挤得错位 */
+.settings-gen-file.is-recommended {
+  border-left-color: var(--accent);
+}
+
+.settings-gen-file:last-child {
+  border-bottom: none;
+}
+
+.settings-gen-role {
+  flex: none;
+  width: 5.5em;
+  color: var(--muted);
+}
+
+.settings-gen-link {
+  flex: none;
+  color: var(--accent);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.settings-gen-link:hover {
+  text-decoration: underline;
+}
+
+/* 「已有 / 缺」标在行尾：缺是这一趟要办的事，用危险色点出来 */
+.settings-gen-state {
+  color: var(--muted);
+}
+
+.settings-gen-file.is-missing .settings-gen-state {
+  color: var(--danger);
+}
+
 /* 遨游星球：名单一行一颗。行尾的上移/下移/移除平时不出现，也不做按钮外壳——
    它们是这一行的次级操作，套上边框会和「下载 8K 贴图」那种动作按钮抢层级 */
 .settings-route {
@@ -2439,6 +2594,12 @@ body.is-resizing {
   object-fit: contain;
 }
 
+/* 逐步预览：小图撑满取景窗，看着是同一张在慢慢显影，不是换了张缩略图 */
+.canvas-gen-image.is-preview {
+  width: 100%;
+  height: 100%;
+}
+
 .canvas-gen-image[hidden] {
   display: none;
 }
@@ -2473,6 +2634,14 @@ body.is-resizing {
   gap: 6px;
   padding: 8px 10px 10px;
   border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+}
+
+/* 进料提示：接了几张输入图、这一张按哪档走。只在真接了图（或明写了要图）时出现 */
+.canvas-gen-feed {
+  margin: 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--canvas-muted, #8b8b8b);
 }
 
 .canvas-gen-prompt {

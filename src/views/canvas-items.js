@@ -1,4 +1,4 @@
-/* 空间图元：数据形状、几何计算和 DOM 渲染。
+/* 画布图元：数据形状、几何计算和 DOM 渲染。
  * 所有坐标都是世界坐标（未乘缩放），图元本身互不嵌套。 */
 
 import { renderMarkdown } from "./markdown.js";
@@ -12,7 +12,7 @@ export const DEFAULT_BORDER = "#9a9a9a";
 /* 矩形/椭圆的边框宽度，跟样式表里 .canvas-item-rect/.canvas-item-ellipse 的 2px 对齐 */
 export const BORDER_DEFAULT_WIDTH = 2;
 export const BORDER_MAX_WIDTH = 40;
-/* 卡片型面板（便签/笔记/文件/图片）的边框和圆角，跟样式表里的 1px 实线、10px 圆角对齐 */
+/* 卡片型面板（笔记/文件/图片）的边框和圆角，跟样式表里的 1px 实线、10px 圆角对齐 */
 export const CARD_DEFAULT_BORDER_WIDTH = 1;
 export const CARD_DEFAULT_RADIUS = 10;
 export const TEXT_DEFAULT_WIDTH = 320;
@@ -28,10 +28,6 @@ export const VIDEO_DEFAULT_HEIGHT = 300;
 /* 底部控制条占掉的高度：自动按视频比例定块高时要把这条算进去 */
 export const VIDEO_ROW_HEIGHT = 34;
 export const VIDEO_MAX_SIDE = 640;
-export const STICKY_DEFAULT_WIDTH = 280;
-export const STICKY_DEFAULT_HEIGHT = 280;
-export const STICKY_DEFAULT_COLOR = "#bfa648";
-export const STICKY_DEFAULT_TEXT = "#000000";
 export const NOTE_DEFAULT_WIDTH = 520;
 export const NOTE_DEFAULT_HEIGHT = 420;
 /* 文件卡片按附件条来做：宽度默认够长名字省略号收尾 */
@@ -87,7 +83,7 @@ export const PICTURE_STROKE_WIDTH_MIN = 0.5;
 export const PICTURE_STROKE_WIDTH_MAX = 120;
 export const PICTURE_STROKE_DEFAULT_WIDTH = 6;
 /* 落点抽稀：比这个间距还近的点不收。手一抖在原地蹭一下会堆出一坨完全重合的点，
-   除了把撤销栈和文件撑大没有任何用处。 */
+   除了把笔画栈和文件撑大没有任何用处。 */
 export const PICTURE_STROKE_MIN_STEP = 1.2;
 /* 橡皮判定再往外让这么多：笔迹细的时候指着它旁边一点也该擦得掉 */
 export const PICTURE_ERASER_TOLERANCE = 4;
@@ -102,7 +98,7 @@ export const SCENE_DEFAULT_HEIGHT = 480;
 export const SCENE_MAX_PARTS = 2000;
 export const SCENE_MAX_SIZE = 20000;
 /* 一件东西的轮廓点数上限：挤成棱柱要三角剖分，一个圆取到百来个点就够了，
-   再多只是把三角剖分和撤销栈一起拖慢 */
+   再多只是把三角剖分一起拖慢 */
 export const SCENE_MAX_POLY_POINTS = 200;
 /* 生图面板：一块本地出图的取景窗。出图一张要 30 秒，所以这块的重点是「等得明白」——
    面板上只摆提示词框和一颗开始，其余参数走默认，agent 想改直接写块字段。 */
@@ -124,20 +120,58 @@ export const GEN_CFG_MIN = 1.0;
 export const GEN_CFG_MAX = 20.0;
 export const GEN_CFG_DEFAULT = 6.0;
 /* 出图那一档：auto 是「看连线自己定」——没接图就文生图，接一张当底图，接多张当参考。
-   明写 t2i / i2i / edit 才能盖掉这个推断（画风锚点那种「只有一张但它是参考图」就得明写）。 */
-export const GEN_MODES = ["auto", "t2i", "i2i", "edit"];
+   明写 t2i / i2i / edit 才能盖掉这个推断（画风锚点那种「只有一张但它是参考图」就得明写）。
+   upscale 不参与推断：它不扩散、不读提示词，只有明选才有。 */
+export const GEN_MODES = ["auto", "t2i", "i2i", "edit", "upscale"];
 export const GEN_MODE_DEFAULT = "auto";
+export const GEN_MODE_LABELS = {
+  auto: "自动",
+  t2i: "文生图",
+  i2i: "图生图",
+  edit: "参考图编辑",
+  upscale: "高清放大",
+};
 /* 图生图改多少：0 原样、1 全改。默认跟上游 sd_img_gen_params_init 的 0.75 一致 */
 export const GEN_STRENGTH_MIN = 0;
 export const GEN_STRENGTH_MAX = 1;
 export const GEN_STRENGTH_DEFAULT = 0.75;
+/* 面板上的尺寸：常用比例、手机、电脑、证件照各给几档。
+   像素一律取引擎要求的 32 倍数、不超过 2048，所以常见分辨率都取最接近的合法值
+   （1080→1088 这种）；证件照给的是比例和出图尺寸，打印前再缩到具体毫米对应像素。 */
+export const GEN_SIZE_CHOICES = [
+  { group: "常用", w: 1024, h: 1024, label: "1:1" },
+  { group: "常用", w: 768, h: 1024, label: "3:4" },
+  { group: "常用", w: 1024, h: 768, label: "4:3" },
+  { group: "常用", w: 576, h: 1024, label: "9:16" },
+  { group: "常用", w: 1024, h: 576, label: "16:9" },
+  { group: "手机", w: 1088, h: 1920, label: "手机 9:16" },
+  { group: "手机", w: 768, h: 1664, label: "全面屏 9:19.5" },
+  { group: "电脑", w: 1920, h: 1088, label: "电脑 16:9" },
+  { group: "电脑", w: 1536, h: 960, label: "电脑 16:10" },
+  { group: "电脑", w: 2048, h: 864, label: "带鱼屏 21:9" },
+  { group: "证件照", w: 1024, h: 1440, label: "一寸" },
+  { group: "证件照", w: 896, h: 1152, label: "小二寸" },
+];
+/* 风格：引擎没有风格参数，选中后把前缀句拼在提示词前面。空前缀就是不加。
+   存的是 label，出图时再查前缀——以后改文案，老块也不会突然换风格。 */
+export const GEN_STYLE_CHOICES = [
+  { label: "无风格", prefix: "" },
+  { label: "写实摄影", prefix: "写实摄影风格，真实照片质感，" },
+  { label: "电影感", prefix: "电影感，宽银幕构图，低饱和光影，" },
+  { label: "动漫", prefix: "日系动漫风格，干净线条，平涂上色，" },
+  { label: "水彩", prefix: "水彩画风格，柔和晕染，留白，" },
+  { label: "油画", prefix: "油画风格，厚涂笔触，" },
+  { label: "3D 渲染", prefix: "3D 渲染风格，柔和材质与体积光，" },
+  { label: "国风", prefix: "中国画风格，工笔淡彩，" },
+  { label: "赛博朋克", prefix: "赛博朋克风格，霓虹冷光，高对比，" },
+];
+/* 一次点开始跑几张：引擎一次一张，多张排队跑，前几张自动落成图片块 */
+export const GEN_SHOTS_CHOICES = [1, 2, 4];
 /* 每类面板拖角缩放的地板：拉到这里就不动了，免得块缩成看不见内容的一小坨 */
 export const AUDIO_MIN_WIDTH = 160;
 export const AUDIO_MIN_HEIGHT = 64;
 export const FILE_MIN_WIDTH = 160;
 export const FILE_MIN_HEIGHT = 56;
-export const STICKY_MIN_WIDTH = 120;
-export const STICKY_MIN_HEIGHT = 60;
 export const NOTE_MIN_WIDTH = 160;
 export const NOTE_MIN_HEIGHT = 120;
 
@@ -302,7 +336,7 @@ function normalizeBlock(raw) {
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
       borderWidth: Math.min(BORDER_MAX_WIDTH, Math.max(0, Math.round(num(raw.borderWidth, BORDER_DEFAULT_WIDTH)))),
       radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),
-      /* 引用态：src 是原图绝对路径，空间里没有副本 */
+      /* 引用态：src 是原图绝对路径，画布里没有副本 */
       linked: raw.linked === true,
       z: layerOf(raw),
     };
@@ -329,34 +363,14 @@ function normalizeBlock(raw) {
       h: Math.max(VIDEO_MIN_HEIGHT, num(raw.h, VIDEO_DEFAULT_HEIGHT)),
       src: typeof raw.src === "string" ? raw.src : "",
       name: typeof raw.name === "string" ? raw.name : "",
-      /* 引用态：src 是原片的绝对路径，空间里不存副本 */
+      /* 引用态：src 是原片的绝对路径，画布里不存副本 */
       linked: raw.linked === true,
       /* sized：已经按视频真实比例定过一次大小，之后尊重用户手拉的尺寸 */
       sized: raw.sized === true,
-      /* 转出来的 AAC 音轨副本（空间目录里的相对路径），没有就是空串 */
+      /* 转出来的 AAC 音轨副本（画布目录里的相对路径），没有就是空串 */
       audioRel: typeof raw.audioRel === "string" ? raw.audioRel : "",
       /* 音量是定下来就记住的：0 表示静，1 表示原声 */
       volume: Math.min(1, Math.max(0, num(raw.volume, 1))),
-      z: layerOf(raw),
-    };
-  }
-  if (type === "sticky") {
-    return {
-      ...base,
-      x: num(raw.x),
-      y: num(raw.y),
-      w: Math.max(STICKY_MIN_WIDTH, num(raw.w, STICKY_DEFAULT_WIDTH)),
-      h: Math.max(STICKY_MIN_HEIGHT, num(raw.h, STICKY_DEFAULT_HEIGHT)),
-      text: typeof raw.text === "string" ? raw.text : "",
-      color: typeof raw.color === "string" && raw.color ? raw.color : STICKY_DEFAULT_COLOR,
-      textColor:
-        typeof raw.textColor === "string" && raw.textColor ? raw.textColor : STICKY_DEFAULT_TEXT,
-      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
-      borderWidth: Math.min(
-        BORDER_MAX_WIDTH,
-        Math.max(0, Math.round(num(raw.borderWidth, CARD_DEFAULT_BORDER_WIDTH))),
-      ),
-      radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),
       z: layerOf(raw),
     };
   }
@@ -439,7 +453,7 @@ function normalizeBlock(raw) {
       ext: typeof raw.ext === "string" ? raw.ext : "",
       size: Math.max(0, num(raw.size)),
       text: raw.text === true,
-      /* 引用态 src 就是原文件绝对路径，空间 files/ 里没有副本 */
+      /* 引用态 src 就是原文件绝对路径，画布 files/ 里没有副本 */
       linked: raw.linked === true,
       /* PDF 块读到哪儿是这块自己的状态：第几页 + 这一页滚过去几成，重开接着读 */
       page: Math.max(1, Math.trunc(num(raw.page, 1))),
@@ -464,7 +478,7 @@ function normalizeBlock(raw) {
       src: typeof raw.src === "string" ? raw.src : "",
       name: typeof raw.name === "string" ? raw.name : "",
       linked: raw.linked === true,
-      /* 读到第几章是这块自己的状态，重开空间接着上次那页 */
+      /* 读到第几章是这块自己的状态，重开画布接着上次那页 */
       chapter: Math.max(0, Math.trunc(num(raw.chapter))),
       z: layerOf(raw),
     };
@@ -509,7 +523,10 @@ function normalizeBlock(raw) {
       seed: Number.isFinite(raw.seed) && raw.seed >= 0 ? Math.trunc(raw.seed) : -1,
       mode: GEN_MODES.includes(raw.mode) ? raw.mode : GEN_MODE_DEFAULT,
       strength: clamp(num(raw.strength, GEN_STRENGTH_DEFAULT), GEN_STRENGTH_MIN, GEN_STRENGTH_MAX),
-      /* 最近那一张，记的是 <空间>/images/ 里的相对路径；还没出过图是空串 */
+      /* 风格存 label；认不出的（比如以后删掉的风格）按无风格算 */
+      style: GEN_STYLE_CHOICES.some((one) => one.label === raw.style) ? raw.style : "",
+      shots: GEN_SHOTS_CHOICES.includes(Number(raw.shots)) ? Number(raw.shots) : 1,
+      /* 最近那一张，记的是 <画布>/images/ 里的相对路径；还没出过图是空串 */
       src: typeof raw.src === "string" ? raw.src : "",
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
       borderWidth: Math.min(
@@ -523,30 +540,17 @@ function normalizeBlock(raw) {
   return null;
 }
 
-/* 便签和笔记的正文不归 items.json 管：一张便签是 <空间>/stickies/<块id>.json，
-   一篇笔记是 <空间>/notes/<块id>.md，一幅画面是 <空间>/pictures/<块id>.json。
+/* 笔记和画面的正文不归 items.json 管：一篇笔记是 <画布>/notes/<块id>.md，
+   一幅画面是 <画布>/pictures/<块id>.json。
    运行时对象上那些字段只是从文件里读回来的缓存，
    存回去就成一份数据两处摆，改一处漏一处。 */
 export function toPersisted(item) {
-  if (item.type === "sticky") {
-    /* 正文在 stickies/ 里，items.json 只留位置、锁和边框规格 */
-    return {
-      id: item.id,
-      type: item.type,
-      x: item.x,
-      y: item.y,
-      z: item.z,
-      locked: item.locked === true,
-      borderWidth: item.borderWidth,
-      radius: item.radius,
-    };
-  }
   if (item.type === "note") {
     const { source, ...rest } = item;
     return rest;
   }
   if (item.type === "picture") {
-    /* 手绘一笔就上百个点，整幅塞进 items.json 会把这个空间的读写一起拖慢 */
+    /* 手绘一笔就上百个点，整幅塞进 items.json 会把这个画布的读写一起拖慢 */
     const { cmds, ...rest } = item;
     return rest;
   }
@@ -613,7 +617,7 @@ export function makeText(x, y, w = TEXT_DEFAULT_WIDTH, minH = 0) {
   };
 }
 
-/* 图片块两种存在方式：拷贝态 src 是空间 images/ 里的相对路径，引用态是原图绝对路径。 */
+/* 图片块两种存在方式：拷贝态 src 是画布 images/ 里的相对路径，引用态是原图绝对路径。 */
 export function makeImage(x, y, w, h, src, linked = false) {
   return {
     id: newId(),
@@ -644,7 +648,7 @@ export function makeAudio(x, y, name, src, linked = false) {
   };
 }
 
-/* 视频块有两种存在方式：拷贝进来的 src 是空间里的相对路径（linked=false），
+/* 视频块有两种存在方式：拷贝进来的 src 是画布里的相对路径（linked=false），
    引用原片的 src 是绝对路径（linked=true），播放地址统一由后端开权限后现取。
    audioRel 是转出来的 AAC 音轨副本：本机放不出原音轨时用它对声，空着就是原样播。 */
 export function makeVideo(x, y, name, src, linked) {
@@ -664,7 +668,7 @@ export function makeVideo(x, y, name, src, linked) {
   };
 }
 
-/* 画面块：正文就是那份指令列表，跟着 items.json 一起走（不像便签另存一份文件）。
+/* 画面块：正文就是那份指令列表，跟着 items.json 一起走（不像笔记另存一份文件）。
    坐标是块内的画面坐标，和块自身的左上角同原点，可以出现负数。 */
 export function makePicture(x, y, w = PICTURE_DEFAULT_WIDTH, h = PICTURE_DEFAULT_HEIGHT) {
   return {
@@ -1140,12 +1144,12 @@ function normalizeFilterList(raw) {
   return { filter: list };
 }
 
-/* 画面里垫一张位图：参考底、扫描件、照片。跟图片块一样两种存法——这个空间
+/* 画面里垫一张位图：参考底、扫描件、照片。跟图片块一样两种存法——这个画布
    images/ 下的相对路径（拷贝态），或原图在本机的绝对路径（引用态，不拷字节）。
    http 和 data: 一律不认：这应用得离线也画得出来，而且一串 base64 会把
-   pictures/<块id>.json 撑爆，撤销栈跟着一起背。 */
+   pictures/<块id>.json 撑爆。 */
 const IMAGE_SRC_RULE =
-  'src 要么是这个空间 images/ 下的相对路径（images/xxx.png），要么是原图在本机的绝对路径（C:\\某处\\参考图.png，引用不拷）；想直接垫一张本机图就写 path，应用会把它拷进这个空间再回填 src';
+  'src 要么是这个画布 images/ 下的相对路径（images/xxx.png），要么是原图在本机的绝对路径（C:\\某处\\参考图.png，引用不拷）；想直接垫一张本机图就写 path，应用会把它拷进这个画布再回填 src';
 
 export function pictureImageSrc(value) {
   const text = typeof value === "string" ? value.trim() : "";
@@ -1160,7 +1164,7 @@ export function pictureImageSrc(value) {
   if (parts.length === 2 && parts[0] === "images" && parts[1]) {
     return { src: parts.join("/"), linked: false };
   }
-  return { why: `image 的 src「${text.slice(0, 28)}」既不是本机绝对路径，也不是 images/xxx 这种空间内相对路径——${IMAGE_SRC_RULE}` };
+  return { why: `image 的 src「${text.slice(0, 28)}」既不是本机绝对路径，也不是 images/xxx 这种画布内相对路径——${IMAGE_SRC_RULE}` };
 }
 
 /* 滤镜和混合模式八种 op 都能带，和 name / variants 一样在出口统一收：
@@ -1813,7 +1817,7 @@ export function collectPictureImageSrcs(cmds, symbols) {
   return [...found].map(([src, linked]) => ({ src, linked }));
 }
 
-/* 把垫图换成另一空间的副本：map 是 {旧 src → 新的 images/xxx.png}，命中的改写 src 并落成拷贝态。
+/* 把垫图换成另一画布的副本：map 是 {旧 src → 新的 images/xxx.png}，命中的改写 src 并落成拷贝态。
    没命中的原样留着（拷不动的那几张就是留着的，画出来是虚线占位框）。
    group 和素材定义里也能写 image，两处一起走，口径和 collectPictureImageSrcs 对齐。 */
 export function remapPictureImageSrcs(cmds, symbols, map) {
@@ -1880,7 +1884,7 @@ export function normalizeHidden(raw) {
 }
 
 /* 顶层按块上的开关过一遍，渲染和橡皮共用这一份判法：
-   cmd 是原始那条（号还在、在数组里的位置也还在，撤销栈和按号 delete 都对得上盘上的数据），
+   cmd 是原始那条（号还在、在数组里的位置也还在，笔画栈和按号 delete 都对得上盘上的数据），
    drawn 是这一条该画出来的那份（整层关掉是 null；组里只关掉几笔的，出来的是少了那几笔的组）。
    两边必须同一套，否则会出现「看不见却擦得到」或者「擦得着却擦不到」。 */
 export function pictureTopLayers(cmds, hidden) {
@@ -1918,7 +1922,7 @@ export function pictureLayerCensus(cmds) {
 
 /* 一套光：全画面只认一个光源，逐条指令只声明「我这个面朝向哪」，明暗由这儿算。
    光源存块上（和 hidden 同一类，进 items.json），颜色存下去的仍是固有色——
-   烘进 stops 的话改一次光要重写上千条，幂等和撤销都顶不住。 */
+   烘进 stops 的话改一次光要重写上千条，幂等和性能都顶不住。 */
 const PICTURE_FACES = ["up", "down", "left", "right", "front", "back"];
 /* k 默认 0.3：双端插值在 k 大的时候，吃一半光的面（朝天的屋顶、地面）算出来就是
    (影色+光色)/2，固有色被吃干，整幅像蒙了张灰纸。0.3 是「看得出有朝向差、颜色还是自己的」那一档。 */
@@ -2130,25 +2134,7 @@ export function normalizePictureSymbols(raw) {
   return { symbols, dropped };
 }
 
-/* 便签：正文和颜色自成一件事，存在空间自己的 stickies/<id>.json 里 */
-export function makeSticky(x, y, text = "") {
-  return {
-    id: newId(),
-    type: "sticky",
-    x,
-    y,
-    w: STICKY_DEFAULT_WIDTH,
-    h: STICKY_DEFAULT_HEIGHT,
-    text,
-    color: STICKY_DEFAULT_COLOR,
-    textColor: STICKY_DEFAULT_TEXT,
-    borderColor: "",
-    borderWidth: CARD_DEFAULT_BORDER_WIDTH,
-    radius: CARD_DEFAULT_RADIUS,
-  };
-}
-
-/* 笔记块默认存 Markdown 快照和一份「原图路径 → 空间副本」映射，编辑不动原 .md。
+/* 笔记块默认存 Markdown 快照和一份「原图路径 → 画布副本」映射，编辑不动原 .md。
    引用态（link.linked）多带写回要用的编码和换行，path 是原 .md 的绝对路径。 */
 export function makeNote(x, y, path, name, source, link = {}) {
   return {
@@ -2173,7 +2159,7 @@ export function makeNote(x, y, path, name, source, link = {}) {
 }
 
 /* 文件块只存定位用的路径和卡片上要显示的名字/体积/扩展名，内容不进 items.json。
-   拷贝态 src 是空间 files/ 里的相对路径，引用态是原文件绝对路径。
+   拷贝态 src 是画布 files/ 里的相对路径，引用态是原文件绝对路径。
    文本块给一个能读几行的默认高度，PDF 块按 A4 竖排给一屏，剩下由用户自己拉。 */
 export function fileBlockSize(info) {
   const pdf = isPdfExt(info.ext);
@@ -2209,7 +2195,7 @@ export function makeFile(x, y, info) {
 }
 
 /* 电子书块只记书在哪儿、读到第几章；正文每次现读，不往 items.json 里存书页。
-   拷贝态 src 是空间 files/ 里的相对路径，引用态是原书绝对路径。 */
+   拷贝态 src 是画布 files/ 里的相对路径，引用态是原书绝对路径。 */
 export function makeEbook(x, y, name, src, linked = false) {
   return {
     id: newId(),
@@ -2514,17 +2500,16 @@ const MISSING_FILE_SVG = `
     <path d="M9.2 12.5l5.6 5.6M14.8 12.5l-5.6 5.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
   </svg>`;
 
-/** 便签/笔记自己那份内容文件在空间目录里的相对位置；复制粘贴和丢文件卡都按它说话。 */
+/** 笔记自己那份内容文件在画布目录里的相对位置；复制粘贴和丢文件卡都按它说话。 */
 export function contentRelOf(item) {
-  if (item.type === "sticky") return `stickies/${item.id}.json`;
   if (item.type === "note") return `notes/${item.id}.md`;
   return "";
 }
 
-/** 块指向的那份文件在磁盘上的绝对位置：引用态记的就是绝对路径，其余一律按空间目录拼。 */
+/** 块指向的那份文件在磁盘上的绝对位置：引用态记的就是绝对路径，其余一律按画布目录拼。 */
 export function absolutePathOf(item, canvasDir) {
   /* 笔记块上那个 path 只在引用态有意义：拷贝进来的那块还会留着「来自哪儿」，
-     可它现在真正拥有的是空间里的 notes/<块id>.md */
+     可它现在真正拥有的是画布里的 notes/<块id>.md */
   const pointer = item.linked ? (item.type === "note" ? item.path : item.src) : item.src;
   const rel = pointer || contentRelOf(item);
   if (!rel || item.linked) return rel;
@@ -2533,7 +2518,7 @@ export function absolutePathOf(item, canvasDir) {
 }
 
 /* 丢文件是所有块共用的一种状态，所以只长一张卡：图标和一句话一行，下面一行文件的绝对路径。
-   块留在原地、宽高不变，只把内容换成这张卡；原文件放回原位后重开空间自己恢复。
+   块留在原地、宽高不变，只把内容换成这张卡；原文件放回原位后重开画布自己恢复。
    附件和音乐块最矮只有 64px，所以图标只能跟标题挤一行，竖着排三行会被块自己裁掉。 */
 export function createMissingCard(item, canvasDir) {
   const card = document.createElement("div");
@@ -2545,7 +2530,7 @@ export function createMissingCard(item, canvasDir) {
   glyph.innerHTML = MISSING_FILE_SVG;
   const title = document.createElement("div");
   title.className = "canvas-missing-title";
-  title.textContent = item.linked ? "原文件不在了" : "空间里的副本丢了";
+  title.textContent = item.linked ? "原文件不在了" : "画布里的副本丢了";
   line.append(glyph, title);
   card.append(line);
   const path = absolutePathOf(item, canvasDir);
@@ -2598,19 +2583,11 @@ export function createItemElement(item, mediaSrc, options = {}) {
     }
   } else if (item.type === "line" || item.type === "arrow") {
     el.append(createLineSvg(item));
-  } else if (item.type === "sticky") {
-    const card = document.createElement("div");
-    card.className = "canvas-sticky-card";
-    const body = document.createElement("p");
-    body.className = "canvas-sticky-body";
-    body.textContent = item.text;
-    card.append(body);
-    el.append(card);
   } else if (item.type === "note") {
     const card = document.createElement("div");
     card.className = "canvas-note-card";
     const body = document.createElement("div");
-    body.className = "notes-body canvas-note-body";
+    body.className = "md-body canvas-note-body";
     body.innerHTML = renderMarkdown(item.source);
     card.append(body);
     el.append(card);
@@ -2649,6 +2626,21 @@ export function createItemElement(item, mediaSrc, options = {}) {
     stage.append(image, hint);
     const bar = document.createElement("div");
     bar.className = "canvas-gen-bar";
+    /* 一行参数：档位是纯文字（哪一档在建块时由入口定下），后面跟尺寸、风格、张数三颗小下拉 */
+    const controls = document.createElement("div");
+    controls.className = "canvas-gen-controls";
+    const modeLabel = document.createElement("span");
+    modeLabel.className = "canvas-gen-mode-label";
+    controls.append(modeLabel);
+    for (const cls of ["canvas-gen-size", "canvas-gen-style", "canvas-gen-shots"]) {
+      const select = document.createElement("button");
+      select.type = "button";
+      select.className = `canvas-gen-select ${cls}`;
+      const label = document.createElement("span");
+      label.className = "canvas-gen-select-label";
+      select.append(label, chevronSvg("M3.8 6.2 8 10.4l4.2-4.2", "canvas-gen-select-arrow"));
+      controls.append(select);
+    }
     /* 这一行只报「这张会怎么出」：接了几张输入图、走的哪一档。没接图就不占地方 */
     const feed = document.createElement("p");
     feed.className = "canvas-gen-feed";
@@ -2668,7 +2660,7 @@ export function createItemElement(item, mediaSrc, options = {}) {
     place.className = "canvas-gen-place";
     place.textContent = "落块";
     actions.append(run, place);
-    bar.append(feed, prompt, actions);
+    bar.append(controls, feed, prompt, actions);
     card.append(stage, bar);
     el.append(card);
   } else if (item.type === "file") {
@@ -2705,13 +2697,13 @@ const FILE_DOC_SVG = `
     <path d="M11.2 3.2v3.6h3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
   </svg>`;
 
-/* 文本预览一次最多渲染这么多字：后端读的是 512KB 开头，全塞进 DOM 会拖慢空间 */
+/* 文本预览一次最多渲染这么多字：后端读的是 512KB 开头，全塞进 DOM 会拖慢画布 */
 const PREVIEW_RENDER_CHARS = 20000;
 const TABLE_EXTS = new Set(["csv", "tsv"]);
 const TABLE_MAX_ROWS = 200;
 const TABLE_MAX_COLS = 24;
 
-/* 附件卡片：文件已经拷进空间的 files/ 了，这里负责把名字/体积说清楚，
+/* 附件卡片：文件已经拷进画布的 files/ 了，这里负责把名字/体积说清楚，
    文本类的再附一段只读预览。要打开文件走右键菜单的「在文件夹中显示」。 */
 function createFileCard(item, options) {
   const card = document.createElement("div");
@@ -2736,7 +2728,7 @@ function createFileCard(item, options) {
   head.append(icon, main);
   card.append(head);
 
-  /* 不管拷贝还是引用，进空间都问一句文件还在不在；
+  /* 不管拷贝还是引用，进画布都问一句文件还在不在；
      丢了就整块换成统一那张丢文件卡，绝对路径写在卡上 */
   options.checkFile?.(item).then((found) => {
     if (!found) options.onMissing?.(item);
@@ -2776,12 +2768,12 @@ function createFileCard(item, options) {
   return card;
 }
 
-/* 空间那边也靠这个决定给不给缩放手柄，所以是导出的 */
+/* 画布那边也靠这个决定给不给缩放手柄，所以是导出的 */
 export function isPdfExt(ext) {
   return String(ext || "").toLowerCase() === "pdf";
 }
 
-/* 和 isPdfExt 一个套路，空间那边也靠它决定给不给缩放手柄 */
+/* 和 isPdfExt 一个套路，画布那边也靠它决定给不给缩放手柄 */
 export function isDocxExt(ext) {
   return String(ext || "").toLowerCase() === "docx";
 }
@@ -2852,7 +2844,7 @@ function createPdfBody(item, options) {
   let url = "";
   let total = 0;
   let width = 0;
-  /* 卡片被换掉（丢文件、复制进空间、重画整张）后旧回调不能再碰 DOM，作废看 seq；
+  /* 卡片被换掉（丢文件、复制进画布、重画整张）后旧回调不能再碰 DOM，作废看 seq；
      宽度又变了一轮，画到一半那一张也不认了，作废看 gen */
   let seq = 0;
   let gen = 0;
@@ -3058,7 +3050,7 @@ function createPdfBody(item, options) {
       if (!total || stage.hidden) return;
       const a = anchor();
       chrome(a.page);
-      /* 读到哪儿当场就记在块上：他可能滚完这一下就切空间，字段得是新的 */
+      /* 读到哪儿当场就记在块上：他可能滚完这一下就切画布，字段得是新的 */
       item.page = a.page;
       item.pageFrac = a.frac;
       clearTimeout(notifyTimer);
@@ -4460,7 +4452,7 @@ function formatMediaTime(seconds) {
   return `${minutes}:${String(secs).padStart(2, "0")}`;
 }
 
-/* 播放器外壳。音频数据按需加载，避免打开空间时把所有歌都读进内存。 */
+/* 播放器外壳。音频数据按需加载，避免打开画布时把所有歌都读进内存。 */
 function createAudioPlayer(item, mediaSrc, options = {}) {
   const loadAudio = options.loadAudio;
   const player = document.createElement("div");
@@ -4598,7 +4590,7 @@ function createAudioPlayer(item, mediaSrc, options = {}) {
   });
   audio.addEventListener("timeupdate", render);
   audio.addEventListener("play", () => {
-    /* 空间上同时只播一个声音 */
+    /* 画布上同时只播一个声音 */
     const scope = player.closest(".canvas-world") || document;
     for (const other of scope.querySelectorAll("audio, video")) {
       if (other !== audio) other.pause();
@@ -4677,7 +4669,7 @@ export function videoControlOf(el) {
 
 /* 视频播放壳。地址不是 base64，而是后端开了读权限的 asset 协议链接，
  * 浏览器按 Range 一段段要，所以 20GB 的片子也只占解码缓冲，不会整份进内存。
- * 地址也是点到才去取：打开空间时不会把所有片子都拉一遍。 */
+ * 地址也是点到才去取：打开画布时不会把所有片子都拉一遍。 */
 function createVideoPlayer(item, mediaSrc, options = {}) {
   const player = document.createElement("div");
   player.className = "canvas-video-player";
@@ -4864,7 +4856,7 @@ function createVideoPlayer(item, mediaSrc, options = {}) {
   };
 
   /* 副本走的是同一条 asset 通道：后端顺手把读权限开了，大音频也不会整份进内存。
-     它一定躺在空间目录里，所以按相对路径取，跟原片是不是引用态无关。 */
+     它一定躺在画布目录里，所以按相对路径取，跟原片是不是引用态无关。 */
   const ensureDub = async () => {
     if (!item.audioRel || dubReady || typeof options.loadVideo !== "function") return;
     try {
@@ -5077,7 +5069,7 @@ function createVideoPlayer(item, mediaSrc, options = {}) {
     markProblem("video");
   });
 
-  /* 副本不进 DOM：空间里有「播一个就停掉其余」的规矩，挂在树上的它会把自己挤掉。 */
+  /* 副本不进 DOM：画布里有「播一个就停掉其余」的规矩，挂在树上的它会把自己挤掉。 */
   if (item.audioRel) ensureDub();
 
   /* 右键菜单通过这套指令控制播放器，读到的永远是播放器此刻的真实状态 */
@@ -5215,8 +5207,8 @@ let pictureSymSeq = 0;
 let picturePatSeq = 0;
 let pictureCutSeq = 0;
 
-/* 画面里垫的位图要显示，就得把存下来的 src 换成这个空间能用的地址，而那张表在 canvas.js 那边
-   （跟着空间切换整个重建）。这里不反向 import，由那边启动时把「src → 地址」的函数塞进来。
+/* 画面里垫的位图要显示，就得把存下来的 src 换成这个画布能用的地址，而那张表在 canvas.js 那边
+   （跟着画布切换整个重建）。这里不反向 import，由那边启动时把「src → 地址」的函数塞进来。
    没塞、或那个 src 现在取不到（还没加载完、原片被删了）都算「图没到」，渲染层自己退化成占位框。 */
 let pictureMedia = null;
 
@@ -6276,20 +6268,6 @@ export function syncItemElement(el, item) {
     el.style.height = `${item.h}px`;
     if (item.type === "note") syncNoteColors(el, item);
     else if (item.type === "file") syncFileColors(el, item);
-    return;
-  }
-
-  if (item.type === "sticky") {
-    el.style.width = `${item.w}px`;
-    el.style.height = `${item.h}px`;
-    const card = el.querySelector(".canvas-sticky-card");
-    if (card) {
-      card.style.background = item.color;
-      card.style.color = item.textColor;
-      card.style.borderColor = item.borderColor || "";
-      card.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
-      card.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
-    }
     return;
   }
 

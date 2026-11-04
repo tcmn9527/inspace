@@ -8,42 +8,40 @@ const SECTIONS = [
     title: "总览与基本约定",
     body: `## 总览与基本约定
 
-无限空间是一个无限画布桌面应用：空间（space）里摆各种块（block），块之间用连线（connector）连起来；另有独立的笔记库（notes），就是磁盘上的 .md 文件树。
+无限画布是一个能无限扩展的桌面应用：画布（space）里摆各种块（block），块之间用连线（connector）连起来。
 
 ### 调用节奏
 - 每个工具都接受 pace: "normal"（默认）或 "instant"。normal 会把界面切到对应页面、镜头缓动跟随、目标加一圈光带，给用户看；instant 只改结果、不演示，批量操作时更省时间。
 - 用户一碰鼠标或键盘，正在进行的运镜会立刻停下，把画面还给用户，不要和用户抢镜头。
-- 空间类工具会先切到空间页、等空间加载完再执行；笔记类工具同理。guide 和 app_state 不切页。
+- 画布类工具会先切到画布页、等画布加载完再执行。guide 和 app_state 不切页。
 - 工具返回 JSON 文本；出错时 isError 为 true，text 是中文原因，照着改参数重试即可。
 
 ### 先看现场再动手
-- 动任何块之前先 space_scene 拿 id 和现状；动笔记之前先 notes_tree。
-- 块 id 只在当前空间里有效；space_open 换了空间后要重新拿。
-- 引用外部 .md 的笔记块，正文不在空间里，读写会自动走原文件。
+- 动任何块之前先 space_scene 拿 id 和现状。
+- 块 id 只在当前画布里有效；space_open 换了画布后要重新拿。
+- 引用外部 .md 的笔记块，正文不在画布里，读写会自动走原文件。
 
 ### 坐标与尺寸
-- 世界坐标，单位像素，原点在空间左上角；x 向右、y 向下。
+- 世界坐标，单位像素，原点在画布左上角；x 向右、y 向下。
 - 普通块用左上角 x,y 加宽高 w,h；线/箭头用起点 x,y 和终点 x2,y2。
 - 相机是另一个概念：camera.x/y 是画面平移量，camera.scale 是缩放（0.25 到 4）。换算关系是 屏幕位置 = 世界坐标 × scale + camera 偏移。一般不用手算，用 camera_focus / camera_fit。
 - 不给 x,y 时块落在当前视野中央，连续创建会自动错开；批量精确摆放请显式给坐标。
 
 ### 颜色与路径
 - 颜色用 CSS 色值："#ff8800"、"rgb(255,136,0)"、"red" 都行；空字符串 "" 表示无填充或无边框。
-- 便签的底色是 color，字色是 textColor，和普通块的 fillColor 不一样。
-- 本机文件（要导入空间的）用绝对路径，例如 C:\\Users\\me\\a.png；笔记库里的路径用相对笔记根、/ 分隔，例如 工作/周报.md（文件带 .md 后缀）。两套路径不能混用。
+- 本机文件（要导入画布的）用绝对路径，例如 C:\\Users\\me\\a.png。
 
-### 删除的三种去向
-- space_delete：整个空间文件夹进系统回收站，可以捞回来。
-- block_delete：块和挂在它身上的连线一起消失。界面里有撤销（Ctrl+Z，最多 80 步），盘上还有每 90 秒一份的自动快照，所以不是绝路——但别指望用户一定知道要撤，删之前先问一句。
-- notes_delete：永久删除笔记或文件夹，不进回收站，最谨慎。`,
+### 删除的两种去向
+- space_delete：整个画布文件夹进系统回收站，可以捞回来。
+- block_delete：块和挂在它身上的连线一起消失，画布上没有撤销可退；块里拷进画布的媒体文件会进系统回收站，用户能手动捞回来。删之前先问一句。`,
   },
   {
     id: "space",
-    title: "应用与空间",
-    body: `## 应用与空间（11 个工具）
+    title: "应用与画布",
+    body: `## 应用与画布（11 个工具）
 
 ### app_state
-一眼看全局，不切页。返回 route（canvas/notes/settings）、dataRoot、notesRoot、theme、mcp 状态、当前空间（id/名字/块数/相机/选中）、当前笔记（根/路径/是否编辑/字数）。新接手先调它。
+一眼看全局，不切页。返回 route（canvas/settings）、dataRoot、theme、mcp 状态、当前画布（id/名字/块数/相机/选中）。新接手先调它。
 
 ### theme_list
 列出全部主题 [{id,name,mode}]，mode 是 dark 或 light；current 标出当前用的那套。
@@ -55,40 +53,40 @@ const SECTIONS = [
 { "theme": "cosmos" }
 ~~~
 
-id 从 theme_list 拿。调 "cosmos" 会给空间页打开一条自动飞行的深空航线：镜头一直往前飞，好几分钟才遇到一颗——远处先是一枚会眨的亮星，越飞越大才显出球体，追上一颗就贴着它慢飞两三圈看表面，看完顺切线方向接着走；镜头里同时只画一颗星体。星野钉在天球方向上，镜头一转就换一片星空。飞行层的细节看「宇宙飞行」那一章。主题是应用级设置，不影响任何空间数据，也不会自动切页。
+id 从 theme_list 拿。调 "cosmos" 会给画布页打开一条自动飞行的深空航线：镜头一直往前飞，好几分钟才遇到一颗——远处先是一枚会眨的亮星，越飞越大才显出球体，追上一颗就贴着它慢飞两三圈看表面，看完顺切线方向接着走；镜头里同时只画一颗星体。星野钉在天球方向上，镜头一转就换一片星空。飞行层的细节看「宇宙飞行」那一章。主题是应用级设置，不影响任何画布数据，也不会自动切页。
 
 ### space_list
-列出全部空间：[{id,name,path}]，current 标出当前空间。
+列出全部画布：[{id,name,path}]，current 标出当前画布。
 
 ### space_open
-切到某个空间，space 传 id 或名字都行；会等空间读完才返回 {space, blocks}。
+切到某个画布，space 传 id 或名字都行；会等画布读完才返回 {space, blocks}。
 
 ~~~json
 { "space": "方案图" }
 ~~~
 
 ### space_create
-新建空间并切过去，返回 {id, name, opened}。
+新建画布并切过去，返回 {id, name, opened}。
 
 ~~~json
 { "name": "登录流程" }
 ~~~
 
 ### space_rename
-改名，磁盘文件夹跟着改；改的是当前空间时界面会重新加载。
+改名，磁盘文件夹跟着改；改的是当前画布时界面会重新加载。
 
 ~~~json
 { "space": "登录流程", "name": "登录流程 v2" }
 ~~~
 
 ### space_delete
-删除整个空间，文件夹进系统回收站。删的是当前空间时，会自动切到列表里的下一个。
+删除整个画布，文件夹进系统回收站。删的是当前画布时，会自动切到列表里的下一个。
 
 ### space_scene
-当前空间的全景：space、camera、selected、blocks[]（每块的 id、type、x、y、w、h、z 和类型专属字段）。可选 type 过滤：
+当前画布的全景：space、camera、selected、blocks[]（每块的 id、type、x、y、w、h、z 和类型专属字段）。可选 type 过滤：
 
 ~~~json
-{ "type": "sticky" }
+{ "type": "text" }
 ~~~
 
 返回里的 id 就是后面 block_update / connector_create / 内容工具要的 id。
@@ -109,12 +107,12 @@ region 三选一：all 整张画布（默认，看整体构图）、viewport 用
 建议节奏：铺一批 → snapshot 看一眼 → 改有问题的几块。不要每建一块就看一次，太费。
 
 ### space_batch
-一次提交一串操作，**整批算一步撤销**，而且期间不运镜、不打光带，只在最后把整批框进视野。
+一次提交一串操作，期间不运镜、不打光带，只在最后把整批框进视野。
 
 ~~~json
 { "operations": [
   { "tool": "block_create", "args": { "type": "text", "x": 0, "y": 0, "text": "第一章" } },
-  { "tool": "block_create", "args": { "type": "sticky", "x": 0, "y": 80, "text": "要点的内容" } },
+  { "tool": "block_create", "args": { "type": "rect", "x": 0, "y": 80, "w": 240, "h": 120 } },
   { "tool": "connector_create", "args": { "from": "<上一个返回的 id>", "to": "<再上一个>" } }
 ] }
 ~~~
@@ -122,10 +120,10 @@ region 三选一：all 整张画布（默认，看整体构图）、viewport 用
 规则：
 - 最多 200 项；按顺序执行；某一项失败不中断后面的，返回里逐项标 ok，失败的带 error。
 - stopOnError: true 可以遇到失败就停。
-- 只收画布上的块操作（block_* / connector_* / sticky_* / note_read / note_write / file_import / pdf_goto / ebook_goto / camera_*）。切空间、换主题、笔记树的增删不能混进来——那会把「一次撤销全退」这个承诺破功。
+- 只收画布上的块操作（block_* / connector_* / note_read / note_write / file_import / pdf_goto / ebook_goto / camera_*）。切画布、换主题不能混进来——中途跳页会把这一批的观感打散。
 - 批量里拿不到前一项的返回值去当参数：id 是执行时才生成的。要连线就先批量建块、拿到返回的 id，再单独调 connector_create 或第二个批次。
 
-**什么时候该用**：铺一整块区域、批量改颜色、连着建十几块再连起来。一个一个调不但慢，撤销栈还会被切成一堆碎片，用户想退回原样得按几十次 Ctrl+Z。`,
+**什么时候该用**：铺一整块区域、批量改颜色、连着建十几块再连起来。一个一个调不但慢，批量也不会每块都运镜打光。`,
   },
   {
     id: "flight",
@@ -187,7 +185,7 @@ region 三选一：all 整张画布（默认，看整体构图）、viewport 用
     title: "块",
     body: `## 块（9 个工具）
 
-块类型：text（画布文字）、rect（矩形）、ellipse（椭圆）、line（线）、arrow（箭头）、sticky（便签）、note（Markdown 笔记卡）、image、audio、video、file（附件/PDF/文本文件卡）、ebook、connector（连线）、picture（矢量画面，见「画面块」一章）、scene（真 3D 场景，字段见 block_create / block_update 的 parts / camera / light）、gen（生图面板，见「生图面板」一章）。
+块类型：text（画布文字）、rect（矩形）、ellipse（椭圆）、line（线）、arrow（箭头）、note（Markdown 笔记卡）、image、audio、video、file（附件/PDF/文本文件卡）、ebook、connector（连线）、picture（矢量画面，见「画面块」一章）、scene（真 3D 场景，字段见 block_create / block_update 的 parts / camera / light）、gen（生图面板，见「生图面板」一章）。
 
 ### block_get
 单块摘要，不切页之外没有副作用。
@@ -211,7 +209,7 @@ region 三选一：all 整张画布（默认，看整体构图）、viewport 用
 { "type": "ellipse", "x": 300, "y": 100, "w": 160, "h": 100, "fillColor": "#ffe8cc" }
 ~~~
 
-边框这组（borderColor / borderWidth / radius）所有带边框的块都认：矩形/椭圆/文字/图片默认 2px 宽，便签/笔记/文件默认 1px；圆角默认 10px（矩形默认 0），椭圆没有圆角；宽度 0 就是无边框。
+边框这组（borderColor / borderWidth / radius）所有带边框的块都认：矩形/椭圆/文字/图片默认 2px 宽，笔记/文件默认 1px；圆角默认 10px（矩形默认 0），椭圆没有圆角；宽度 0 就是无边框。
 locked 传 true 建好就锁住（所有块类型都认，连线除外）：锁住的块不能移动、缩放、改内容、删除。
 
 线 / 箭头：
@@ -220,22 +218,13 @@ locked 传 true 建好就锁住（所有块类型都认，连线除外）：锁�
 { "type": "arrow", "x": 0, "y": 0, "x2": 240, "y2": 0, "borderColor": "#333333" }
 ~~~
 
-便签：
-
-~~~json
-{ "type": "sticky", "text": "待确认", "x": 0, "y": 300, "color": "#bfa648", "textColor": "#000000", "borderColor": "" }
-~~~
-
-color 是便签底色，textColor 是字色；宽高默认 280×280，最小有下限。边框同样认 borderColor / borderWidth / radius。
-
-笔记卡（两种来源）：
+笔记卡：
 
 ~~~json
 { "type": "note", "markdown": "# 会议记录\\n- 第一项", "name": "会议记录" }
-{ "type": "note", "notePath": "工作/周报.md", "name": "周报" }
 ~~~
 
-markdown 直接给正文；notePath 从笔记库读一篇，正文和图片会拷进空间，之后各改各的。宽高默认 520×420。边框同样认 borderColor / borderWidth / radius。
+markdown 直接给正文。宽高默认 520×420。边框同样认 borderColor / borderWidth / radius。
 
 图片 / 音频 / 视频 / 附件 / 电子书（按扩展名自动判）：
 
@@ -244,7 +233,7 @@ markdown 直接给正文；notePath 从笔记库读一篇，正文和图片会�
 { "type": "file", "path": "C:\\\\Users\\\\me\\\\资料.zip" }
 ~~~
 
-- mode 默认 copy（拷进空间，原文件删了也不影响）；link 只引用原文件（省空间，但原文件动了块就失效）。
+- mode 默认 copy（拷进画布，原文件删了也不影响）；link 只引用原文件（省画布，但原文件动了块就失效）。
 - 图片和附件认 borderColor / borderWidth / radius；音视频和电子书没有边框外观。
 - 这类块也可以直接调 file_import，不用先想类型。
 
@@ -260,11 +249,11 @@ markdown 直接给正文；notePath 从笔记库读一篇，正文和图片会�
 - locked 是块的锁：锁住的块不能移动、缩放、改内容、删除，改其他字段会报错；解锁传 locked:false（可以在同一次调用里带上其他改动）。
 - 文字块的 w/h 改不了（高度随内容），宽度要在创建时定。
 - borderWidth/radius 所有带边框的块都能改（椭圆只有宽度），连线没有这组字段。
-- note 块的 markdown 只适用于空间内的笔记卡；引用外部 .md 的用 note_write。
+- note 块的 markdown 只适用于画布内的笔记卡；引用外部 .md 的用 note_write。
 - 连线的 shape/arrow/label/from/to/fromSide 也可以走 connector_update。
 
 ### block_delete
-删一块，挂在它身上的连线一起删，不可撤销。锁住的块删不掉，先 block_update 解锁。
+删一块，挂在它身上的连线一起删，画布上没有撤销可退（拷进画布的媒体文件会进系统回收站）。锁住的块删不掉，先 block_update 解锁。
 
 ### block_duplicate
 复制一块，返回新块摘要（新 id）；媒体文件会真拷副本。dx/dy 默认 24。
@@ -359,7 +348,7 @@ x/y 是画面平移量，不是「对准哪个世界坐标」；只想让用户�
 ~~~
 
 ### camera_fit
-缩放到刚好装下空间里所有块（四周留 80px），适合收尾或开场。
+缩放到刚好装下画布里所有块（四周留 80px），适合收尾或开场。
 
 ### camera_reset
 回到 100% 缩放，视野中心不动。`,
@@ -367,20 +356,10 @@ x/y 是画面平移量，不是「对准哪个世界坐标」；只想让用户�
   {
     id: "content",
     title: "块内内容",
-    body: `## 块内内容：便签、笔记卡、文本文件（7 个工具）
-
-### sticky_read
-读便签：text、color（底色）、textColor（字色）、borderColor。
-
-### sticky_write
-改便签内容或颜色，只传要改的：
-
-~~~json
-{ "id": "<便签id>", "text": "新内容", "color": "#ffd166" }
-~~~
+    body: `## 块内内容：笔记卡、文本文件（5 个工具）
 
 ### note_read
-读笔记卡：markdown、name、linked。linked 为 true 表示正文来自空间外的 .md 原文件。
+读笔记卡：markdown、name、linked。linked 为 true 表示正文来自画布外的 .md 原文件。
 
 ### note_write
 整篇覆盖笔记卡正文：
@@ -389,7 +368,7 @@ x/y 是画面平移量，不是「对准哪个世界坐标」；只想让用户�
 { "id": "<笔记卡id>", "markdown": "# 新正文" }
 ~~~
 
-引用外部 .md 时直接写回原文件；空间内的笔记卡只改空间里的副本。返回会带回写入后的 markdown。
+引用外部 .md 时直接写回原文件；画布内的笔记卡只改画布里的副本。返回会带回写入后的 markdown。
 
 ### file_read
 只对「文本文件块」有效（卡片里能直接翻正文的 txt/md/日志等）：
@@ -407,15 +386,18 @@ maxChars 默认 20000，0 表示整份；返回 text、chars、truncated、encod
 { "id": "<文件块id>", "text": "新内容" }
 ~~~
 
-- 拷贝态写空间里的副本，引用态写原文件。
+- 拷贝态写画布里的副本，引用态写原文件。
 - 原文件在读取后被别的程序改过时会报冲突；先 file_read 看新内容，确认覆盖再带 force: true 调一次。
 - 块内编辑框还开着且没处理时也会拒绝，先把那边的保存处理掉。
 
 ### file_reveal
 在系统文件管理器里定位这块指向的文件。
 
+### image_open
+用系统默认的看图工具打开那块图，跟用户在画布上双击那块图是一回事。图片块和生图面板都认。
+
 ### file_import
-把本机文件放上空间，按扩展名自动选块类型：
+把本机文件放上画布，按扩展名自动选块类型：
 
 ~~~json
 { "path": "C:\\\\Users\\\\me\\\\demo.mp4", "mode": "copy", "x": 0, "y": 0 }
@@ -589,7 +571,7 @@ mask 不参与橡皮判定——渐变没有硬边界，「擦得到」的界在
 上面照样用矢量指令画——它和别的指令一样是一条指令，橡皮擦得到、picture_get 看得见、按号 delete 也删得掉。
 
 发法就一行：{op:"image", path:"C:\\某处\\参考图.png", x:0, y:0}。
-应用会把它拷进这个空间的 images/ 下、把回填好的 src 存下来，并照原图量出 w / h 填进框，你不用先知道它多大。
+应用会把它拷进这个画布的 images/ 下、把回填好的 src 存下来，并照原图量出 w / h 填进框，你不用先知道它多大。
 已经在这块画面里垫过的图（比如 picture_get 读回来的 src），第二次直接写 src 就行；
 不想拷、就想引用本机原图，把绝对路径写进 src（这两种写法不混：src 只认 images/xxx.png 或本机绝对路径）。
 联网地址和 data: 内联一律不认——这应用要离线也画得出来，一串 base64 还会把 pictures/<块id>.json 撑爆。
@@ -603,8 +585,8 @@ opacity 压到 0.3 上下、去色、再加一点对比，剩下的线够你描�
 描完记得按号 delete 掉这条 image——它留在文件里就还是这张块的一部分。
 
 两个坑：src 是 images/ 下那份副本，删掉同名的独立图片块会把文件一起删了，画面里这条就只剩一个虚线占位框；
-复制这块（Ctrl+V、block_duplicate，包括给 space 复制到别的空间）会连垫图一起真再拷一份副本进目标空间，
-引用本机绝对路径的那种也顺手收进来变成副本，所以换空间不用管图——只有原文件已经不在的那几张拷不动，
+复制这块（Ctrl+V、block_duplicate，包括给 space 复制到别的画布）会连垫图一起真再拷一份副本进目标画布，
+引用本机绝对路径的那种也顺手收进来变成副本，所以换画布不用管图——只有原文件已经不在的那几张拷不动，
 块照样粘过去，那几条就是虚线框。两种都画成同框的虚线框，位置和尺寸还在，看得见「这儿本来有张图」而不是凭空少一块。
 
 ### 图层：一幅画分成几摊管
@@ -679,7 +661,7 @@ off:true 关掉，画面回到没有光的原样（和没做这功能时逐字�
 
 ### 用户手绘的笔迹
 用户在块左缘那条工具条上画：选择 / 笔 / 毛笔 / 橡皮，再加墨色、笔宽和撤笔画。工具条第一项是「选择」，
-点它才回到挪块、缩放；画画的蓝色只亮在这条工具条上，不占空间工具栏。
+点它才回到挪块、缩放；画画的蓝色只亮在这条工具条上，不占画布工具栏。
 他画下来的每一笔就是 op:"stroke" 的原始点串，存的是手绘轨迹，不是精确图形。
 要「洗画」：picture_get 拿到这些 stroke，照着点串改写成 rect / poly / line / text，
 再按号 delete 掉原来那几笔，别留着两套。
@@ -695,7 +677,7 @@ off:true 关掉，画面回到没有光的原样（和没做这功能时逐字�
    报错里把这块现有的名字列回来，照着改完再发一次。
 3. 坐标是块内画面坐标：块的左上角是原点，可以出现负数、也可以超出块边界。
    画到框外面的部分不显示但数据还在，把块拉大就露出来。
-   换算回空间世界坐标：picture_get 的 frame.x + 画面内 x。
+   换算回画布世界坐标：picture_get 的 frame.x + 画面内 x。
 4. 颜色只认 #rgb / #rrggbb / #rrggbbaa。red、rgba(...) 这类写法会被整条丢掉。
    只想描边不想填色就不写 fill（渲染器会自动填 none）；反过来 fill 写了不透明色就是实心。
 5. 条数有两个口袋：顶层 cmds 最多 4000 条，展开后（use 摊成素材的实际节点）最多 20000 个。
@@ -711,12 +693,13 @@ off:true 关掉，画面回到没有光的原样（和没做这功能时逐字�
 
 ### 先有一块
 block_create {type:"gen", x, y, w, h, prompt, imageW, imageH, steps, cfg, seed, mode, strength}。
-面板上只摆一个提示词框和一颗「开始」，出图尺寸 / 步数 / 贴合度 / 种子 / 那一档 / 改动幅度没有控件——想调就调块上这几个字段，
+面板上摆着提示词框、尺寸、风格、张数和一颗「开始」；步数 / 贴合度 / 种子 / 那一档 / 改动幅度没有控件——想调就调块上这几个字段，
 gen_run 和 block_update 都收这九个。默认 1024×1024、20 步、cfg 6、seed -1、mode auto、strength 0.75。
+风格只是往提示词前面拼一句前缀（面板上选的风格存 style 字段），agent 想指定画风直接在 prompt 里写清楚就行。
 
 ### gen_run：一条命令出一张
 gen_run {id, prompt} 默认等到出完再回（本机一张约 30 秒）。返回里 phase 回到 idle、seconds 是这一张花了多久，
-src 是这张图在这个空间 images/ 里的相对路径。
+src 是这张图在这个画布 images/ 里的相对路径。
 - 头一次跑（或者闲过 45 秒引擎自己放掉权重之后）要从盘上读十来 GB 权重，那一两分钟也算在同一个等待里；
   timeout 别压太小，默认 300 秒，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问。
 - 引擎一次只吃一张。别的面板正占着它会直接报回「引擎正被 xxx 占着」，先 gen_cancel 或者等它完事。
@@ -750,6 +733,25 @@ src 是这张图在这个空间 images/ 里的相对路径。
 - 反过来，「把<画布>的脸换成<材料>的脸」这种句式容易 under-edit：实测模型整张照抄底图、材料那张根本没进来。
   让**材料那张当主语**才拉得动——「\`<image1>\` 中那位女子坐在 \`<image2>\` 的沙发上，穿着 \`<image2>\` 那件礼服」；
   两张都要动的时候 cfg 别往下压，4.5 那版就是照抄了底图，回到 6 才压得住。
+- **暗部被整张顶亮，先加步数，别改词**。双参考换装 864×1152 实测：28 步连着三版（换措辞、在总括条款里点名发色、往负向词塞「头发变灰」）
+  头发都从纯黑翻成灰蓝、墙面发白；同 seed 同词只把步数提到 44，一发就收住——头发回黑、墙面和曝光回到原图，换个 seed 再跑 44 步照样对。
+  这一档是整张重绘，没收敛到位时暗部对模型来说还是「没定下来」，它就往提亮的方向收。代价在时间：44 步实测 113~126 秒，28 步 92~113 秒。
+- 真要贴住原图的明暗和颜色，另一条路是让那张照片当**底图**走图生图：实测 i2i 0.7 出来的头发、墙面、裤子都和原图一个明暗，
+  但这条路没有参考图，衣服全靠文字描述，画不准。要「既保住明暗又照抄实物」得底图和参考图一起喂，这一版引擎还没开这个口子。
+
+### 高清放大：mode 明写 upscale
+另一条不吃扩散的路：纯 Real-ESRGAN x4plus 放大，跟提示词、步数、cfg、seed、块上那对宽高**统统无关**——
+它只把连过来的那一张放大 4 倍（864×1152 → 3456×4608），出来还是存进 images/、还是那块面板的 src。
+- 只吃**一张**连线输入图：没接连报错，连两张也报（放大没有「多张」这个概念）。
+- 这一档不参与 auto 推断，**只能明写** mode:"upscale"；面板上选了它，提示词框会自己收起来。
+- 它不碰那 12 GB 权重，也不看 mmproj：没载模型也能放大，头一次跑不用等一两分钟读盘。
+- 放大倍数是权重自己定的（x4plus 就是 4×），想要小图就出完再缩，别指望传个数改倍率。
+- 快：864×1152 本机实测约 10 秒，512×512 约 1.7 秒（引擎按 512 分块跑，整张一次过要 26 GB 显存、会干净失败）。
+- **别拿它放大带字的图**。实测一张文字为主的长卷（827×1200）放大后笔画根根清楚，但字被「补」错了：
+  「魔愁涧」成了「鹰愁洞」、「白骨精」成了「白骨稿」。ESRGAN 是按纹理补细节，不认字形。
+  海报、截图、扫描件这种要放大，先跟用户说一句这个风险；插画和照片不受影响。
+- 缺文件会直接报回**绝对路径**。那份 .pth 在数据根的 gen/upscale/RealESRGAN_x4plus.pth（67 MB），
+  它跟着数据根走，不在设置页「检测模型」那套可换档位里——**别自己去下载或挪**，把报错里那个路径原样报给用户。
 
 ### 出完看一眼
 gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一帧逐步预览。
@@ -819,98 +821,6 @@ PDF 还没读完时会报错，稍等再试。
 action：play / pause / toggle / seek（value 是目标秒数）/ volume（value 是 0 到 1）。`,
   },
   {
-    id: "notes",
-    title: "笔记库",
-    body: `## 笔记库（13 个工具）
-
-笔记库就是磁盘上的 .md 文件树，路径一律相对笔记根、用 / 分隔；文件路径带 .md 后缀，文件夹不带。
-
-### notes_tree
-整棵树：
-
-~~~json
-{ "root": "D:\\\\...\\\\notes", "path": "<当前打开>", "tree": [ ... ] }
-~~~
-
-每个节点有 path、name、kind（dir/file），文件夹带 children。动笔记前先调它。
-
-### notes_read
-读一篇：{path, text, chars}。path 是相对路径，如 工作/周报.md。
-
-### notes_write
-整篇覆盖：
-
-~~~json
-{ "path": "工作/周报.md", "text": "# 周报\\n..." }
-~~~
-
-当前正在编辑器里打开的笔记会走同一条自动保存链，写完界面同步刷新。
-
-### notes_attach_image
-把本机图片贴进笔记：
-
-~~~json
-{ "path": "C:\\\\Users\\\\me\\\\chart.png", "notePath": "工作/周报.md", "append": true }
-~~~
-
-图片会复制到这篇笔记自己的 .assets/<笔记名>/ 下；append 默认 true，在正文末尾补一段图片语法；append: false 只存图不插正文。返回 asset（图片相对路径）和 markdown（插入的那行）。
-
-### notes_create
-新建笔记：
-
-~~~json
-{ "name": "周报", "dir": "工作", "text": "# 本周" }
-~~~
-
-name 不用带 .md；dir 是所在文件夹（相对路径），不传放根目录；text 可带初始正文。
-
-### notes_create_folder
-新建文件夹：
-
-~~~json
-{ "name": "归档", "dir": "工作" }
-~~~
-
-### notes_rename
-笔记或文件夹改名（笔记不用带 .md）：
-
-~~~json
-{ "path": "工作/周报.md", "name": "周报 2026-10" }
-~~~
-
-### notes_move
-移到另一个文件夹，dir 为空字符串表示笔记根：
-
-~~~json
-{ "path": "工作/周报.md", "dir": "归档" }
-~~~
-
-不能把文件夹移进它自己里面。
-
-### notes_delete
-永久删除一篇笔记或整个文件夹，不进回收站，最谨慎。
-
-### notes_open
-在笔记页打开给人看：
-
-~~~json
-{ "path": "工作/周报.md" }
-~~~
-
-### notes_current
-当前笔记页状态：root、path、editing、chars。
-
-### notes_edit
-切阅读/编辑状态：
-
-~~~json
-{ "editing": true }
-~~~
-
-### notes_reveal
-在系统文件管理器里定位笔记或文件夹；path 传空字符串是笔记根。`,
-  },
-  {
     id: "recipes",
     title: "常用配方",
     body: `## 常用配方
@@ -928,18 +838,12 @@ camera_fit {} → block_highlight {ids:["<块id>", ...]} → camera_focus {id:"<
 
 normal 节奏会自己切页、运镜、打光带，不需要额外做什么。
 
-### 3. 把一篇笔记搬上空间
-notes_tree → notes_read {path:"工作/周报.md"} → block_create {type:"note", notePath:"工作/周报.md", x:0, y:0} → camera_focus {id:"<新块id>"}
-
-### 4. 把本机资料放上空间
+### 3. 把本机资料放上画布
 file_import {path:"C:\\\\Users\\\\me\\\\demo.mp4", mode:"copy", x:0, y:0}
 
 等它返回再继续（大文件要拷一会儿）；返回的 id 可以接着 pdf_goto / ebook_goto / media_control。
 
-### 5. 整理笔记
-notes_tree → notes_create_folder {name:"归档", dir:""} → notes_move {path:"旧笔记.md", dir:"归档"} → notes_open {path:"归档/旧笔记.md"}
-
-### 6. 批量建块（推荐用 space_batch）
+### 4. 批量建块（推荐用 space_batch）
 先算好网格：列间距 = 块宽 + 40，行间距 = 块高 + 60；把整批操作塞进一次 space_batch，显式给每一块的 x/y：
 
 ~~~json
@@ -949,9 +853,9 @@ notes_tree → notes_create_folder {name:"归档", dir:""} → notes_move {path:
 ] }
 ~~~
 
-整批只记一步撤销，中途也不会每块都运镜。
+整批中途不会每块都运镜。
 
-### 7. 铺完自查（很重要）
+### 5. 铺完自查（很重要）
 1. space_batch 铺完一批
 2. space_snapshot {region:"all"} —— 看整体：有没有块重叠、有没有大片空白、重心是不是歪的
 3. 有问题的块：space_snapshot {rect:{...}, maxSide:2000} 凑近看，确认是文字溢出还是尺寸不够
@@ -959,7 +863,7 @@ notes_tree → notes_create_folder {name:"归档", dir:""} → notes_move {path:
 
 不要跳第 2 步直接交活。你看到的坐标是对的，看到的效果不一定对。
 
-### 8. 用户说「重排一下」
+### 6. 用户说「重排一下」
 block_select {ids:[...]} 选中那一批 → 让用户右键选「对齐 / 分布 / 整理成网格」（这三个是界面里的操作，没有对应工具）；需要你用工具做的话，就是自己算坐标再 block_update，或者直接 space_batch 一批 block_update。`,
   },
   {
@@ -967,17 +871,16 @@ block_select {ids:[...]} 选中那一批 → 让用户右键选「对齐 / 分�
     title: "易错点",
     body: `## 易错点
 
-- 忘拿 id：动块前先 space_scene；id 跨空间不通用，space_open 后重新拿。
+- 忘拿 id：动块前先 space_scene；id 跨画布不通用，space_open 后重新拿。
 - 连线两端只能是两个不同的普通块；删块会连删线。
-- 便签底色是 color，不是 fillColor；便签没有 fillColor。
 - 文字块高度随内容自动长，block_update 改不了 text 的 w/h。
-- radius 对除 ellipse 以外的带边框块都有效（rect/text/image/sticky/note/file）；ellipse 没有圆角。
+- radius 对除 ellipse 以外的带边框块都有效（rect/text/image/note/file）；ellipse 没有圆角。
 - 坐标是世界坐标，不是屏幕坐标；拿不准就 space_scene 看现成的 x/y。
 - 批量摆放一定要显式给坐标，不给会落在视野中央一格格错开。
-- 本机文件用绝对路径，笔记用相对路径，两者不能混。
+- 本机文件用绝对路径。
 - file_write 冲突先 file_read 看新内容，再决定要不要 force；别无脑覆盖。
 - PDF 页码从 1 开始，电子书章节从 0 开始；PDF 没读完不能跳页。
-- 删除去向：space_delete 进回收站，notes_delete 永久不回头；block_delete 能靠 Ctrl+Z 撤回，但撤销栈只在内存里，刷新窗口就没了。
+- 删除去向：space_delete 整个画布文件夹进回收站；block_delete 删掉的块退不回来，拷进画布的媒体文件进回收站。
 - 盲铺是大忌：一次要建的块超过五块，就开 space_batch；铺完 space_snapshot 看一眼再交活。
 - 批量里拿不到前一项的 id：id 是执行时才生成的。要连线就分两批。
 - 设置页换数据目录和窗口控制没有工具；改主题用 theme_set，先 theme_list 拿 id。
@@ -995,7 +898,7 @@ export function guideText(topic) {
   if (!key) {
     const toc = SECTIONS.map((section) => `- ${section.id}：${section.title}`).join("\n");
     return [
-      "# 无限空间 MCP 速查手册",
+      "# 无限画布 MCP 速查手册",
       "",
       "第一次接手先读「总览与基本约定」；下面每章也可以单独取：guide {topic:\"章节名\"}。",
       "",

@@ -1,4 +1,4 @@
-/* 宇宙主题背景：一张全屏 WebGL2 画布，叠在空间底色上、块和连线层下面。
+/* 宇宙主题背景：一张全屏 WebGL2 画布，叠在画布底色上、块和连线层下面。
  *
  * 这里是一条自动航线：相机在三维宇宙里一直往前飞，一镜到底。
  *   星野   恒星钉在天球方向上，转头就换一片星空；近处尘埃有真实视差，飞起来往后掠。
@@ -312,7 +312,7 @@ export function setCosmosCamera(camera) {
   state.camKnown = true;
 }
 
-/* 换空间等于换一段航线：星野重铺、星体重新沿新航线摆 */
+/* 换画布等于换一段航线：星野重铺、星体重新沿新航线摆 */
 export function setCosmosSeed(id) {
   state.pendingSeed = id || "inspace";
   if (!state.ok) return;
@@ -791,7 +791,7 @@ function resetFlight() {
     orbit: null,
     paused: false,
     travelled: 0,
-    /* 名单走到哪儿了：新空间从第一颗重新开始 */
+    /* 名单走到哪儿了：新画布从第一颗重新开始 */
     queue: 0,
     wanderPhase: rnd() * Math.PI * 2,
     bodies: [],
@@ -2166,7 +2166,7 @@ uniform float u_radius;
 out vec4 outColor;
 void main() {
   vec3 n = normalize(v_nrm);
-  /* 相机空间 +z 指向观察者：这半边是正面，用补光保证贴图细节 */
+  /* 相机画布 +z 指向观察者：这半边是正面，用补光保证贴图细节 */
   float sunL = dot(n, u_sunView);
   float key = smoothstep(-0.28, 0.42, sunL);
   float fill = max(n.z, 0.0);

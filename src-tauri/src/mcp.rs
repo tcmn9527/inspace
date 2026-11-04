@@ -1,4 +1,4 @@
-//! 应用内 MCP 服务：让别的 agent 通过 Streamable HTTP 操作这个空间。
+//! 应用内 MCP 服务：让别的 agent 通过 Streamable HTTP 操作这个画布。
 //!
 //! 这里只做协议和通道，不知道任何工具的业务含义：
 //! 工具清单由前端启动时注册进来，tools/call 通过 Tauri 事件发给前端执行，
@@ -29,8 +29,10 @@ use tokio::sync::oneshot;
 
 const DEFAULT_PORT: u16 = 31230;
 const PORT_TRIES: u16 = 20;
-/// 一次工具调用的等待上限：前端可能正在等文件拷贝、等 PDF 打开，
+/// 一次工具调用的默认等待上限：前端可能正在等文件拷贝、等 PDF 打开，
 /// 但 MCP 客户端那边也有自己的超时，这里比常见的 60 秒多留一截。
+/// 前端注册工具时可以按工具报一个更长的 `waitSeconds`（生图那一条自己会等到 600 秒），
+/// 这里只兜住没报的工具——上限压太短会把「还在正常干活」的命令误报成超时。
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 const EVENT_NAME: &str = "mcp-command";
 
@@ -47,6 +49,7 @@ pub struct McpState {
     port: Mutex<u16>,
     error: Mutex<Option<String>>,
     tools: Mutex<Vec<Value>>,
+    waits: Mutex<HashMap<String, Duration>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Value>>>,
     next_id: AtomicU64,
 }
@@ -66,6 +69,7 @@ pub fn start(app: AppHandle, config_dir: PathBuf) -> Arc<McpState> {
         port: Mutex::new(0),
         error: Mutex::new(None),
         tools: Mutex::new(Vec::new()),
+        waits: Mutex::new(HashMap::new()),
         pending: Mutex::new(HashMap::new()),
         next_id: AtomicU64::new(1),
     });
@@ -218,7 +222,7 @@ async fn handle_rpc(
                     "protocolVersion": version,
                     "capabilities": { "tools": {} },
                     "serverInfo": { "name": "inspace", "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": "这是「无限空间」桌面应用的本地 MCP，能操作空间、块、连线、笔记库和播放器。第一次接手先调 guide 拿速查手册（不传 topic 给整本，也可以按章取），再调 app_state、space_scene 或 notes_tree 熟悉现场。工具默认会把界面切到对应页面并做演示：镜头缓动跟随、给目标加一圈光带；传 pace: \"instant\" 可跳过演示。坐标是空间里的世界坐标，原点在空间左上角。块 id 只在当前空间有效，动块前先从 space_scene 里拿。"
+                    "instructions": "这是「无限画布」桌面应用的本地 MCP，能操作画布、块、连线和播放器。第一次接手先调 guide 拿速查手册（不传 topic 给整本，也可以按章取），再调 app_state 或 space_scene 熟悉现场。工具默认会把界面切到对应页面并做演示：镜头缓动跟随、给目标加一圈光带；传 pace: \"instant\" 可跳过演示。坐标是画布里的世界坐标，原点在画布左上角。块 id 只在当前画布有效，动块前先从 space_scene 里拿。"
                 }),
             )
         }
@@ -268,12 +272,25 @@ async fn call_frontend(state: &Arc<McpState>, tool: &str, args: Value) -> Value 
         return tool_error(&format!("把命令递给界面失败：{error}"));
     }
 
-    match tokio::time::timeout(CALL_TIMEOUT, receiver).await {
+    /* 前端报过预算的工具按它自己的来（生图那一条会等到 600 秒再自己回 timedOut），
+       没报的照默认 120 秒。取大不取小：默认值不该比工具自己承诺的上限还短。 */
+    let budget = state
+        .waits
+        .lock()
+        .unwrap()
+        .get(tool)
+        .copied()
+        .unwrap_or(CALL_TIMEOUT)
+        .max(CALL_TIMEOUT);
+    match tokio::time::timeout(budget, receiver).await {
         Ok(Ok(payload)) => normalize_payload(payload),
         Ok(Err(_)) => tool_error("界面没有接住这条命令（应用可能正在关闭）"),
         Err(_) => {
             state.pending.lock().unwrap().remove(&request_id);
-            tool_error("界面处理这条命令超过了等待上限")
+            tool_error(&format!(
+                "界面处理这条命令超过了等待上限 {} 秒；命令还在界面里跑，结果已经收不到了",
+                budget.as_secs()
+            ))
         }
     }
 }
@@ -323,13 +340,27 @@ fn info_of(state: &McpState) -> Value {
 
 #[tauri::command]
 pub fn mcp_register_tools(state: tauri::State<'_, Arc<McpState>>, tools: Vec<Value>) -> Value {
+    let mut waits = HashMap::new();
     let clean: Vec<Value> = tools
         .into_iter()
-        .filter(|tool| {
-            tool.get("name").and_then(Value::as_str).is_some_and(|name| !name.is_empty())
-                && tool.get("inputSchema").is_some()
+        .filter_map(|mut tool| {
+            let name = tool
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())?
+                .to_string();
+            /* waitSeconds 是这条命令自己报的等待预算，只给总线用；
+               留在工具表里会跟着 tools/list 发给客户端。 */
+            if let Some(seconds) = tool.as_object_mut().and_then(|map| map.remove("waitSeconds")) {
+                if let Some(seconds) = seconds.as_u64() {
+                    waits.insert(name.clone(), Duration::from_secs(seconds));
+                }
+            }
+            tool.get("inputSchema")?;
+            Some(tool)
         })
         .collect();
+    *state.waits.lock().unwrap() = waits;
     *state.tools.lock().unwrap() = clean;
     json!({ "count": state.tools.lock().unwrap().len() })
 }

@@ -1,4 +1,4 @@
-/* 空间后端调用：每个空间都是数据文件夹下 spaces/ 里的一个文件夹。 */
+/* 画布后端调用：每个画布都是数据文件夹下 spaces/ 里的一个文件夹。 */
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 
@@ -11,11 +11,16 @@ export const renameCanvas = (id, name) => invoke("canvas_rename", { id, name });
 export const deleteCanvas = (id) => invoke("canvas_delete", { id });
 export const saveCanvasImage = (id, data, ext) => invoke("canvas_save_image", { id, data, ext });
 /* 图片和音频都不走 base64：后端确认文件还在、开一次 asset 读权限，这里换成地址。
-   拷贝态 src 是空间目录里的相对路径，引用态是原文件绝对路径。 */
+   拷贝态 src 是画布目录里的相对路径，引用态是原文件绝对路径。 */
 export const pickCanvasImage = () => invoke("canvas_pick_image");
 export const importCanvasImage = (id, path) => invoke("canvas_import_image", { id, path });
 export const imageUrl = async (id, src, linked) =>
   convertFileSrc(await invoke("canvas_image_url", { id, src, linked: Boolean(linked) }));
+/* 双击看大图：交给系统默认的看图工具打开那块图。路径后端从 items.json 那块自己算，
+   前端只给块 id。 */
+export const openCanvasImage = (id, itemId) =>
+  invoke("canvas_open_image", { id, itemId });
+/* 删图：文件当场进系统回收站，引用态的原图不碰。 */
 export const deleteCanvasImage = (id, src, linked) =>
   invoke("canvas_delete_image", { id, src, linked: Boolean(linked) });
 export const saveCanvasAudio = (id, data, ext) => invoke("canvas_save_audio", { id, data, ext });
@@ -36,7 +41,7 @@ export const videoUrl = async (id, src, linked) =>
 export const deleteCanvasVideo = (id, src, linked, audioRel) =>
   invoke("canvas_delete_video", { id, src, linked, audioRel: audioRel || null });
 /* 文件块：图片/音频/视频之外的都算文件。插的时候问一句——
-   拷贝态进空间 files/，引用态只记原文件绝对路径，打开都交给系统默认程序。 */
+   拷贝态进画布 files/，引用态只记原文件绝对路径，打开都交给系统默认程序。 */
 export const fileInfo = (path) => invoke("canvas_file_info", { path });
 export const pickCanvasFile = () => invoke("canvas_pick_file");
 export const importCanvasFile = (id, path) => invoke("canvas_import_file", { id, path });
@@ -65,11 +70,11 @@ export const revealCanvasFile = (id, rel, linked) =>
   invoke("canvas_reveal_file", { id, rel, linked: Boolean(linked) });
 export const deleteCanvasFile = (id, rel, linked) =>
   invoke("canvas_delete_file", { id, rel, linked: Boolean(linked) });
-/* 便签块 / 空间自己的笔记块：要显示的是它那份内容文件，路径由后端按块 id 从 items.json 认 */
+/* 画布自己的笔记块：要显示的是它那份内容文件，路径由后端按块 id 从 items.json 认 */
 export const revealBlock = (id, itemId) => invoke("canvas_reveal_block", { id, itemId });
 export const canvasFileExists = (id, rel, linked) =>
   invoke("canvas_file_exists", { id, rel, linked: Boolean(linked) });
-/* 电子书：放上空间前先整本读一遍目录，读不了的（DRM/KF8）当场说清楚 */
+/* 电子书：放上画布前先整本读一遍目录，读不了的（DRM/KF8）当场说清楚 */
 export const ebookInfo = (path) => invoke("canvas_ebook_info", { path });
 export const ebookToc = (id, rel, linked) =>
   invoke("canvas_ebook_toc", { id, rel, linked: Boolean(linked) });
@@ -87,30 +92,25 @@ export const saveCanvasNoteImage = (id, itemId, data, ext) =>
   invoke("canvas_save_note_image", { id, itemId, data, ext });
 export const readCanvasNoteImage = (id, itemId, rel) =>
   invoke("canvas_read_note_image", { id, itemId, rel });
-/* 空间自己的便签/笔记：一块一份文件，住在 <空间>/stickies、<空间>/notes 里。 */
-export const readSticky = (id, itemId) => invoke("canvas_read_sticky", { id, itemId });
-export const writeSticky = (id, itemId, sticky) => invoke("canvas_write_sticky", { id, itemId, sticky });
-export const duplicateSticky = (id, itemId, toId, toItem) =>
-  invoke("canvas_duplicate_sticky", { id, itemId, toId, toItem });
-export const deleteSticky = (id, itemId) => invoke("canvas_delete_sticky", { id, itemId });
+/* 画布自己的笔记：一块一份文件，住在 <画布>/notes 里。 */
 export const readNoteText = (id, itemId) => invoke("canvas_read_note", { id, itemId });
 export const writeNoteText = (id, itemId, text) => invoke("canvas_write_note", { id, itemId, text });
 export const duplicateNote = (id, itemId, toId, toItem) =>
   invoke("canvas_duplicate_note", { id, itemId, toId, toItem });
 export const deleteNote = (id, itemId) => invoke("canvas_delete_note", { id, itemId });
-/* 画面块的绘制指令和素材表一块一份，住在 <空间>/pictures/<块id>.json：
-   手绘一笔就上百个点，塞进 items.json 会把整个空间的读写一起拖慢。 */
+/* 画面块的绘制指令和素材表一块一份，住在 <画布>/pictures/<块id>.json：
+   手绘一笔就上百个点，塞进 items.json 会把整个画布的读写一起拖慢。 */
 export const readPicture = (id, itemId) => invoke("canvas_read_picture", { id, itemId });
 export const writePicture = (id, itemId, cmds, symbols) =>
   invoke("canvas_write_picture", { id, itemId, cmds, symbols: symbols || {} });
 export const deletePicture = (id, itemId) => invoke("canvas_delete_picture", { id, itemId });
-/* 场景块里的东西一块一份，住在 <空间>/scenes/<块id>.json：
-   一件东西动辄上百个坐标点，塞进 items.json 会把整个空间的读写和每份快照一起拖慢。 */
+/* 场景块里的东西一块一份，住在 <画布>/scenes/<块id>.json：
+   一件东西动辄上百个坐标点，塞进 items.json 会把整个画布的读写和每份快照一起拖慢。 */
 export const readScene = (id, itemId) => invoke("canvas_read_scene", { id, itemId });
 export const writeScene = (id, itemId, parts) =>
   invoke("canvas_write_scene", { id, itemId, parts: parts || [] });
 export const deleteScene = (id, itemId) => invoke("canvas_delete_scene", { id, itemId });
-/* 生图面板的提示词和参数，一块一份，住在 <空间>/genpanels/<块id>.json。
+/* 生图面板的提示词和参数，一块一份，住在 <画布>/genpanels/<块id>.json。
    出的那张图不在这里——它落在 images/ 里，路径记在块上，和图片块同一套规矩。 */
 export const readGen = (id, itemId) => invoke("canvas_read_gen", { id, itemId });
 export const writeGen = (id, itemId, content) => invoke("canvas_write_gen", { id, itemId, content });
@@ -119,17 +119,14 @@ export const deleteGen = (id, itemId) => invoke("canvas_delete_gen", { id, itemI
 export const genStatus = () => invoke("gen_status");
 export const genStart = (req) => invoke("gen_start", { req });
 export const genCancel = () => invoke("gen_cancel");
-/* 复制块时把源块那份文件再拷一份进目标空间，返回新的相对路径；
+/* 复制块时把源块那份文件再拷一份进目标画布，返回新的相对路径；
    引用态那块也照样收：从它记的原文件路径拷，粘出来的块从此自己带一份 */
 export const duplicateMedia = (id, itemId, toId) =>
   invoke("canvas_duplicate_media", { id, itemId, toId });
 /* 画面块垫的位图：items.json 里没有它的记录，src 只能由前端从指令里读出来直给，
-   后端仍旧只认源空间 images/ 以内（或引用态那个原文件绝对路径）。 */
+   后端仍旧只认源画布 images/ 以内（或引用态那个原文件绝对路径）。 */
 export const duplicatePictureImage = (id, src, linked, toId) =>
   invoke("canvas_duplicate_picture_image", { id, src, linked: Boolean(linked), toId });
-export const readNote = (rel) => invoke("notes_read", { rel });
-export const readNoteImage = (noteRel, rel) => invoke("notes_read_image", { noteRel, rel });
-export const listNotes = () => invoke("notes_tree");
 export const revealCanvas = (id) => invoke("canvas_reveal", { id });
 /* 导出：图片块先读成 data URL 再进导出图（asset 协议是另一个源，直接画会污染画布）；
    拼好的 PNG / PDF 交给后端弹保存框写盘，取消返回 null。 */
@@ -141,8 +138,5 @@ export const openExport = (path) => invoke("canvas_open_export", { path });
 export const exportPickDir = () => invoke("canvas_export_pick_dir");
 export const exportWrite = (dir, name, ext, data) =>
   invoke("canvas_export_write", { dir, name, ext, data });
-/* 历史版本：后端在每次覆盖 items.json 之前留的自动快照（盘上的，不是内存里的撤销栈） */
-export const historyList = (id) => invoke("canvas_history_list", { id });
-export const historyRead = (id, file) => invoke("canvas_history_read", { id, file });
-/* 跨空间搜索：后端把所有空间的 items.json 扫一遍，只认块里的文字 */
+/* 跨画布搜索：后端把所有画布的 items.json 扫一遍，只认块里的文字 */
 export const searchSpace = (query) => invoke("canvas_search", { query });

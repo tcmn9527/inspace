@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>无限空间</title>
+    <title>无限画布</title>
     <!-- Markdown 渲染器（marked，MIT，内嵌不联网） -->
     <script src="/vendor/marked.umd.js"></script>
     <!-- DOCX 预览（mammoth，BSD，内嵌不联网）：把 docx 转成语义化 HTML -->
@@ -18,7 +18,7 @@
 
   <body>
     <header class="titlebar" data-tauri-drag-region>
-      <span class="titlebar-text" data-tauri-drag-region>无限空间</span>
+      <span class="titlebar-text" data-tauri-drag-region>无限画布</span>
 
       <div class="titlebar-right">
         <button
@@ -41,6 +41,26 @@
             <circle cx="5.5" cy="6.1" r="1" fill="currentColor" />
             <circle cx="8.1" cy="4.5" r="1" fill="currentColor" />
             <circle cx="10.6" cy="6.3" r="1" fill="currentColor" />
+          </svg>
+        </button>
+
+        <button
+          id="settings-btn"
+          class="caption"
+          type="button"
+          title="设置"
+          aria-label="设置"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5" fill="none" />
+            <path
+              d="M10.18 5.86L10.48 2.93L13.52 2.93L13.82 5.86L15.05 6.38L17.34 4.51L19.49 6.66L17.62 8.95L18.14 10.18L21.07 10.48L21.07 13.52L18.14 13.82L17.62 15.05L19.49 17.34L17.34 19.49L15.05 17.62L13.82 18.14L13.52 21.07L10.48 21.07L10.18 18.14L8.95 17.62L6.66 19.49L4.51 17.34L6.38 15.05L5.86 13.82L2.93 13.52L2.93 10.48L5.86 10.18L6.38 8.95L4.51 6.66L6.66 4.51L8.95 6.38z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
           </svg>
         </button>
 
@@ -117,207 +137,16 @@
     </header>
 
     <div class="shell">
-      <nav class="rail">
-        <button
-          class="rail-item is-active"
-          type="button"
-          data-route="canvas"
-          title="空间"
-          aria-label="空间"
-          aria-current="page"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path
-              d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-              stroke="currentColor"
-              stroke-width="1.5"
-              fill="none"
-              stroke-linejoin="round"
-              stroke-linecap="round"
-            />
-            <path
-              d="M9 22v-6a3 3 0 0 1 6 0v6"
-              stroke="currentColor"
-              stroke-width="1.5"
-              fill="none"
-              stroke-linejoin="round"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
-
-        <button
-          class="rail-item"
-          type="button"
-          data-route="notes"
-          title="笔记"
-          aria-label="笔记"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path
-              d="M6.5 3h7.5l4 4v13.5a1 1 0 0 1-1 1H6.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"
-              stroke="currentColor"
-              stroke-width="1.6"
-              fill="none"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M14 3v4.5h4"
-              stroke="currentColor"
-              stroke-width="1.6"
-              fill="none"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M8.2 12.2h7M8.2 15.6h4.6"
-              stroke="currentColor"
-              stroke-width="1.6"
-              fill="none"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
-
-        <div class="rail-spacer"></div>
-
-        <button
-          class="rail-item"
-          type="button"
-          data-route="settings"
-          title="设置"
-          aria-label="设置"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <circle
-              cx="12"
-              cy="12"
-              r="3"
-              stroke="currentColor"
-              stroke-width="1.5"
-              fill="none"
-            />
-            <path
-              d="M10.18 5.86L10.48 2.93L13.52 2.93L13.82 5.86L15.05 6.38L17.34 4.51L19.49 6.66L17.62 8.95L18.14 10.18L21.07 10.48L21.07 13.52L18.14 13.82L17.62 15.05L19.49 17.34L17.34 19.49L15.05 17.62L13.82 18.14L13.52 21.07L10.48 21.07L10.18 18.14L8.95 17.62L6.66 19.49L4.51 17.34L6.38 15.05L5.86 13.82L2.93 13.52L2.93 10.48L5.86 10.18L6.38 8.95L4.51 6.66L6.66 4.51L8.95 6.38z"
-              stroke="currentColor"
-              stroke-width="1.5"
-              fill="none"
-              stroke-linejoin="round"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
-      </nav>
-
-      <section class="notes-page" id="notes-view" hidden>
-        <aside class="notes-tree-pane" id="notes-tree">
-          <header class="notes-tree-head">
-            <span class="notes-root-name" id="notes-root-name" title="">笔记</span>
-          </header>
-          <div class="notes-tree-scroll" id="notes-tree-scroll"></div>
-          <p class="notes-tree-empty" id="notes-tree-empty" hidden>还没有笔记，右键空白处新建</p>
-          <div
-            class="splitter splitter-v"
-            id="notes-split-v"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="拖动调整文件树宽度"
-            title="拖动调整文件树宽度"
-          ></div>
-        </aside>
-
-        <div class="notes-main">
-          <header class="notes-main-head">
-            <button
-              class="notes-icon-btn notes-tree-toggle"
-              id="notes-tree-toggle"
-              type="button"
-              title="隐藏文件树"
-              aria-label="隐藏文件树"
-              aria-pressed="true"
-            >
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                <rect
-                  x="2"
-                  y="3"
-                  width="12"
-                  height="10"
-                  rx="1.8"
-                  stroke="currentColor"
-                  stroke-width="1.1"
-                  fill="none"
-                />
-                <path d="M6.6 3v10" stroke="currentColor" stroke-width="1.1" />
-              </svg>
-            </button>
-            <span class="notes-crumb" id="notes-crumb"></span>
-            <div class="notes-main-actions">
-              <button
-                class="notes-btn notes-btn-icon"
-                id="notes-edit"
-                type="button"
-                title="编辑"
-                aria-label="编辑"
-              >
-                <svg class="icon-edit" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                  <path
-                    d="M10.8 2.6a1.7 1.7 0 0 1 2.4 2.4l-7.4 7.4-3 .6.6-3 7.4-7.4Z"
-                    stroke="currentColor"
-                    stroke-width="1.2"
-                    fill="none"
-                    stroke-linejoin="round"
-                  />
-                  <path d="M9.6 3.8l2.6 2.6" stroke="currentColor" stroke-width="1.2" fill="none" />
-                </svg>
-                <svg class="icon-view" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                  <path
-                    d="M1.6 8S4 3.8 8 3.8 14.4 8 14.4 8 12 12.2 8 12.2 1.6 8 1.6 8Z"
-                    stroke="currentColor"
-                    stroke-width="1.2"
-                    fill="none"
-                    stroke-linejoin="round"
-                  />
-                  <circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.2" fill="none" />
-                </svg>
-              </button>
-            </div>
-          </header>
-          <div class="notes-body" id="notes-body" hidden></div>
-          <p class="notes-empty" id="notes-empty">从左边选一篇笔记，或者在左边空白处右键新建</p>
-          <div class="notes-editor" id="notes-editor" hidden>
-            <div class="notes-toolbar" id="notes-toolbar" role="toolbar" aria-label="Markdown 工具栏"></div>
-            <textarea
-              class="notes-textarea"
-              id="notes-textarea"
-              spellcheck="false"
-              aria-label="Markdown 源码"
-            ></textarea>
-            <div class="notes-status"><span id="notes-status-text"></span></div>
-          </div>
-          <p class="notes-error" id="notes-error" hidden></p>
-        </div>
-
-        <div class="notes-guide" id="notes-guide" hidden>
-          <div class="notes-guide-card">
-            <h2>笔记文件夹打不开了</h2>
-            <p>
-              笔记存在数据文件夹的 <code>notes/</code> 里：每个 <code>.md</code>
-              文件就是一篇笔记，文件夹就是分类。换数据文件夹请到设置页。
-            </p>
-            <p class="notes-guide-path" id="notes-guide-path"></p>
-          </div>
-        </div>
-      </section>
-
       <section class="canvas-page" id="canvas-view">
         <div class="canvas-topbar">
           <button
             class="canvas-name"
             id="canvas-name"
             type="button"
-            title="切换空间"
+            title="切换画布"
             aria-haspopup="true"
           >
-            <span id="canvas-name-text">空间</span>
+            <span id="canvas-name-text">画布</span>
             <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
               <path
                 d="M2.5 4.5 6 8l3.5-3.5"
@@ -330,7 +159,7 @@
             </svg>
           </button>
 
-          <div class="canvas-tools" id="canvas-tools" role="toolbar" aria-label="空间工具">
+          <div class="canvas-tools" id="canvas-tools" role="toolbar" aria-label="画图">
             <button class="canvas-tool is-active" type="button" data-tool="select" title="选择 / 移动">
               <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
                 <path
@@ -389,21 +218,13 @@
                 />
               </svg>
             </button>
-            <button class="canvas-tool" type="button" data-tool="picture" title="画布：拖一块画面出来，可以往里面涂画">
+            <button class="canvas-tool" type="button" data-tool="picture" title="画图：拖一块画面出来，可以往里面涂画">
               <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
                 <rect x="3" y="4" width="14" height="12" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none" />
                 <path d="M5.2 13.4c1.6-3.4 3-1.2 4.3-3.1 1.2-1.8 2.5.9 4.2-1.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
               </svg>
             </button>
             <!-- 场景块故意不给工具栏入口：里面的东西目前只能由 agent 摆（block_create type:"scene"），已落块的照常渲染 -->
-            <button class="canvas-tool" type="button" data-tool="gen" title="文生图：拖一块面板出来，写一句提示词就能出一张图">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <path d="M10.4 2.3c.5.6.8 1.3.8 2.1" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" />
-                <path d="M4.2 7.1c3.7-.7 8-.7 11.6 0" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
-                <path d="M12.4 8.1c-.6 3-2.7 5.9-6.5 8.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
-                <path d="M7.6 9c1.4 2.9 3.6 5.3 6.9 7.2" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" />
-              </svg>
-            </button>
             <button class="canvas-tool" id="canvas-insert-image" type="button" title="插入本地图片">
               <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
                 <rect
@@ -480,25 +301,15 @@
                 />
               </svg>
             </button>
-            <button class="canvas-tool" id="canvas-insert-note" type="button" title="插入笔记">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <rect
-                  x="4.2"
-                  y="3.4"
-                  width="11.6"
-                  height="13.2"
-                  rx="1.4"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                />
-                <path
-                  d="M7 7h6M7 9.6h6M7 12.2h3.8"
-                  stroke="currentColor"
-                  stroke-width="1.1"
-                  stroke-linecap="round"
-                />
-              </svg>
+            <button
+              class="canvas-tool canvas-tool-menu"
+              id="canvas-insert-gen"
+              type="button"
+              title="AI 出图"
+              aria-label="AI 出图"
+              aria-haspopup="menu"
+            >
+              <span>AI出图</span>
             </button>
           </div>
 
@@ -523,78 +334,6 @@
           </div>
 
           <div class="canvas-actions">
-            <button
-              class="canvas-act"
-              id="canvas-undo"
-              type="button"
-              title="撤销（Ctrl+Z）"
-              aria-label="撤销"
-              disabled
-            >
-              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-                <path
-                  d="M7.6 6.4H12a4.2 4.2 0 0 1 0 8.4H8.4"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  fill="none"
-                  stroke-linecap="round"
-                />
-                <path
-                  d="M9.6 3.8 6.4 6.4l3.2 2.6"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-            <button
-              class="canvas-act"
-              id="canvas-redo"
-              type="button"
-              title="重做（Ctrl+Shift+Z）"
-              aria-label="重做"
-              disabled
-            >
-              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-                <path
-                  d="M12.4 6.4H8a4.2 4.2 0 0 0 0 8.4h3.6"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  fill="none"
-                  stroke-linecap="round"
-                />
-                <path
-                  d="M10.4 3.8l3.2 2.6-3.2 2.6"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-            <span class="canvas-act-sep" aria-hidden="true"></span>
-            <button
-              class="canvas-act"
-              id="canvas-history"
-              type="button"
-              title="历史版本（自动快照）"
-              aria-label="历史版本"
-            >
-              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-                <circle cx="10" cy="10" r="6.4" stroke="currentColor" stroke-width="1.5" fill="none" />
-                <path
-                  d="M10 6.2V10l2.7 1.7"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
             <button
               class="canvas-act"
               id="canvas-export"
@@ -624,7 +363,7 @@
           </div>
         </div>
 
-        <!-- 搜索：Ctrl+F 唤出，搜这个空间的块，也搜笔记库的正文 -->
+        <!-- 搜索：Ctrl+F 唤出，搜这个画布的块，也搜 Markdown 卡片里的正文 -->
         <div class="canvas-search" id="canvas-search" hidden>
           <div class="canvas-search-field">
             <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true">
@@ -635,7 +374,7 @@
               class="canvas-search-input"
               id="canvas-search-input"
               type="text"
-              placeholder="搜索这个空间的块、笔记正文…"
+              placeholder="搜索这个画布的块、正文…"
               spellcheck="false"
               autocomplete="off"
               aria-label="搜索"
@@ -655,10 +394,10 @@
           <div class="canvas-guide-layer" id="canvas-guide-layer" aria-hidden="true"></div>
           <p class="canvas-metrics" id="canvas-metrics" hidden></p>
 
-          <!-- 鸟瞰窗：右下角整个空间的缩小版，拖亮框或点框外就把视野带到那儿 -->
+          <!-- 鸟瞰窗：右下角整个画布的缩小版，拖亮框或点框外就把视野带到那儿 -->
           <div class="canvas-minimap" id="canvas-minimap">
             <canvas class="canvas-minimap-canvas" id="canvas-minimap-canvas"></canvas>
-            <span class="canvas-minimap-count" id="canvas-minimap-count" aria-label="空间上的面板数量">0</span>
+            <span class="canvas-minimap-count" id="canvas-minimap-count" aria-label="画布上的面板数量">0</span>
             <button
               class="canvas-minimap-min"
               id="canvas-minimap-min"
@@ -695,13 +434,13 @@
 
         <div class="canvas-empty" id="canvas-empty" hidden>
           <div class="canvas-empty-card">
-            <h2>无限空间</h2>
+            <h2>无限画布</h2>
             <p>
-              每个空间都是本地的一个文件夹：图片放在 images 里，内容放在 json 里。
+              每个画布都是本地的一个文件夹：图片放在 images 里，内容放在 json 里。
               重启后还在，也能直接用资源管理器打开。
             </p>
-            <button class="notes-btn notes-btn-primary" id="canvas-create" type="button">
-              新建空间
+            <button class="plain-btn plain-btn-primary" id="canvas-create" type="button">
+              新建画布
             </button>
           </div>
         </div>
@@ -716,14 +455,13 @@
         <div class="settings-card">
           <p class="settings-title">数据文件夹</p>
           <p class="settings-hint">
-            笔记、空间都存在这一个文件夹里：notes/ 是那棵 Markdown 树，spaces/
-            是一个空间一个文件夹。 换文件夹时会先问旧的要拷贝一份留着、剪贴走，还是干脆新建一份不带过去。
+            画布都存在这一个文件夹里：spaces/ 是一个画布一个文件夹。 换文件夹时会先问旧的要拷贝一份留着、剪贴走，还是干脆新建一份不带过去。
           </p>
           <code class="settings-path" id="settings-data-path"></code>
           <div class="settings-actions">
-            <button class="notes-btn" id="settings-data-pick" type="button">更换文件夹…</button>
-            <button class="notes-btn" id="settings-data-reveal" type="button">打开所在目录</button>
-            <button class="notes-btn" id="settings-data-reset" type="button">恢复默认位置</button>
+            <button class="plain-btn" id="settings-data-pick" type="button">更换文件夹…</button>
+            <button class="plain-btn" id="settings-data-reveal" type="button">打开所在目录</button>
+            <button class="plain-btn" id="settings-data-reset" type="button">恢复默认位置</button>
           </div>
           <p class="settings-status" id="settings-data-status" hidden></p>
           <p class="settings-error" id="settings-data-error" hidden></p>
@@ -731,14 +469,14 @@
         <div class="settings-card" id="settings-ffmpeg-card" hidden>
           <p class="settings-title">视频组件</p>
           <p class="settings-hint">
-            空间里的视频碰到本机放不出声的音轨（AC3、DTS 这类）时，要靠 ffmpeg
+            画布里的视频碰到本机放不出声的音轨（AC3、DTS 这类）时，要靠 ffmpeg
             把那条音轨转成 AAC。没装它画面照样能播，只是那条视频不会响。
             要修就把 ffmpeg.exe 放进下面这个文件夹，再点重新检测。
           </p>
           <code class="settings-path" id="settings-ffmpeg-dir"></code>
           <div class="settings-actions">
-            <button class="notes-btn" id="settings-ffmpeg-reveal" type="button">打开组件文件夹</button>
-            <button class="notes-btn" id="settings-ffmpeg-recheck" type="button">重新检测</button>
+            <button class="plain-btn" id="settings-ffmpeg-reveal" type="button">打开组件文件夹</button>
+            <button class="plain-btn" id="settings-ffmpeg-recheck" type="button">重新检测</button>
           </div>
           <p class="settings-error" id="settings-ffmpeg-error" hidden></p>
         </div>
@@ -764,9 +502,9 @@
           <p class="settings-status" id="settings-cosmos-status"></p>
           <code class="settings-path" id="settings-cosmos-dir" hidden></code>
           <div class="settings-actions">
-            <button class="notes-btn" id="settings-cosmos-upgrade" type="button">下载 8K 贴图</button>
-            <button class="notes-btn" id="settings-cosmos-cancel" type="button" hidden>取消下载</button>
-            <button class="notes-btn" id="settings-cosmos-clear" type="button" hidden>清除 8K 贴图</button>
+            <button class="plain-btn" id="settings-cosmos-upgrade" type="button">下载 8K 贴图</button>
+            <button class="plain-btn" id="settings-cosmos-cancel" type="button" hidden>取消下载</button>
+            <button class="plain-btn" id="settings-cosmos-clear" type="button" hidden>清除 8K 贴图</button>
           </div>
           <p class="settings-error" id="settings-cosmos-error" hidden></p>
         </div>
@@ -779,23 +517,23 @@
           <span class="settings-path" id="settings-gen-dir"></span>
           <div class="settings-gen-detail" id="settings-gen-detail" hidden></div>
           <div class="settings-actions">
-            <button class="notes-btn" id="settings-gen-check" type="button">检测模型</button>
-            <button class="notes-btn" id="settings-gen-reveal" type="button">打开模型文件夹</button>
-            <button class="notes-btn" id="settings-gen-dir-pick" type="button">换个目录</button>
-            <button class="notes-btn" id="settings-gen-dir-reset" type="button" hidden>恢复默认位置</button>
+            <button class="plain-btn" id="settings-gen-check" type="button">检测模型</button>
+            <button class="plain-btn" id="settings-gen-reveal" type="button">打开模型文件夹</button>
+            <button class="plain-btn" id="settings-gen-dir-pick" type="button">换个目录</button>
+            <button class="plain-btn" id="settings-gen-dir-reset" type="button" hidden>恢复默认位置</button>
           </div>
           <p class="settings-error" id="settings-gen-error" hidden></p>
         </div>
         <div class="settings-card" id="settings-mcp-card">
           <p class="settings-title">Agent 连接（MCP）</p>
           <p class="settings-hint">
-            别的 agent 可以通过本机 MCP 操作空间和笔记。复制连接配置贴到它那边即可；
+            别的 agent 可以通过本机 MCP 操作画布。复制连接配置贴到它那边即可；
             服务只监听 127.0.0.1，token 只存在本机配置里。
           </p>
           <code class="settings-path" id="settings-mcp-url"></code>
           <div class="settings-actions">
-            <button class="notes-btn" id="settings-mcp-copy" type="button">复制连接配置</button>
-            <button class="notes-btn" id="settings-mcp-reset" type="button">重置 token</button>
+            <button class="plain-btn" id="settings-mcp-copy" type="button">复制连接配置</button>
+            <button class="plain-btn" id="settings-mcp-reset" type="button">重置 token</button>
           </div>
           <p class="settings-status" id="settings-mcp-status" hidden></p>
           <p class="settings-error" id="settings-mcp-error" hidden></p>

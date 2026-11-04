@@ -1,25 +1,21 @@
-/* 全局搜索：一块面板搜三处东西。
+/* 全局搜索：一块面板搜两处东西。
  *
- *   1. 当前空间里的块 —— 正文、便签、笔记卡、文件名、连线标签，内存里现成的，改了立刻能搜到。
- *   2. 笔记库里的 .md —— 磁盘上的文件，第一次打开搜索时在后台读一遍，之后复用。
- *   3. 别的空间 —— 后端扫一遍所有空间的 items.json。这步慢一些，所以先出前两类，
+ *   1. 当前画布里的块 —— 正文、笔记卡、文件名、连线标签，内存里现成的，改了立刻能搜到。
+ *   2. 别的画布 —— 后端扫一遍所有画布的 items.json。这步慢一些，所以先出前一类，
  *      扫完再补进列表，不让用户盯着空白等。
  *
- * 结果点一下就跳过去：当前空间的块把镜头带过去并高亮一秒；笔记切到笔记页打开那篇；
- * 别的空间先切过去，再定位到那块。
+ * 结果点一下就跳过去：当前画布的块把镜头带过去并高亮一秒；别的画布先切过去，再定位到那块。
  */
 
 import * as store from "./canvas-store.js";
 
 const DEBOUNCE = 90;
-/* 本地和远程分开配份额：不然本地搜出几十条，别的空间永远挤不进来 */
+/* 本地和远程分开配份额：不然本地搜出几十条，别的画布永远挤不进来 */
 const LOCAL_RESULTS = 30;
 const REMOTE_RESULTS = 12;
-const NOTE_LIMIT = 600;
 
 const TYPE_LABEL = {
   text: "文字",
-  sticky: "便签",
   note: "笔记卡",
   image: "图片",
   audio: "音频",
@@ -63,7 +59,6 @@ function mark(text, query) {
 /* 一块的「名字」和「正文」分开算：名字命中的排前面，正文命中的给一段上下文 */
 function describeBlock(item) {
   if (item.type === "text") return { title: item.text.split("\n")[0] || "文字", body: item.text };
-  if (item.type === "sticky") return { title: (item.text || "").split("\n")[0] || "便签", body: item.text || "" };
   if (item.type === "note") return { title: item.name || "笔记卡", body: item.source || "" };
   if (item.type === "connector") return { title: item.label || "连线", body: item.label || "" };
   if (item.type === "image") return { title: "图片", body: "" };
@@ -72,7 +67,7 @@ function describeBlock(item) {
   return { title: item.name || TYPE_LABEL[item.type] || item.type, body: item.name || "" };
 }
 
-export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jumpToSpace }) {
+export function initSearch({ getItems, getSpaceId, focusBlock, jumpToSpace }) {
   const panel = document.querySelector("#canvas-search");
   const input = document.querySelector("#canvas-search-input");
   const list = document.querySelector("#canvas-search-results");
@@ -82,8 +77,6 @@ export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jum
   let timer = null;
   let results = [];
   let cursor = 0;
-  let notesCache = null; // [{ rel, name, text }]
-  let notesLoading = null;
   let opened = false;
   let remoteSeq = 0;
   let remotePending = false;
@@ -96,7 +89,6 @@ export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jum
     input.value = "";
     input.focus();
     renderResults([]);
-    void ensureNotes();
   }
 
   function close() {
@@ -113,45 +105,6 @@ export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jum
   }
 
   const isOpen = () => !panel.hidden;
-
-  /* 笔记库那部分：一棵树读成一张平表。读不动的单篇跳过，不影响别的结果。 */
-  async function ensureNotes() {
-    if (notesCache || notesLoading) return notesLoading;
-    notesLoading = (async () => {
-      try {
-        const tree = await store.listNotes();
-        const files = [];
-        const walk = (nodes) => {
-          for (const node of nodes || []) {
-            if (node.kind === "dir") walk(node.children);
-            else if (node.kind === "file" && files.length < NOTE_LIMIT) files.push(node);
-          }
-        };
-        walk(tree);
-        const collected = [];
-        /* 一次读几篇，别把磁盘和界面都堵住 */
-        const queue = [...files];
-        const worker = async () => {
-          while (queue.length) {
-            const node = queue.shift();
-            try {
-              const text = await store.readNote(node.path);
-              collected.push({ rel: node.path, name: node.name, text: String(text ?? "") });
-            } catch {
-              /* 读不了就跳过 */
-            }
-          }
-        };
-        await Promise.all([worker(), worker(), worker(), worker()]);
-        notesCache = collected;
-      } catch {
-        notesCache = [];
-      }
-      if (opened) build(input.value);
-      return notesCache;
-    })();
-    return notesLoading;
-  }
 
   function searchBlocks(query) {
     const out = [];
@@ -173,38 +126,19 @@ export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jum
     return out;
   }
 
-  function searchNotes(query) {
-    const needle = query.toLowerCase();
-    const out = [];
-    for (const note of notesCache || []) {
-      const name = String(note.name || "").replace(/\.md$/i, "");
-      const inName = name.toLowerCase().includes(needle);
-      const inBody = note.text.toLowerCase().includes(needle);
-      if (!inName && !inBody) continue;
-      out.push({
-        kind: "note",
-        rel: note.rel,
-        title: name,
-        text: snippetOf(inBody ? note.text : note.rel, query),
-        score: inName ? 1.6 : 0,
-      });
-    }
-    return out;
-  }
-
   function build(query) {
     const text = query.trim();
     if (!text) {
       renderResults([]);
       return;
     }
-    const local = [...searchBlocks(text), ...searchNotes(text)].sort((a, b) => b.score - a.score);
-    /* 本地的先上屏：块在内存里、笔记是快照，这一屏不该为了等磁盘而空着 */
+    const local = searchBlocks(text).sort((a, b) => b.score - a.score);
+    /* 本地的先上屏：块在内存里，这一屏不该为了等磁盘而空着 */
     renderResults(local.slice(0, LOCAL_RESULTS), text);
     void searchOtherSpaces(text, local);
   }
 
-  /* 别的空间放在后面扫。慢一步没关系，但不能把已经出来的本地结果顶掉 */
+  /* 别的画布放在后面扫。慢一步没关系，但不能把已经出来的本地结果顶掉 */
   async function searchOtherSpaces(text, local) {
     if (!jumpToSpace) return;
     const seq = ++remoteSeq;
@@ -245,11 +179,9 @@ export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jum
       if (query) {
         const empty = document.createElement("p");
         empty.className = "canvas-search-empty";
-        empty.textContent = notesCache
-          ? remotePending
-            ? "这个空间和笔记库里都没有（还在搜其它空间…）"
-            : "这个空间、笔记库和别的空间里都没有"
-          : "这个空间里没有（笔记库还在读…）";
+        empty.textContent = remotePending
+          ? "这个画布里没有（还在搜其它画布…）"
+          : "这个画布和别的画布里都没有";
         list.append(empty);
       }
       return;
@@ -264,9 +196,7 @@ export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jum
       const badge =
         entry.kind === "block"
           ? TYPE_LABEL[entry.type] || "块"
-          : entry.kind === "note"
-            ? "笔记"
-            : String(entry.spaceName || "空间");
+          : String(entry.spaceName || "画布");
       row.innerHTML =
         `<span class="canvas-search-badge">${escapeHtml(badge.length > 10 ? `${badge.slice(0, 10)}…` : badge)}</span>` +
         `<span class="canvas-search-main"><span class="canvas-search-title">${mark(entry.title, query)}</span>` +
@@ -293,12 +223,10 @@ export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jum
     close();
     if (entry.kind === "block") {
       focusBlock(entry.id);
-    } else if (entry.kind === "other") {
-      Promise.resolve(jumpToSpace?.(entry.space, entry.id)).catch((error) =>
-        console.error(`跳到那个空间失败：${error}`),
-      );
     } else {
-      openNoteFile(entry.rel);
+      Promise.resolve(jumpToSpace?.(entry.space, entry.id)).catch((error) =>
+        console.error(`跳到那个画布失败：${error}`),
+      );
     }
   }
 
@@ -335,7 +263,7 @@ export function initSearch({ getItems, getSpaceId, focusBlock, openNoteFile, jum
     true,
   );
 
-  /* 换页了就别留着这个浮层：它挂在空间页里，跟着一起藏起来更干净 */
+  /* 换页了就别留着这个浮层：它挂在画布页里，跟着一起藏起来更干净 */
   window.addEventListener("inspace:route", () => close());
 
   document.addEventListener("keydown", (event) => {

@@ -1,4 +1,4 @@
-/* 通用右键菜单：主菜单 + 最多两级向右展开的浮层，空间块、连线、笔记树都从这里弹。
+/* 通用右键菜单：主菜单 + 最多两级向右展开的浮层，画布块、连线都从这里弹。
  * 用法：openMenu(x, y, [{ label, onClick, danger, swatch, trailing, color, children, colorPicker, slider }])
  *   trailing    —— 行尾的当前值指示，纯展示、不响应指针，color 给圆点当填充色。
  *   children    —— 下一级菜单：鼠标移到这一行就在右边展开，移开收掉；点一下也开着。

@@ -37,6 +37,13 @@ const DEFAULT_DIT: &str = "qwen_image_2.1-Q6_K.gguf";
 const DEFAULT_ENCODER: &str = "Qwen3VL-8B-Instruct-Q4_K_M.gguf";
 const DEFAULT_VISION: &str = "mmproj-Qwen3VL-8B-Instruct-F16.gguf";
 const DEFAULT_VAE: &str = "qwen_image_2.1_vae_bf16.safetensors";
+/// 高清放大那颗网络权重，跟着数据根走（`gen/upscale/`）。它不参与「模型目录可换」
+/// 那套：只有 67 MB，没人会为它单独指一个盘。
+const UPSCALE_SUB: &str = "upscale";
+const DEFAULT_UPSCALER: &str = "RealESRGAN_x4plus.pth";
+/// 分块边长（输入侧像素）。整张一次过装不下：864×1152→3456×4608 那一版图要 26 GB
+/// 显存，引擎干净失败；512 分块同一张 9.8 秒出，反复跑也不坏。
+const UPSCALE_TILE: i32 = 512;
 /// 档位存 SQLite 用的键：存的就是模型目录里的纯文件名
 const DIT_KEY: &str = "gen_dit";
 const ENCODER_KEY: &str = "gen_encoder";
@@ -251,7 +258,7 @@ pub struct Machine {
     pub ram_total_mb: u64,
     /// 检测这一刻的空闲内存。忙的时候数字会小，建议档跟着小——这是有意的。
     pub ram_avail_mb: u64,
-    /// 模型目录所在盘的剩余空间
+    /// 模型目录所在盘的剩余画布
     pub dir_free_mb: u64,
 }
 
@@ -326,7 +333,8 @@ pub struct GenRequest {
     /// 解码只靠 image 的 png 特性——别的格式在前端那侧就已经画成 PNG 了。
     #[serde(default)]
     pub images: Vec<String>,
-    /// t2i / i2i / edit。不给就按图数定：没图是文生图，一张当底图，多张当参考。
+    /// t2i / i2i / edit / upscale。不给就按图数定：没图是文生图，一张当底图，多张当参考。
+    /// upscale 那档不读提示词，也不碰扩散权重。
     #[serde(default)]
     pub mode: Option<String>,
     /// 图生图改多少（0 原样 1 全改）。不给吃上游默认 0.75。
@@ -334,7 +342,7 @@ pub struct GenRequest {
     pub strength: Option<f32>,
 }
 
-/// 输入图的三种吃法。
+/// 输入图的三种吃法，外加一条完全不碰扩散模型的放大路。
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Mode {
     Text,
@@ -342,6 +350,8 @@ enum Mode {
     Image,
     /// 多张参考图（Qwen-Image 2.1 吃 ref-latent）
     Reference,
+    /// 纯 ESRGAN 前向，输出 4×。不吃提示词、不载入那 12 GB 权重
+    Upscale,
 }
 
 impl Mode {
@@ -350,6 +360,7 @@ impl Mode {
             "t2i" | "text" => Mode::Text,
             "i2i" | "image" => Mode::Image,
             "edit" | "reference" => Mode::Reference,
+            "upscale" => Mode::Upscale,
             _ if count == 0 => Mode::Text,
             _ if count == 1 => Mode::Image,
             _ => Mode::Reference,
@@ -802,7 +813,7 @@ fn ram_mb() -> (u64, u64) {
     (0, 0)
 }
 
-/// 目录所在盘的剩余空间（MB）。目录还没建出来时按最近的已存在父目录算。
+/// 目录所在盘的剩余画布（MB）。目录还没建出来时按最近的已存在父目录算。
 fn free_mb(dir: &Path) -> u64 {
     #[cfg(windows)]
     {
@@ -1003,7 +1014,8 @@ pub async fn gen_start(
     req: GenRequest,
 ) -> Result<(), String> {
     let block = check_item_id(&req.block)?;
-    if req.prompt.trim().is_empty() {
+    /* 放大那一档压根不读提示词，别拿空框拦它 */
+    if Mode::pick(req.mode.as_deref(), req.images.len()) != Mode::Upscale && req.prompt.trim().is_empty() {
         return Err("提示词是空的".to_string());
     }
     let core = state.0.clone();
@@ -1015,6 +1027,10 @@ pub async fn gen_start(
 }
 
 fn begin(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: String) -> Result<(), String> {
+    /* 放大这一档不碰扩散模型：既不载入那 12 GB，也不走 ctx，自成一条路 */
+    if Mode::pick(req.mode.as_deref(), req.images.len()) == Mode::Upscale {
+        return begin_upscale(core, app, req, block);
+    }
     let ctx = {
         let mut engine = core.lock();
         /* 一次一张：正在出图时再点「开始」不排队、不打断，直接回绝 */
@@ -1043,6 +1059,41 @@ fn begin(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: String) -
     let handle = Ctx(ctx);
     thread::spawn(move || run_job(core, app, handle, req, block));
     Ok(())
+}
+
+/// 高清放大这一趟：认领 busy、认权重，然后把前向丢给后台线程。
+/// 一次前向几十秒，中途掐不掉，所以「停止」只能靠标志位让收尾显示成「已取消」。
+fn begin_upscale(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: String) -> Result<(), String> {
+    {
+        let mut engine = core.lock();
+        if engine.busy {
+            return Err("正在出图，等这一张跑完".to_string());
+        }
+        engine.busy = true;
+        engine.last_used = Instant::now();
+        core.cancel.store(false, Ordering::Relaxed);
+    }
+    let model = match upscaler_path(&core) {
+        Ok(path) => path,
+        Err(error) => {
+            core.lock().busy = false;
+            return Err(error);
+        }
+    };
+    thread::spawn(move || upscale_job(core, app, model, req, block));
+    Ok(())
+}
+
+/// 放大权重的位置：数据根里的 `gen/upscale/`，跟「模型目录可换」那套无关。
+fn upscaler_path(core: &GenCore) -> Result<PathBuf, String> {
+    let path = core.data.dir(GEN_DIR).join(UPSCALE_SUB).join(DEFAULT_UPSCALER);
+    if !path.is_file() {
+        return Err(format!(
+            "放大模型不在：{}（Real-ESRGAN x4plus，67 MB）",
+            path.display()
+        ));
+    }
+    Ok(path)
 }
 
 /// 停止这一轮。这里不碰那把锁——它正被「载入权重」占着的时候，等锁就是卡界面。
@@ -1142,14 +1193,36 @@ fn run_job(
         );
         out
     };
+    finish(&core, &app, block, outcome, started.elapsed().as_secs_f32());
+}
+
+/// 两条路（扩散、放大）跑完都从这儿收尾：交还 busy，再把这一张或这条错发回前端。
+fn finish(
+    core: &GenCore,
+    app: &tauri::AppHandle,
+    block: String,
+    outcome: Result<Out, String>,
+    seconds: f32,
+) {
     let canceled = core.cancel.load(Ordering::Relaxed);
     {
         let mut engine = core.lock();
         engine.busy = false;
         engine.last_used = Instant::now();
     }
-    let seconds = started.elapsed().as_secs_f32();
     match outcome {
+        /* 放大那一次前向掐不断，只能跑完再认这张已经作废——
+           不然界面先显示「已取消」，过几秒又自己变成一张成品。 */
+        Ok(_) if canceled => {
+            let _ = app.emit(
+                "gen-failed",
+                FailEvent {
+                    block,
+                    error: "已取消".to_string(),
+                    canceled: true,
+                },
+            );
+        }
         Ok(image) => {
             let _ = app.emit(
                 "gen-done",
@@ -1173,6 +1246,88 @@ fn run_job(
                 },
             );
         }
+    }
+}
+
+fn upscale_job(
+    core: GenCore,
+    app: tauri::AppHandle,
+    model: PathBuf,
+    req: GenRequest,
+    block: String,
+) {
+    let started = Instant::now();
+    let outcome = upscale_run(&model, &req);
+    finish(&core, &app, block, outcome, started.elapsed().as_secs_f32());
+}
+
+/// 一次 ESRGAN 前向。ctx 现建现放：认过一次 0.1 秒，比那 12 GB 权重便宜得多，
+/// 不值得为它维护一套空闲释放。提示词、宽高、步数、种子在这一档全都不看，
+/// 输出尺寸就是输入的 4 倍（网络自带的倍率）。
+fn upscale_run(model: &Path, req: &GenRequest) -> Result<Out, String> {
+    match req.images.len() {
+        1 => {}
+        0 => return Err("高清放大要连一张图过来".to_string()),
+        count => return Err(format!("高清放大只吃一张图，现在连了 {count} 张")),
+    }
+    let input = decode_input(&req.images[0])?;
+    let path = cpath(model);
+    /* 后端名留空 = 引擎自己挑，和扩散那条路一个口径；参数住 CPU 也是照它抄。
+       线程数只管 CPU 后端，CUDA 上用不上，跟着引擎的默认 4。 */
+    let backend = CString::new("").expect("常量串");
+    let params_backend = CString::new("cpu").expect("常量串");
+    unsafe {
+        let ctx = sd::new_upscaler_ctx(
+            path.as_ptr(),
+            false,
+            4,
+            UPSCALE_TILE,
+            backend.as_ptr(),
+            params_backend.as_ptr(),
+        );
+        if ctx.is_null() {
+            return Err("放大模型起不来：new_upscaler_ctx 返回空，看后端日志".to_string());
+        }
+        let mut result: *mut sd::sd_image_generation_result_t = null_mut();
+        let ok = sd::upscale(ctx, input.raw, 4, &mut result);
+        let out = read_back(result, ok, "放大失败，看后端日志");
+        sd::free_upscaler_ctx(ctx);
+        out
+    }
+}
+
+/// 把引擎那份结果像素拷出来。扩散和放大两条路共用：结果必须在拷完之后才 free，
+/// 顺序错了就是拿已还回去的内存。
+fn read_back(
+    result: *mut sd::sd_image_generation_result_t,
+    ok: bool,
+    failed: &str,
+) -> Result<Out, String> {
+    if !ok || result.is_null() {
+        return Err(failed.to_string());
+    }
+    unsafe {
+        let batch = &*result;
+        let item = batch
+            .items
+            .as_ref()
+            .ok_or_else(|| "出图失败：结果里没有图".to_string())?;
+        let image = &item.image;
+        let channel = image.channel;
+        let len = (image.width * image.height * channel) as usize;
+        if image.data.is_null() || len == 0 {
+            sd::free_sd_image_generation_result(result);
+            return Err("出图失败：结果是空的".to_string());
+        }
+        let out = Out {
+            // 必须拷：free 一跑，这份像素就没了
+            pixels: std::slice::from_raw_parts(image.data, len).to_vec(),
+            width: image.width,
+            height: image.height,
+            channel,
+        };
+        sd::free_sd_image_generation_result(result);
+        Ok(out)
     }
 }
 
@@ -1235,33 +1390,13 @@ fn generate(ctx: Ctx, req: &GenRequest) -> Result<Out, String> {
                 params.ref_images = ref_images.as_ptr() as *mut sd::sd_image_t;
                 params.ref_images_count = ref_images.len() as _;
             }
+            /* 放大那一档在 begin() 就分岔走了，压根不会带着它走到这儿来碰扩散参数 */
+            Mode::Upscale => unreachable!("高清放大不走扩散"),
         }
 
         let mut result: *mut sd::sd_image_generation_result_t = null_mut();
-        if !sd::generate_image(ctx.0, &params, &mut result) || result.is_null() {
-            return Err("出图失败".to_string());
-        }
-        let batch = &*result;
-        let item = batch
-            .items
-            .as_ref()
-            .ok_or_else(|| "出图失败：结果里没有图".to_string())?;
-        let image = &item.image;
-        let channel = image.channel;
-        let len = (image.width * image.height * channel) as usize;
-        if image.data.is_null() || len == 0 {
-            sd::free_sd_image_generation_result(result);
-            return Err("出图失败：结果是空的".to_string());
-        }
-        let out = Out {
-            // 必须拷：free_sd_image_generation_result 一跑，这份像素就没了
-            pixels: std::slice::from_raw_parts(image.data, len).to_vec(),
-            width: image.width,
-            height: image.height,
-            channel,
-        };
-        sd::free_sd_image_generation_result(result);
-        Ok(out)
+        let ok = sd::generate_image(ctx.0, &params, &mut result);
+        read_back(result, ok, "出图失败")
     }
 }
 

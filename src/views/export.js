@@ -2,7 +2,7 @@
  *
  * 做法：不重画一遍，而是把世界里那份 DOM 原样克隆下来，塞进一个
  * <foreignObject>，让浏览器自己再排一次版、再光栅化一次 —— 这样文字换行、
- * 圆角、便签配色、笔记里的 Markdown 全都不用手写第二套渲染。
+ * 圆角、配色、笔记里的 Markdown 全都不用手写第二套渲染。
  *
  * 几个必须自己处理的坑：
  *   - 图片走 asset 协议，是另一个源，直接画会污染画布。所以图片一律先让后端
@@ -18,7 +18,7 @@ import { bytesToBase64, rasterize } from "./raster.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
-/* 留白：块的边框和便签的阴影不至于被切在边上 */
+/* 留白：块的边框和阴影不至于被切在边上 */
 const PADDING = 56;
 
 /* 清晰度档位 = 相对「屏幕上 100% 的样子」的倍数。
@@ -531,7 +531,7 @@ export function createExporter({
     const view = document.createElement("div");
     view.id = "view";
     /* 必须挂上 canvas-stage 这个类：块的样式里有不少是 .canvas-stage 的后代选择器，
-       少了它，卡片会掉内边距、便签会掉阴影 */
+       少了它，卡片会掉内边距和阴影 */
     view.className = "canvas-stage";
     view.setAttribute(
       "style",
@@ -624,14 +624,6 @@ export function createExporter({
         else rects.push(item);
       } else if (item.type === "text") {
         if (String(item.text || "").trim()) texts.push(item);
-      } else if (item.type === "sticky") {
-        if (!String(item.text || "").trim()) continue;
-        texts.push({
-          ...item,
-          type: "text",
-          fontSize: item.fontSize || 16,
-          color: item.textColor || "#2b2622",
-        });
       } else if (
         item.type === "image" ||
         item.type === "video" ||
@@ -827,9 +819,9 @@ body { font-family: ${FONT_STACK}; }
 
   async function buildArticle(name) {
     const items = getItems();
-    if (!items.length) throw new Error("这个空间还是空的，没东西可导出");
+    if (!items.length) throw new Error("这个画布还是空的，没东西可导出");
     const nodes = articleNodes(items);
-    if (!nodes.length) throw new Error("这个空间只有连线，没有可成文的文字");
+    if (!nodes.length) throw new Error("这个画布只有连线，没有可成文的文字");
 
     const body = renderWechatBody(nodes);
     return [
@@ -1168,9 +1160,9 @@ body { font-family: ${FONT_STACK}; }
 
   async function buildToutiao(name) {
     const items = getItems();
-    if (!items.length) throw new Error("这个空间还是空的，没东西可导出");
+    if (!items.length) throw new Error("这个画布还是空的，没东西可导出");
     const nodes = articleNodes(items);
-    if (!nodes.length) throw new Error("这个空间只有连线，没有可成文的文字");
+    if (!nodes.length) throw new Error("这个画布只有连线，没有可成文的文字");
     const blocks = toutiaoBlocks(nodes);
     if (!blocks.length) throw new Error("这里没有可以转成文章的文字");
     const bytes = await buildDocx(blocks);
@@ -1234,10 +1226,10 @@ body { font-family: ${FONT_STACK}; }
 
   async function run(format, options = {}) {
     const items = getItems();
-    if (!items.length) throw new Error("这个空间还是空的，没东西可导出");
+    if (!items.length) throw new Error("这个画布还是空的，没东西可导出");
     const box = contentBox(items);
-    if (!box) throw new Error("这个空间只有连线，没东西可导出");
-    const name = (getMeta().name || "空间").trim() || "空间";
+    if (!box) throw new Error("这个画布只有连线，没东西可导出");
+    const name = (getMeta().name || "画布").trim() || "画布";
 
     if (format === "wechat") {
       const html = await buildArticle(name);
@@ -1301,10 +1293,10 @@ body { font-family: ${FONT_STACK}; }
      onSlice 返回 Promise —— 写完一张再画下一张，失败就整批停。 */
   async function exportSlices(options = {}) {
     const items = getItems();
-    if (!items.length) throw new Error("这个空间还是空的，没东西可导出");
+    if (!items.length) throw new Error("这个画布还是空的，没东西可导出");
     const box = contentBox(items);
-    if (!box) throw new Error("这个空间只有连线，没东西可导出");
-    const name = (getMeta().name || "空间").trim() || "空间";
+    if (!box) throw new Error("这个画布只有连线，没东西可导出");
+    const name = (getMeta().name || "画布").trim() || "画布";
 
     const info = slicePlan(box, options.quality);
     const prepared = await prepareWorld();
@@ -1352,7 +1344,7 @@ body { font-family: ${FONT_STACK}; }
    */
   async function snapshot(options = {}) {
     const items = getItems();
-    if (!items.length) throw new Error("这个空间还是空的，没有画面可看");
+    if (!items.length) throw new Error("这个画布还是空的，没有画面可看");
 
     let box = null;
     const region = options.region ?? "all";
@@ -1367,7 +1359,7 @@ body { font-family: ${FONT_STACK}; }
       box = { x, y, w, h };
     } else {
       box = contentBox(items);
-      if (!box) throw new Error("这个空间只有连线，没有可看的块");
+      if (!box) throw new Error("这个画布只有连线，没有可看的块");
     }
 
     const maxSide = Math.max(320, Math.min(4096, Number(options.maxSide) || 1600));

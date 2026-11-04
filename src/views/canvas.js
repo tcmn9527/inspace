@@ -1,4 +1,4 @@
-/* 无限空间。
+/* 无限画布。
  *
  * 结构：stage（视口，overflow hidden）> world（translate + scale）+ 选择框层。
  * 图元坐标全部是世界坐标；屏幕坐标只在选中框和鼠标换算时出现。
@@ -11,7 +11,7 @@
  *   - 粘贴图片/纯文本时落在鼠标当前位置。
  *   - 右键图元：边框色、填充色（文字还有文字色）、删除。
  *
- * 数据落在后端给的空间文件夹里：图元是 items.json，图片在 images/。 */
+ * 数据落在后端给的画布文件夹里：图元是 items.json，图片在 images/。 */
 
 import { closeColorPicker, openColorPicker } from "./color-picker.js";
 import { confirmDialog, choiceDialog, promptDialog, progressDialog, CLOSE_X_SVG } from "./dialog.js";
@@ -28,7 +28,6 @@ import {
   syncGen,
 } from "./genpanel.js";
 import { openVideoHelp } from "./video-help.js";
-import { createHistory } from "./history.js";
 import { createExporter, QUALITY, DEFAULT_QUALITY } from "./export.js";
 import { rasterize, toPngDataUrl } from "./raster.js";
 import * as store from "./canvas-store.js";
@@ -51,10 +50,14 @@ import {
   GEN_MIN_HEIGHT,
   GEN_MIN_WIDTH,
   GEN_MODES,
+  GEN_MODE_LABELS,
+  GEN_SHOTS_CHOICES,
+  GEN_SIZE_CHOICES,
   GEN_STEPS_MAX,
   GEN_STEPS_MIN,
   GEN_STRENGTH_MAX,
   GEN_STRENGTH_MIN,
+  GEN_STYLE_CHOICES,
   GEN_TEXT_MAX,
   FILE_MIN_HEIGHT,
   FILE_MIN_WIDTH,
@@ -76,10 +79,6 @@ import {
   SCENE_DEFAULT_WIDTH,
   SCENE_MIN_HEIGHT,
   SCENE_MIN_WIDTH,
-  STICKY_DEFAULT_COLOR,
-  STICKY_DEFAULT_TEXT,
-  STICKY_MIN_HEIGHT,
-  STICKY_MIN_WIDTH,
   absolutePathOf,
   capturePagePin,
   collectPictureImageSrcs,
@@ -102,7 +101,6 @@ import {
   makeNote,
   makePicture,
   makeScene,
-  makeSticky,
   makeText,
   makeVideo,
   newId,
@@ -142,7 +140,6 @@ import {
 } from "./canvas-items.js";
 import { initMinimap, refreshMinimap, blurMinimapFocus, isMinimapFocused } from "./minimap.js";
 import { initSearch } from "./search.js";
-import { openNote } from "./notes.js";
 import { setCosmosCamera, setCosmosSeed } from "./cosmos.js";
 
 const { invoke } = window.__TAURI__.core;
@@ -175,7 +172,6 @@ const CONNECTABLE = new Set([
   "image",
   "audio",
   "video",
-  "sticky",
   "note",
   "file",
   "ebook",
@@ -190,14 +186,11 @@ const RESIZE_MIN = {
   file: { w: FILE_MIN_WIDTH, h: FILE_MIN_HEIGHT },
   video: { w: VIDEO_MIN_WIDTH, h: VIDEO_MIN_HEIGHT },
   ebook: { w: EBOOK_MIN_WIDTH, h: EBOOK_MIN_HEIGHT },
-  sticky: { w: STICKY_MIN_WIDTH, h: STICKY_MIN_HEIGHT },
   note: { w: NOTE_MIN_WIDTH, h: NOTE_MIN_HEIGHT },
   picture: { w: PICTURE_MIN_WIDTH, h: PICTURE_MIN_HEIGHT },
   scene: { w: SCENE_MIN_WIDTH, h: SCENE_MIN_HEIGHT },
   gen: { w: GEN_MIN_WIDTH, h: GEN_MIN_HEIGHT },
 };
-const STICKY_BG_PRESETS = ["#bfa648", "#a6bf47", "#47bfb4", "#e5e1d6", "#aab0b5", "#262626"];
-const STICKY_TEXT_PRESETS = ["#000000", "#ffffff", "#4c4c4c", "#9e9e9e"];
 const NOTE_EDITOR_GUARDS = ".canvas-note-editor, .color-pop, #ctx-menu";
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "opus", "weba"]);
@@ -205,7 +198,7 @@ const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "o
 const VIDEO_EXTS = new Set(["mp4", "m4v", "webm", "mkv", "mov"]);
 /* Markdown 不当附件看待：拖进来抄成正文，直接变成一个能编辑的笔记块 */
 const MARKDOWN_EXTS = new Set(["md", "markdown"]);
-/* epub/mobi 能就地在空间上读；azw/azw3 这一版读不了，仍旧按附件收进来 */
+/* epub/mobi 能就地在画布上读；azw/azw3 这一版读不了，仍旧按附件收进来 */
 const EBOOK_EXTS = new Set(["epub", "mobi"]);
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -224,13 +217,13 @@ let drag = null;
 let itemEls = new Map();
 let imageCache = new Map();
 /* 画面块里垫的那张位图，渲染层只认 src，要能显示的地址得回来这张表拿。
-   切空间时 imageCache 整个换掉，所以塞的是一个现查的函数、不是那张表本身。 */
+   切画布时 imageCache 整个换掉，所以塞的是一个现查的函数、不是那张表本身。 */
 setPictureMedia((src) => imageCache.get(src) || "");
 let audioCache = new Map();
 /* 视频只缓存 asset 地址（一串字符），不缓存任何字节 */
 let videoCache = new Map();
 let noteImageCache = new Map();
-/* 文本块只读预览：缓存后端解好码的开头一段，切空间就清空重来。
+/* 文本块只读预览：缓存后端解好码的开头一段，切画布就清空重来。
    键带上存在方式，免得同一个路径的拷贝态和引用态串了。 */
 let filePreviewCache = new Map();
 const previewKey = (item) => `${item.linked ? "L" : "C"}|${item.src}`;
@@ -240,7 +233,7 @@ let pdfUrlCache = new Map();
 let docxUrlCache = new Map();
 let xlsxUrlCache = new Map();
 let pptxUrlCache = new Map();
-/* 书的目录进空间只读一次，翻章不用再解析整本；键和预览一样带上存在方式 */
+/* 书的目录进画布只读一次，翻章不用再解析整本；键和预览一样带上存在方式 */
 let ebookTocCache = new Map();
 const ebookKey = (canvasId, item) => `${canvasId}|${item.linked}|${item.src}`;
 let noteEditor = null; // 当前笔记块的编辑态 { itemId, el, box, textarea, editor }
@@ -248,7 +241,7 @@ let noteEditor = null; // 当前笔记块的编辑态 { itemId, el, box, textare
 let noteWriteBack = false;
 /* 已经弹过「改哪一份」的块，双击连着触发两次不至于叠出两层弹层 */
 let noteAskId = null;
-/* 音视频块指向的文件找不到了（引用查原片、拷贝查副本）：块留在原地，改成丢文件卡。每次进空间重新查。 */
+/* 音视频块指向的文件找不到了（引用查原片、拷贝查副本）：块留在原地，改成丢文件卡。每次进画布重新查。 */
 let mediaMissing = new Set();
 let modalOpen = false;
 let lastPointer = { x: 0, y: 0, inside: false };
@@ -262,164 +255,6 @@ let loadToken = 0;
 let copyTask = null; // { job, canvasId, resolve, label }
 /* 转音轨排在拷贝后面，同一根进度条，不并发 */
 let audioFix = null; // { job, canvasId, item }
-
-/* ---------- 撤销 / 重做 ----------
-   快照就是这一屏的所有块，含便签正文和笔记正文（它们平时另存一份文件，
-   但撤销要能把这些内容一起还回来，所以内存里这份是完整的）。
-   画面的绘制指令是唯一的例外：它不进快照，见 captureHistory。 */
-
-function captureHistory() {
-  if (!current) return "";
-  try {
-    /* 手绘一笔就上百个点，80 份全量快照会把内存吃穿，所以把 cmds 摘出去。
-       笔画的撤销由那块画面自己管一层栈（见 pictureHistory）；
-       全局撤销管的是这块的位置、尺寸、边框和纸色。
-       场景块里的东西（parts）同一个道理：一件的底面就有一圈坐标点。 */
-    return JSON.stringify(current.items, (key, value) =>
-      (key === "cmds" || key === "parts") && Array.isArray(value) ? undefined : value,
-    );
-  } catch {
-    return "";
-  }
-}
-
-function applyHistory(snap) {
-  if (!current || !snap) return;
-  let raw;
-  try {
-    raw = JSON.parse(snap);
-  } catch {
-    return;
-  }
-  /* 回放前先把正在编辑的正文收掉，不然输入框还指着已经不存在的块 */
-  if (editingId || edgeLabelEditor) commitEditing();
-  pauseMedia();
-  noteEditor = null;
-  current.items = sanitizeItems(raw);
-  /* 快照里没有画面的指令、也没有场景里的那堆东西（见 captureHistory），回放完从旁表接回去：
-     撤一次块的位置，不该顺手把用户画过的笔画、摆过的东西一起抹了 */
-  for (const item of current.items) {
-    if (item.type === "picture") {
-      const held = pictureCmdBank.get(item.id);
-      if (held) item.cmds = held;
-      const bank = pictureSymbolBank.get(item.id);
-      if (bank) item.symbols = bank;
-    } else if (item.type === "scene") {
-      const held = scenePartsBank.get(item.id);
-      if (held) item.parts = held;
-    } else if (item.type === "gen") {
-      /* 提示词和参数在快照里有、在 items.json 里没有：撤销完把这块自己那份文件追平，
-         不然重开空间看到的是撤销之前写的那句 */
-      persistGen(item);
-    }
-  }
-  for (const id of [...selectedIds]) if (!findItem(id)) selectedIds.delete(id);
-  const needImages = current.items.some((item) => {
-    if (item.type === "image") return Boolean(item.src) && !imageCache.get(item.src);
-    if (item.type === "picture") {
-      return collectPictureImageSrcs(item.cmds, item.symbols).some((one) => !imageCache.get(one.src));
-    }
-    return false;
-  });
-  renderAll();
-  syncSelectedClasses();
-  updateSelection();
-  updateChrome();
-  refreshMinimap();
-  scheduleItemsSave();
-  /* 便签和笔记的正文平时落在各自文件里，撤销回来的块要把文件也补上，
-     否则下一次打开这个空间就只剩个空壳 */
-  for (const item of current.items) {
-    if (item.type === "sticky") persistSticky(item);
-    else if (item.type === "note" && !item.linked) persistNote(item);
-  }
-  if (needImages) {
-    /* 撤销回来的图片块可能还没在缓存里（那边刚被删过）：补一次地址再就地换图，
-       整屏不重排，免得把用户正在做的事打断 */
-    void loadImages().then(() => {
-      if (!current) return;
-      for (const item of current.items) {
-        /* 画面里垫的图：地址刚补回来，那块画面得整幅重画一次，虚线占位框才换成真图。
-           没垫图的块不碰——九百多条指令那一幅重画一次不便宜。 */
-        if (item.type === "picture") {
-          if (!collectPictureImageSrcs(item.cmds, item.symbols).length) continue;
-          const el = itemEls.get(item.id);
-          if (el) syncItemElement(el, item);
-          continue;
-        }
-        if (item.type !== "image" || !item.src) continue;
-        const url = imageCache.get(item.src);
-        if (!url) continue;
-        const el = itemEls.get(item.id);
-        if (!el) continue;
-        const img = el.querySelector("img.canvas-image");
-        if (img) {
-          if (img.getAttribute("src") !== url) img.src = url;
-          continue;
-        }
-        /* 刚才按「丢文件」画的空卡片：整块重画一次 */
-        removeItemFromDom(item.id);
-        addItemElement(item);
-      }
-      updateSelection();
-    });
-  }
-}
-
-const history = createHistory({
-  capture: captureHistory,
-  apply: applyHistory,
-  onChange: () => syncHistoryButtons(),
-});
-
-function syncHistoryButtons() {
-  if (!ui) return;
-  const state = historyState();
-  if (ui.undo) ui.undo.disabled = !state.canUndo;
-  if (ui.redo) ui.redo.disabled = !state.canRedo;
-}
-
-/* 按钮的可用态跟栈走；history 自己不知道界面长什么样，这里现问一次 */
-function historyState() {
-  let canUndo = false;
-  let canRedo = false;
-  try {
-    canUndo = history.canUndo;
-    canRedo = history.canRedo;
-  } catch {
-    /* 还没 reset 过 */
-  }
-  return { canUndo, canRedo };
-}
-
-function undoHistory() {
-  if (history.busy) return;
-  if (editingId || edgeLabelEditor) {
-    /* 正文还在编辑：第一次 Ctrl+Z 先退出编辑态，别直接回滚一整步 */
-    commitEditing();
-    return;
-  }
-  history.undo();
-}
-
-function redoHistory() {
-  if (history.busy) return;
-  if (editingId || edgeLabelEditor) {
-    commitEditing();
-    return;
-  }
-  history.redo();
-}
-
-/* 删块时文件先不回收：这一笔还能被撤销，文件得留着。
-   真正执行推迟到这条记录被挤出撤销栈的时候（见 history.js）。
-   万一那一刻这份文件又被别的块引用上了（撤销之后又做了新动作），跳过。 */
-function deferFileDelete(canvasId, stillUsed, action) {
-  history.addCleanup(() => {
-    if (current && current.meta.id === canvasId && stillUsed()) return;
-    action();
-  });
-}
 
 /* ---------- 导出 ---------- */
 
@@ -504,7 +339,7 @@ function openExportMenu() {
 async function openImageExportDialog() {
   const base = exporter.plan({ quality: readQuality() });
   if (!base) {
-    showToast("这个空间还是空的，没东西可导");
+    showToast("这个画布还是空的，没东西可导");
     return;
   }
   const currentQuality = readQuality();
@@ -655,68 +490,6 @@ function showToast(text) {
   toastTimer = setTimeout(() => el.classList.remove("is-on"), 3600);
 }
 
-/* ---------- 历史版本 ---------- */
-
-function stampText(ms) {
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function agoText(ms) {
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return `${Math.floor(diff / 86_400_000)} 天前`;
-}
-
-/* 盘上那些自动快照。它是撤销栈之外的第二个底：撤销栈一刷新就没了，
-   这份留在空间文件夹的 .history/ 里，关机重开也还在。 */
-async function openHistoryPicker() {
-  if (!current) return;
-  const canvasId = current.meta.id;
-  let entries = [];
-  try {
-    entries = await store.historyList(canvasId);
-  } catch (error) {
-    showError(error);
-    return;
-  }
-  if (!entries.length) {
-    showToast("还没有自动快照：改动一下，过一会儿再来看");
-    return;
-  }
-  const picked = await choiceDialog({
-    title: "历史版本",
-    message:
-      `盘上留了 ${entries.length} 份自动快照（每 90 秒最多留一份）。` +
-      "挑一份恢复——恢复前的样子会先进撤销栈，按 Ctrl+Z 能退回来。",
-    options: entries.slice(0, 30).map((entry) => ({
-      value: entry.file,
-      label: `${stampText(entry.time)}　${agoText(entry.time)}`,
-      hint: `${entry.items} 块 · ${formatSize(entry.bytes)}`,
-    })),
-  });
-  if (!picked) return;
-  await restoreHistory(canvasId, picked);
-}
-
-async function restoreHistory(canvasId, file) {
-  if (!current || current.meta.id !== canvasId) return;
-  try {
-    const items = await store.historyRead(canvasId, file);
-    if (!Array.isArray(items)) throw new Error("这份快照里没有块");
-    /* 回放走的是撤销栈那同一套：换 items、重排、把便签和笔记的正文补回文件。
-       所以恢复完马上按 Ctrl+Z，回到的就是恢复前那一刻 */
-    applyHistory(JSON.stringify(items));
-    history.touch();
-    showToast(`已恢复到这一版（${items.length} 块），Ctrl+Z 可以退回`);
-  } catch (error) {
-    showError(error);
-  }
-}
-
 /* ---------- 初始化 ---------- */
 
 export function initCanvas() {
@@ -736,14 +509,11 @@ export function initCanvas() {
     insertAudio: document.querySelector("#canvas-insert-audio"),
     insertVideo: document.querySelector("#canvas-insert-video"),
     insertFile: document.querySelector("#canvas-insert-file"),
-    insertNote: document.querySelector("#canvas-insert-note"),
+    insertGen: document.querySelector("#canvas-insert-gen"),
     zoomValue: document.querySelector("#canvas-zoom-value"),
     zoomIn: document.querySelector("#canvas-zoom-in"),
     zoomOut: document.querySelector("#canvas-zoom-out"),
-    undo: document.querySelector("#canvas-undo"),
-    redo: document.querySelector("#canvas-redo"),
     exportBtn: document.querySelector("#canvas-export"),
-    historyBtn: document.querySelector("#canvas-history"),
     empty: document.querySelector("#canvas-empty"),
     create: document.querySelector("#canvas-create"),
     error: document.querySelector("#canvas-error"),
@@ -764,7 +534,7 @@ export function initCanvas() {
     ui.insertAudio,
     ui.insertVideo,
     ui.insertFile,
-    ui.insertNote,
+    ui.insertGen,
   ]) {
     button.addEventListener("click", dropTool);
   }
@@ -772,6 +542,11 @@ export function initCanvas() {
   ui.insertAudio.addEventListener("click", insertAudioFromFile);
   ui.insertVideo.addEventListener("click", insertVideoFromFile);
   ui.insertFile.addEventListener("click", insertFileFromPicker);
+  ui.insertGen.addEventListener("click", (event) => {
+    /* 菜单在 document 上挂着「点外部就收起」：不挡住这一下，刚开的菜单会被当成外部点击 */
+    event.stopPropagation();
+    openInsertGenMenu();
+  });
   ui.copyCancel.addEventListener("click", () => {
     const job = copyTask?.job || audioFix?.job;
     if (!job) return;
@@ -779,7 +554,6 @@ export function initCanvas() {
     ui.copyCancel.textContent = "停止中…";
     store.cancelVideoCopy(job).catch(() => {});
   });
-  ui.insertNote.addEventListener("click", insertNoteFromPicker);
 
   /* 菜单在 document 上挂了「点外部就收起」（见 menu.js），点击冒泡到那里会把刚弹出的
      切换器当成外部点击立刻关掉，所以这里要挡住 */
@@ -790,9 +564,7 @@ export function initCanvas() {
   ui.create.addEventListener("click", createFlow);
   bindZoomHold(ui.zoomIn, ZOOM_STEP);
   bindZoomHold(ui.zoomOut, -ZOOM_STEP);
-  ui.undo.addEventListener("click", undoHistory);
-  ui.redo.addEventListener("click", redoHistory);
-  /* 和空间名一样：菜单在 document 上挂着「点外部就收起」，这一下点击冒泡到那里，
+  /* 和画布名一样：菜单在 document 上挂着「点外部就收起」，这一下点击冒泡到那里，
      会把刚弹出的菜单当成外部点击立刻收掉，看起来就是「点了没反应」 */
   ui.exportBtn.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -803,7 +575,6 @@ export function initCanvas() {
     }
     openExportMenu();
   });
-  ui.historyBtn?.addEventListener("click", () => void openHistoryPicker());
   /* 缩放比例可以直接改：只选中数字部分，百分号留着，敲数字就能覆盖。
      焦点事件里同步设置选区会被浏览器随后落光标的默认行为盖掉，所以要等一帧 */
   ui.zoomValue.addEventListener("focus", () => {
@@ -860,7 +631,7 @@ export function initCanvas() {
     "wheel",
     (e) => {
       if (!active || !current) return;
-      /* 全屏看片时滚轮是给影片的，别去动背后空间的缩放 */
+      /* 全屏看片时滚轮是给影片的，别去动背后画布的缩放 */
       if (document.fullscreenElement) return;
       const rect = ui.stage.getBoundingClientRect();
       if (e.ctrlKey || e.metaKey) {
@@ -870,7 +641,7 @@ export function initCanvas() {
         zoomAt(e.clientX - rect.left, e.clientY - rect.top, current.camera.scale + step);
         return;
       }
-      /* 滚轮落在块的滚动区上就交给块自己滚（不 preventDefault，浏览器原生滚动），滚到头也不动空间 */
+      /* 滚轮落在块的滚动区上就交给块自己滚（不 preventDefault，浏览器原生滚动），滚到头也不动画布 */
       if (hasScrollableAncestor(e.target, Math.abs(e.deltaY) >= Math.abs(e.deltaX))) return;
       e.preventDefault();
       current.camera.x -= e.deltaX;
@@ -917,20 +688,12 @@ export function initCanvas() {
 
   setTool("select");
   updateChrome();
-  syncHistoryButtons();
 
   initSearch({
     getItems: () => (current ? current.items : []),
     getSpaceId: () => current?.meta?.id || "",
     focusBlock: focusBlockById,
-    openNoteFile: (rel) => {
-      /* 笔记是另一个页面的事：切过去，等它把树读完再打开那一篇 */
-      window.dispatchEvent(new CustomEvent("inspace:route", { detail: "notes" }));
-      Promise.resolve(window.__inspace?.ready)
-        .then(() => openNote(rel))
-        .catch((error) => console.error(`打开笔记失败：${error}`));
-    },
-    /* 别的空间的命中：先切过去，等它读完再定位。spaceOpen 自己会等到渲染完 */
+    /* 别的画布的命中：先切过去，等它读完再定位。spaceOpen 自己会等到渲染完 */
     jumpToSpace: async (spaceId, itemId) => {
       if (!spaceId) return;
       if (spaceId !== current?.meta?.id) await canvasAgent.spaceOpen(spaceId);
@@ -997,31 +760,25 @@ export function leaveCanvas() {
   /* 面板已经不显示了还让方向键挪视野，到了别的页面会莫名其妙 */
   blurMinimapFocus();
   pauseMedia();
-  /* 全屏壳躲在被隐藏的空间视图里时浏览器不会自己退，切走要手动收，
+  /* 全屏壳躲在被隐藏的画布视图里时浏览器不会自己退，切走要手动收，
      不然下一页会被撑到整块屏幕的尺寸 */
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   modalOpen = false;
-  activePickerClose?.();
-  activePickerClose = null;
   if (editingId || edgeLabelEditor) commitEditing();
   closeColorPicker(true);
   closeMenu();
-  history.dispose();
   void flushBlockContents();
   flushItems();
   flushCamera();
-  /* 走开的这个空间的笔画旁表没理由还揣着：块 id 到别的空间也用不上 */
-  pictureCmdBank.clear();
-  pictureSymbolBank.clear();
+  /* 走开的这个画布的画笔状态没理由还揣着：块 id 到别的画布也用不上 */
   pictureEditors.clear();
   pictureTimers.forEach((timer) => clearTimeout(timer));
   pictureTimers.clear();
-  scenePartsBank.clear();
   sceneTimers.forEach((timer) => clearTimeout(timer));
   sceneTimers.clear();
 }
 
-/* ---------- 空间列表 / 新建 / 切换 ---------- */
+/* ---------- 画布列表 / 新建 / 切换 ---------- */
 
 async function loadList() {
   try {
@@ -1034,7 +791,7 @@ async function loadList() {
 
 async function switchTo(id) {
   pauseMedia();
-  /* 换空间 = 换一块新画幅，上一个空间里武装着的画图工具不该跟着过来 */
+  /* 换画布 = 换一块新画幅，上一个画布里武装着的画图工具不该跟着过来 */
   setTool("select");
   if (!current || current.meta.id !== id) {
     if (editingId || edgeLabelEditor) commitEditing();
@@ -1075,8 +832,6 @@ async function switchTo(id) {
     const brokenContent = await loadBlockContents();
     mediaMissing = await refreshMediaFiles();
     if (token !== loadToken || !active) return;
-    /* 正文都读回来了才开始记历史：撤销回的第一帧应该是「刚打开的样子」 */
-    history.reset();
     await loadPictureImages();
     if (token !== loadToken || !active) return;
     renderAll();
@@ -1084,7 +839,7 @@ async function switchTo(id) {
     for (const item of staleNotes) {
       renderMissing(itemEls.get(item.id), item, current.meta.path || "");
     }
-    /* 自己那份内容文件读不动的便签/笔记同样是丢了，只是丢的是空间目录里的那份 */
+    /* 自己那份内容文件读不动的笔记同样是丢了，只是丢的是画布目录里的那份 */
     for (const item of brokenContent) {
       renderMissing(itemEls.get(item.id), item, current.meta.path || "");
     }
@@ -1160,7 +915,7 @@ async function loadImages() {
 
 /* 画面里垫的那张位图，src 是跟着 pictures/<块id>.json 一起读回来的，比上面那次 loadImages 晚一步。
    这里补上：只问缓存里还没有的 src，只重画真垫了图的块——九百多条指令那一幅重画一次不便宜。
-   刚打开空间时调它，那时块还没建，重画那步自然落空，地址先躺在缓存里等 renderAll。 */
+   刚打开画布时调它，那时块还没建，重画那步自然落空，地址先躺在缓存里等 renderAll。 */
 async function loadPictureImages() {
   if (!current) return;
   const canvasId = current.meta.id;
@@ -1189,7 +944,7 @@ async function loadPictureImages() {
   }
 }
 
-/* 音视频：进空间先问一句文件还在不在——引用态查原片，拷贝态查空间里的副本。
+/* 音视频：进画布先问一句文件还在不在——引用态查原片，拷贝态查画布里的副本。
    在就照常显示，没了块还留在原地，只把内容换成丢文件卡（音视频是点开才加载的，这里不提前拉数据）。 */
 async function refreshMediaFiles() {
   if (!current) return new Set();
@@ -1210,7 +965,7 @@ async function refreshMediaFiles() {
   return missing;
 }
 
-/* 音视频都是按需加载的，切空间/离开时把还在响的播放器停掉 */
+/* 音视频都是按需加载的，切画布/离开时把还在响的播放器停掉 */
 function pauseMedia() {
   if (!ui || !ui.world) return;
   for (const media of ui.world.querySelectorAll("audio, video")) media.pause();
@@ -1219,7 +974,7 @@ function pauseMedia() {
 function updateChrome() {
   const hasCanvas = Boolean(current);
   ui.page.classList.toggle("no-canvas", !hasCanvas);
-  ui.nameText.textContent = current?.meta.name || "空间";
+  ui.nameText.textContent = current?.meta.name || "画布";
   ui.empty.hidden = hasCanvas;
   if (!hasCanvas) {
     ui.world.textContent = "";
@@ -1236,7 +991,6 @@ function showEmpty() {
   pauseMedia();
   if (edgeLabelEditor) finishEdgeLabelEdit(false);
   current = null;
-  history.dispose();
   selectedIds = new Set();
   editingId = null;
   noteEditor = null;
@@ -1258,9 +1012,9 @@ function showEmpty() {
 
 async function createFlow() {
   const name = await promptDialog({
-    title: "新建空间",
-    label: "空间名字",
-    value: "新空间",
+    title: "新建画布",
+    label: "画布名字",
+    value: "新画布",
     okText: "创建",
   });
   if (!name) return;
@@ -1276,8 +1030,8 @@ async function createFlow() {
 async function renameFlow() {
   if (!current) return;
   const name = await promptDialog({
-    title: "重命名空间",
-    label: "空间名字",
+    title: "重命名画布",
+    label: "画布名字",
     value: current.meta.name,
     okText: "重命名",
   });
@@ -1300,7 +1054,7 @@ async function renameFlow() {
 async function deleteFlow() {
   if (!current) return;
   const ok = await confirmDialog({
-    title: "删除空间",
+    title: "删除画布",
     message: `「${current.meta.name}」的整个文件夹会被移到系统回收站，之后仍可找回。`,
     okText: "删除",
     danger: true,
@@ -1329,13 +1083,13 @@ function openSwitcher() {
     onClick: () => switchTo(canvas.id),
   }));
   if (entries.length) entries.push("-");
-  entries.push({ label: "新建空间", onClick: createFlow });
+  entries.push({ label: "新建画布", onClick: createFlow });
   if (current) {
-    entries.push({ label: "重命名空间", onClick: renameFlow });
+    entries.push({ label: "重命名画布", onClick: renameFlow });
     entries.push({ label: "在资源管理器中显示", onClick: revealFlow });
-    entries.push({ label: "删除空间", danger: true, onClick: deleteFlow });
+    entries.push({ label: "删除画布", danger: true, onClick: deleteFlow });
   }
-  openMenu(rect.left, rect.bottom + 6, entries, { label: "空间" });
+  openMenu(rect.left, rect.bottom + 6, entries, { label: "画布" });
 }
 
 async function revealFlow() {
@@ -1473,7 +1227,7 @@ function resetZoom() {
   zoomAt(ui.stage.clientWidth / 2, ui.stage.clientHeight / 2, 1);
 }
 
-/* 从落点往上找有没有真的带滚动条的容器（笔记正文、便签卡、编辑框、代码块等） */
+/* 从落点往上找有没有真的带滚动条的容器（笔记正文、编辑框、代码块等） */
 function hasScrollableAncestor(node, vertical) {
   for (let el = node; el && el !== ui.stage; el = el.parentElement) {
     const overflow = vertical ? getComputedStyle(el).overflowY : getComputedStyle(el).overflowX;
@@ -1871,23 +1625,20 @@ function onStagePointerDown(e) {
     dropTool();
     return;
   }
-  /* 按住到松手之间不往撤销栈里落东西：一次拖动只算一步，
-     不然每个 pointermove 都会被记成一笔 */
-  history.hold(true);
-  /* 全屏时画面还挂在原来那个块上，事件会顺着 DOM 冒泡回空间：
-     这时点的是影片，不是空间，别去挪那块的位置 */
+  /* 全屏时画面还挂在原来那个块上，事件会顺着 DOM 冒泡回画布：
+     这时点的是影片，不是画布，别去挪那块的位置 */
   if (document.fullscreenElement) {
     dropTool();
     return;
   }
-  /* 右下角鸟瞰窗自己管自己的按下（拖视窗/点跳/收起），别当成空间平移 */
+  /* 右下角鸟瞰窗自己管自己的按下（拖视窗/点跳/收起），别当成画布平移 */
   if (e.target.closest?.(".canvas-minimap, .canvas-minimap-key")) {
     dropTool();
     return;
   }
-  /* 回到空间上操作，方向键就不再是挪视野 */
+  /* 回到画布上操作，方向键就不再是挪视野 */
   blurMinimapFocus();
-  /* 连线文字的输入框自己收指针：选字、挪光标，不是平移空间 */
+  /* 连线文字的输入框自己收指针：选字、挪光标，不是平移画布 */
   if (edgeLabelEditor && e.target === edgeLabelEditor.input) {
     dropTool();
     return;
@@ -2403,6 +2154,30 @@ function snapResize(state, dx, dy) {
   return { dx: nextDx, dy: nextDy, guides };
 }
 
+/* 直线/箭头吸到 45° 的倍数：水平、垂直和两条对角线。
+   判据和块对齐同一口径——离目标方向的垂距不超过 6 个屏幕像素就咬住。 */
+const LINE_SNAP_STEP = Math.PI / 4;
+function snapLineAngle(origin, point) {
+  const dx = point.x - origin.x;
+  const dy = point.y - origin.y;
+  const len = Math.hypot(dx, dy);
+  /* 贴着起点时不吸：方向还没定型，硬吸会让线头乱跳 */
+  if (len * current.camera.scale < SNAP_PX) return null;
+  const angle = Math.atan2(dy, dx);
+  const target = Math.round(angle / LINE_SNAP_STEP) * LINE_SNAP_STEP;
+  const miss = len * Math.abs(Math.sin(angle - target)) * current.camera.scale;
+  if (miss > SNAP_PX) return null;
+  /* 终点沿目标方向摆到同样的投影长度上：只微调，不跳 */
+  const along = dx * Math.cos(target) + dy * Math.sin(target);
+  return {
+    point: {
+      x: origin.x + Math.cos(target) * along,
+      y: origin.y + Math.sin(target) * along,
+    },
+    guide: { axis: "angle", at: origin, angle: target },
+  };
+}
+
 /* 辅助线画在屏幕坐标的顶层：它是拖拽这一下的临时提示，不属于任何一块，
    所以不参与面板之间的层级（同连线端点手柄那个口径）。松手即清。 */
 function drawSnapGuides(guides) {
@@ -2419,6 +2194,17 @@ function drawSnapGuides(guides) {
       line.style.left = `${top.x}px`;
       line.style.top = `${Math.min(top.y, bottom.y) - overhang}px`;
       line.style.height = `${Math.abs(bottom.y - top.y) + overhang * 2}px`;
+    } else if (guide.axis === "angle") {
+      /* 吸附角度的那条参考线：以起点为中心，沿咬住的方向拉长到盖住整个画布 */
+      const origin = worldToStage(guide.at.x, guide.at.y);
+      const reach = Math.hypot(ui.stage.clientWidth, ui.stage.clientHeight);
+      const cos = Math.cos(guide.angle);
+      const sin = Math.sin(guide.angle);
+      line.className = "canvas-guide canvas-guide-angle";
+      line.style.left = `${origin.x - cos * reach}px`;
+      line.style.top = `${origin.y - sin * reach}px`;
+      line.style.width = `${reach * 2}px`;
+      line.style.transform = `rotate(${guide.angle}rad)`;
     } else {
       const start = worldToStage(guide.from, guide.at);
       const end = worldToStage(guide.to, guide.at);
@@ -2437,7 +2223,6 @@ function startDraw(e) {
   if (tool === "rect" || tool === "ellipse") item = makeBox(tool, start.x, start.y, start.x, start.y);
   else if (tool === "picture") item = makePicture(start.x, start.y, 0, 0);
   else if (tool === "scene") item = makeScene(start.x, start.y, 0, 0);
-  else if (tool === "gen") item = makeGen(start.x, start.y, 0, 0);
   else if (tool === "line" || tool === "arrow") item = makeLine(tool, start.x, start.y, start.x, start.y);
   else if (tool === "text") item = makeText(start.x, start.y, 40);
   if (!item) {
@@ -2461,8 +2246,6 @@ function startResize(handle, e) {
   /* 手柄只在单选时才画出来，所以这里拿到的必然是那一个 */
   const item = findItem(loneSelected());
   if (!item) return;
-  /* 手柄上的按下挡住了舞台那一层的 pointerdown，这里自己把撤销栈挂起 */
-  history.hold(true);
   const start = clientToWorld(e.clientX, e.clientY);
   if (handle.dataset.handle === "bend") {
     drag = {
@@ -2620,28 +2403,36 @@ function onWindowPointerMove(e) {
   }
 
   if (drag.kind === "endpoint") {
+    /* 拖的是哪一头，另一端就是吸角度的原点 */
+    const origin = drag.end === "a" ? { x: item.x2, y: item.y2 } : { x: item.x, y: item.y };
+    const snapped = snapLineAngle(origin, point);
+    const target = snapped ? snapped.point : point;
     if (drag.end === "a") {
-      item.x = point.x;
-      item.y = point.y;
+      item.x = target.x;
+      item.y = target.y;
     } else {
-      item.x2 = point.x;
-      item.y2 = point.y;
+      item.x2 = target.x;
+      item.y2 = target.y;
     }
+    drawSnapGuides(snapped ? [snapped.guide] : []);
   } else if (drag.kind === "draw") {
     if (
       item.type === "rect" ||
       item.type === "ellipse" ||
       item.type === "picture" ||
-      item.type === "scene" ||
-      item.type === "gen"
+      item.type === "scene"
     ) {
       item.x = Math.min(drag.start.x, point.x);
       item.y = Math.min(drag.start.y, point.y);
       item.w = Math.max(1, Math.abs(dx));
       item.h = Math.max(1, Math.abs(dy));
     } else if (item.type === "line" || item.type === "arrow") {
-      item.x2 = point.x;
-      item.y2 = point.y;
+      /* 画的时候也吸：起点在按下处，鼠标离 45° 的倍数足够近就咬住 */
+      const snapped = snapLineAngle({ x: item.x, y: item.y }, point);
+      const target = snapped ? snapped.point : point;
+      item.x2 = target.x;
+      item.y2 = target.y;
+      drawSnapGuides(snapped ? [snapped.guide] : []);
     } else if (item.type === "text") {
       /* 文字块拖出矩形：按下处是起点，往右下方拖出宽高 */
       item.x = Math.min(drag.start.x, point.x);
@@ -2723,13 +2514,7 @@ function onWindowPointerMove(e) {
 }
 
 function onWindowPointerUp(e) {
-  try {
-    settlePointerUp(e);
-  } finally {
-    /* 按下时挂起的那一步在手势收尾之后才算完：画一半撤掉的块、拖完的尺寸
-       都在这一句之前定下来，撤销栈里不会留下「半成品」状态 */
-    history.hold(false);
-  }
+  settlePointerUp(e);
 }
 
 function settlePointerUp(e) {
@@ -2776,7 +2561,7 @@ function settlePointerUp(e) {
     return;
   }
   if (!item) {
-    /* 拖到一半这块没了（切空间/被别处删掉）：手势没有收尾，工具也得自己退回去 */
+    /* 拖到一半这块没了（切画布/被别处删掉）：手势没有收尾，工具也得自己退回去 */
     dropTool();
     return;
   }
@@ -2837,8 +2622,6 @@ function settlePointerUp(e) {
 
   if (!finished.moved) return;
   scheduleItemsSave();
-  /* 便签的宽高记在它自己那份 json 里，不写进 items.json */
-  if (finished.kind === "resize" && item.type === "sticky") persistSticky(item);
 }
 
 /* ---------- 连线交互 ---------- */
@@ -3121,18 +2904,43 @@ function onStageDoubleClick(e) {
     startEdgeLabelEdit(item.id);
     return;
   }
+  /* 双击图片：交给系统看图工具打开原图。画布上那块太小，看不清时用。
+     锁只拦「改」不拦「读」，所以这条放在锁的判断前头。 */
+  if (item.type === "image" || item.type === "gen") {
+    if (!openImageByDoubleClick(e, item)) return;
+    e.preventDefault();
+    return;
+  }
   /* 锁住的块不进入编辑 */
   if (item.locked) return;
-  if (!["text", "sticky", "note", "file"].includes(item.type)) return;
+  if (!["text", "note", "file"].includes(item.type)) return;
   /* 非文本的附件没有正文可编，双击仍然什么都不做（找文件走右键「在文件夹中显示」） */
   if (item.type === "file" && !isFileEditable(item)) return;
   e.preventDefault();
   setTool("select", true);
   select(item.id);
   if (item.type === "text") startTextEdit(item.id);
-  else if (item.type === "sticky") startStickyEdit(item.id);
   else if (item.type === "note") startNoteEdit(item.id);
   else startFileEdit(item.id);
+}
+
+/* 双击看大图：返回 true 表示这一下归它管。
+   生图面板只认取景窗里那张——双击提示词框是选词，不是看大图。 */
+function openImageByDoubleClick(e, item) {
+  if (item.type === "gen" && !e.target.closest?.(".canvas-gen-image")) return false;
+  if (!item.src) {
+    if (item.type === "gen") showToast("这张还没出好，等出完了再双击");
+    return false;
+  }
+  openImageExternally(item).catch(showError);
+  return true;
+}
+
+function openImageExternally(item) {
+  const canvasId = current?.meta?.id;
+  if (!canvasId) return Promise.resolve();
+  /* 块上的路径可能还没落盘（生图刚出完那一下），先把这笔存下去，后端才认得 */
+  return flushItems().then(() => store.openCanvasImage(canvasId, item.id));
 }
 
 function onStageContextMenu(e) {
@@ -3375,31 +3183,6 @@ function openItemMenu(item, x, y) {
         ],
       });
     }
-  } else if (item.type === "sticky") {
-    entries.push({ label: "编辑", onClick: () => startStickyEdit(item.id) });
-    entries.push({
-      label: "文字",
-      children: [
-        colorEntry(item, "textColor", {
-          presets: STICKY_TEXT_PRESETS,
-          allowAlpha: false,
-          save: () => persistSticky(item),
-        }),
-      ],
-    });
-    entries.push({
-      label: "背景",
-      children: [
-        colorEntry(item, "color", {
-          presets: STICKY_BG_PRESETS,
-          allowAlpha: false,
-          save: () => persistSticky(item),
-        }),
-      ],
-    });
-    entries.push(
-      borderMenuEntry(item, colorEntry(item, "borderColor", { save: () => persistSticky(item) })),
-    );
   } else if (item.type === "note") {
     entries.push({ label: "编辑", onClick: () => startNoteEdit(item.id) });
     entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
@@ -3430,11 +3213,11 @@ function openItemMenu(item, x, y) {
       },
     });
   }
-  /* 空间不替用户开文件，只把他带到那份文件躺着的地方 */
+  /* 画布不替用户开文件，只把他带到那份文件躺着的地方 */
   if (revealTarget(item)) {
     entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
   }
-  /* 属性：便签报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行 */
+  /* 属性：笔记报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行 */
   if (PROP_KIND[item.type]) {
     entries.push({ label: "属性", onClick: () => openItemProps(item) });
   }
@@ -3447,10 +3230,9 @@ function openItemMenu(item, x, y) {
   openMenu(x, y, entries);
 }
 
-/* 属性卡：这块是什么、文件躺在哪儿。便签只报「便签」，媒体和文件类带上绝对路径；
+/* 属性卡：这块是什么、文件躺在哪儿。笔记只报「笔记」，媒体和文件类带上绝对路径；
    路径整段可选中、长路径换行显示，不拿省略号把中间藏掉。 */
 const PROP_KIND = {
-  sticky: "便签",
   note: "笔记",
   image: "图片",
   audio: "音乐",
@@ -3563,9 +3345,9 @@ function moveLayer(item, dir) {
 }
 
 function openBlankMenu(x, y) {
-  const entries = [{ label: "新建空间", onClick: createFlow }];
+  const entries = [{ label: "新建画布", onClick: createFlow }];
   if (current) {
-    /* 刚复制过块才给这一条：空白处右键主要是空间级操作，粘不上去时不摆个死项 */
+    /* 刚复制过块才给这一条：空白处右键主要是画布级操作，粘不上去时不摆个死项 */
     if (copiedBlocks) {
       entries.push({ label: "粘贴", onClick: pasteCopiedBlocks });
     }
@@ -3577,7 +3359,7 @@ function openBlankMenu(x, y) {
         scheduleCameraSave();
       },
     });
-    entries.push({ label: "重命名空间", onClick: renameFlow });
+    entries.push({ label: "重命名画布", onClick: renameFlow });
     entries.push({ label: "在资源管理器中显示", onClick: revealFlow });
   }
   openMenu(x, y, entries);
@@ -3699,89 +3481,50 @@ function deleteItems(ids) {
     el?.querySelector("audio")?.pause();
     el?.querySelector("video")?.pause();
     removeItemFromDom(removeId);
-    /* 下面这些文件都不当场回收：先挂在撤销记录上，等这一笔再也撤不回来了才真删。
-       缓存的地址也别清 —— 撤销回来时块要立刻能显示，不用再问一遍后端。
-       引用态本来就是用户自己的文件，哪种情况都不碰。 */
+    /* 块一删，画布里那份副本当场进回收站（引入的原图是用户自己的，不碰）。
+       别的块还指着同一个文件就先留着，等最后一块也删了再收。 */
     const canvasId = current.meta.id;
-    const usedBy = (type, src) => () =>
+    const usedBy = (type, src) =>
       current.items.some((other) => other.type === type && other.src === src);
     if (item.type === "image" && item.src && !item.linked) {
       const { src } = item;
-      deferFileDelete(canvasId, usedBy("image", src), () => {
-        void store.deleteCanvasImage(canvasId, src, false).catch(() => {});
-      });
+      if (!srcInUse(src)) void store.deleteCanvasImage(canvasId, src, false).catch(() => {});
     }
     if (item.type === "audio" && item.src && !item.linked) {
       const { src } = item;
-      deferFileDelete(canvasId, usedBy("audio", src), () => {
-        void store.deleteCanvasAudio(canvasId, src, false).catch(() => {});
-      });
+      if (!usedBy("audio", src)) void store.deleteCanvasAudio(canvasId, src, false).catch(() => {});
     }
     if (item.type === "video" && item.src && !item.linked) {
       const { src, audioRel } = item;
-      deferFileDelete(canvasId, usedBy("video", src), () => {
-        void store.deleteCanvasVideo(canvasId, src, false, audioRel).catch(() => {});
-      });
-    }
-    if (item.type === "sticky") {
-      clearTimeout(stickyTimers.get(item.id));
-      stickyTimers.delete(item.id);
-      const stickyId = item.id;
-      deferFileDelete(
-        canvasId,
-        () => current.items.some((other) => other.id === stickyId),
-        () => void store.deleteSticky(canvasId, stickyId).catch(() => {}),
-      );
+      if (!usedBy("video", src)) void store.deleteCanvasVideo(canvasId, src, false, audioRel).catch(() => {});
     }
     if (item.type === "picture") {
       clearTimeout(pictureTimers.get(item.id));
       pictureTimers.delete(item.id);
       /* 块没了，那一套笔和笔画栈也跟着清空：块 id 不会复用，留着只是漏 */
       pictureEditors.delete(item.id);
-      const pictureId = item.id;
-      /* 撤回来那块还得带着笔画，所以旁表里这份也留到这条撤销记录被挤出栈为止，
-         跟文件一起放手 */
-      deferFileDelete(
-        canvasId,
-        () => current.items.some((other) => other.id === pictureId),
-        () => {
-          pictureCmdBank.delete(pictureId);
-          pictureSymbolBank.delete(pictureId);
-          void store.deletePicture(canvasId, pictureId).catch(() => {});
-        },
-      );
+      void store.deletePicture(canvasId, item.id).catch(() => {});
+      /* 垫的位图：拷贝进画布的那份跟着块一起回收（引入的原图是用户自己的，不碰） */
+      for (const one of collectPictureImageSrcs(item.cmds, item.symbols)) {
+        if (one.linked || !one.src) continue;
+        if (/^[a-zA-Z]:[\\/]/.test(one.src) || one.src.startsWith("/")) continue;
+        if (!srcInUse(one.src)) void store.deleteCanvasImage(canvasId, one.src, false).catch(() => {});
+      }
     }
     if (item.type === "scene") {
       clearTimeout(sceneTimers.get(item.id));
       sceneTimers.delete(item.id);
-      const sceneId = item.id;
-      /* 和画面一样：旁表里这份留到那条撤销记录被挤出栈为止，撤回来块还带着它摆的东西 */
-      deferFileDelete(
-        canvasId,
-        () => current.items.some((other) => other.id === sceneId),
-        () => {
-          scenePartsBank.delete(sceneId);
-          void store.deleteScene(canvasId, sceneId).catch(() => {});
-        },
-      );
+      void store.deleteScene(canvasId, item.id).catch(() => {});
     }
     if (item.type === "gen") {
       clearTimeout(genTimers.get(item.id));
       genTimers.delete(item.id);
       /* 这一轮的运行态（第几步、预览图）跟着块走：不留，否则「一次一张」会被一块已经不存在的图卡住 */
       dropGenRun(item.id);
-      const genId = item.id;
-      deferFileDelete(
-        canvasId,
-        () => current.items.some((other) => other.id === genId),
-        () => void store.deleteGen(canvasId, genId).catch(() => {}),
-      );
-      /* 出的那张图没人指着才回收：落块落出去的那张图片块还用它，撤回来两边都还在 */
-      if (item.src) {
-        const { src } = item;
-        deferFileDelete(canvasId, () => srcInUse(src), () => {
-          void store.deleteCanvasImage(canvasId, src, false).catch(() => {});
-        });
+      void store.deleteGen(canvasId, item.id).catch(() => {});
+      /* 出的那张图没人指着才回收：落块落出去的那张图片块还用它 */
+      if (item.src && !srcInUse(item.src)) {
+        void store.deleteCanvasImage(canvasId, item.src, false).catch(() => {});
       }
     }
     if (item.type === "note") {
@@ -3792,34 +3535,21 @@ function deleteItems(ids) {
       if (noteEditor?.itemId === item.id) noteEditor = null;
       clearTimeout(noteTimers.get(item.id));
       noteTimers.delete(item.id);
-      /* 引用块的原文件不归这里管，删的是空间自己那份 .md */
-      const noteId = item.id;
-      if (!item.linked) {
-        deferFileDelete(
-          canvasId,
-          () => current.items.some((other) => other.id === noteId),
-          () => void store.deleteNote(canvasId, noteId).catch(() => {}),
-        );
-      }
+      /* 引用块的原文件不归这里管，删的是画布自己那份 .md */
+      if (!item.linked) void store.deleteNote(canvasId, item.id).catch(() => {});
     }
     /* 拷贝块的副本跟着块一起进回收站；引用块只断链接，原文件在用户手里不动 */
     if (item.type === "file" && item.src) {
       if (fileEditor?.itemId === item.id) flushFileEditor();
       filePreviewCache.delete(previewKey(item));
-      if (!item.linked) {
-        const { src } = item;
-        deferFileDelete(canvasId, usedBy("file", src), () => {
-          void store.deleteCanvasFile(canvasId, src, false).catch(() => {});
-        });
+      if (!item.linked && !usedBy("file", item.src)) {
+        void store.deleteCanvasFile(canvasId, item.src, false).catch(() => {});
       }
     }
     if (item.type === "ebook" && item.src) {
       ebookTocCache.delete(ebookKey(current.meta.id, item));
-      if (!item.linked) {
-        const { src } = item;
-        deferFileDelete(canvasId, usedBy("ebook", src), () => {
-          void store.deleteCanvasFile(canvasId, src, false).catch(() => {});
-        });
+      if (!item.linked && !usedBy("ebook", item.src)) {
+        void store.deleteCanvasFile(canvasId, item.src, false).catch(() => {});
       }
     }
   }
@@ -3984,10 +3714,6 @@ function commitEditing() {
     commitNoteEditing();
     return;
   }
-  if (editing?.type === "sticky") {
-    commitStickyEditing();
-    return;
-  }
   const id = editingId;
   editingId = null;
   const item = findItem(id);
@@ -4012,48 +3738,15 @@ function commitEditing() {
   scheduleItemsSave();
 }
 
-/* ---------- 便签 / 笔记 / 画面块的内容文件 ----------
-   一块一份，住在空间自己目录里：便签 stickies/<块id>.json，笔记 notes/<块id>.md，
-   画面 pictures/<块id>.json。items.json 只留位置和层级，正文和笔画不再内嵌。
-   跟数据根顶层那两个旧目录、跟笔记页都脱钩——
-   空间上改这张便签，首页那张不动，反过来也一样。 */
+/* ---------- 笔记 / 画面块的内容文件 ----------
+   一块一份，住在画布自己目录里：笔记 notes/<块id>.md，画面 pictures/<块id>.json。
+   items.json 只留位置和层级，正文和笔画不再内嵌。 */
 
 const CONTENT_WRITE_DELAY = 400;
-let stickyTimers = new Map(); // 块 id -> 还没落盘的写盘定时器
 let noteTimers = new Map();
 let pictureTimers = new Map();
 let sceneTimers = new Map();
 let genTimers = new Map();
-/* 块 id -> 那份笔画。全局撤销快照不含 cmds（见 captureHistory），回放之后要从现在还活着的
-   这份旁表里接回去；删掉的块也先留一份，等那条撤销记录被挤出栈、文件真进回收站了才放手。 */
-const pictureCmdBank = new Map();
-/* 素材表同理：快照里没有它，回放后不接回来，块上那些 use 就全点不着名，画面当场空一片 */
-const pictureSymbolBank = new Map();
-/* 场景块里的那堆东西同理：快照不含 parts，回放之后要从现在还活着的这份旁表里接回去 */
-const scenePartsBank = new Map();
-
-/* 块上那几个运行时字段拼回文件该有的样子（字段口径同首页便签的 json） */
-function stickyFileOf(item) {
-  return {
-    title: "",
-    body: item.text || "",
-    color: item.color || STICKY_DEFAULT_COLOR,
-    textColor: item.textColor || STICKY_DEFAULT_TEXT,
-    borderColor: item.borderColor || "",
-    width: item.w,
-    height: item.h,
-  };
-}
-
-function applyStickyFile(item, file) {
-  item.text = typeof file.body === "string" ? file.body : "";
-  item.color = file.color || STICKY_DEFAULT_COLOR;
-  item.textColor = file.textColor || STICKY_DEFAULT_TEXT;
-  item.borderColor = typeof file.borderColor === "string" ? file.borderColor : "";
-  if (Number.isFinite(file.width)) item.w = Math.max(STICKY_MIN_WIDTH, file.width);
-  if (Number.isFinite(file.height)) item.h = Math.max(STICKY_MIN_HEIGHT, file.height);
-}
-
 function scheduleContentWrite(timers, key, write) {
   clearTimeout(timers.get(key));
   timers.set(
@@ -4065,23 +3758,8 @@ function scheduleContentWrite(timers, key, write) {
   );
 }
 
-/* 打字、改色、拖角都只改块上的字段，落盘统一走这一句；真正的写发生在防抖到点之后 */
-function persistSticky(item) {
-  if (!current || item.type !== "sticky") return;
-  /* 正文不进 items.json，但撤销要管它：每敲一下都算「有变化」，
-     防抖到点落一步历史 */
-  history.touch();
-  const canvasId = current.meta.id;
-  scheduleContentWrite(stickyTimers, item.id, () => {
-    const target = current && current.meta.id === canvasId ? findItem(item.id) : null;
-    if (!target) return;
-    store.writeSticky(canvasId, item.id, stickyFileOf(target)).catch(showError);
-  });
-}
-
 function persistNote(item) {
   if (!current || item.type !== "note" || item.linked) return;
-  history.touch();
   const canvasId = current.meta.id;
   scheduleContentWrite(noteTimers, item.id, () => {
     const target = current && current.meta.id === canvasId ? findItem(item.id) : null;
@@ -4091,12 +3769,9 @@ function persistNote(item) {
 }
 
 /* 画面的指令和素材表只认 pictures/<块id>.json 那一份：items.json 里没有它们，
-   全局撤销快照里也没有（见 captureHistory），所以这一句故意不调 history.touch()——
-   笔画的撤销归块自己那一层栈管，全局撤销只管这块的位置、尺寸和边框。 */
+   块自己的笔画撤销管的是画笔那层栈，和这儿无关。 */
 function persistPicture(item) {
   if (!current || item.type !== "picture") return;
-  pictureCmdBank.set(item.id, item.cmds || []);
-  pictureSymbolBank.set(item.id, item.symbols || {});
   const canvasId = current.meta.id;
   scheduleContentWrite(pictureTimers, item.id, () => {
     const target = current && current.meta.id === canvasId ? findItem(item.id) : null;
@@ -4105,11 +3780,9 @@ function persistPicture(item) {
   });
 }
 
-/* 场景块里的东西只认 scenes/<块id>.json 那一份：items.json 和全局快照里都没有 parts。
-   和画面同一套：全局撤销管这块的位置、尺寸、机位和光，不管里面摆了什么。 */
+/* 场景块里的东西只认 scenes/<块id>.json 那一份：items.json 里没有 parts。 */
 function persistScene(item) {
   if (!current || item.type !== "scene") return;
-  scenePartsBank.set(item.id, item.parts || []);
   const canvasId = current.meta.id;
   scheduleContentWrite(sceneTimers, item.id, () => {
     const target = current && current.meta.id === canvasId ? findItem(item.id) : null;
@@ -4118,9 +3791,7 @@ function persistScene(item) {
   });
 }
 
-/* 面板写的那句话和那几个参数只认 genpanels/<块id>.json 那一份。
-   和画面/场景不一样：这几个字段在撤销快照里是有的（captureHistory 只摘 cmds 和 parts），
-   所以这里故意不调 history.touch()——回放完直接调这一句把文件追平就够了。
+/* 面板写的那句话和那几个参数只认 genpanels/<块id>.json 那一份；
    出的那张图不在这一份里：它和 img 块一样是 images/ 里的真文件，路径记在块上。 */
 function persistGen(item) {
   if (!current || item.type !== "gen") return;
@@ -4143,20 +3814,20 @@ function genContentOf(item) {
     seed: item.seed,
     mode: item.mode,
     strength: item.strength,
+    style: item.style || "",
+    shots: item.shots || 1,
   };
 }
 
-/* 切空间、重命名、退出页面前把还没写完的正文补上，最后一次编辑不至于丢掉 */
+/* 切画布、重命名、退出页面前把还没写完的正文补上，最后一次编辑不至于丢掉 */
 async function flushBlockContents() {
   const canvasId = current?.meta.id;
   const pending = [
-    ...[...stickyTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "sticky" })),
     ...[...noteTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "note" })),
     ...[...pictureTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "picture" })),
     ...[...sceneTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "scene" })),
     ...[...genTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "gen" })),
   ];
-  stickyTimers.clear();
   noteTimers.clear();
   pictureTimers.clear();
   sceneTimers.clear();
@@ -4167,7 +3838,6 @@ async function flushBlockContents() {
       clearTimeout(timer);
       const item = findItem(itemId);
       if (!item) return null;
-      if (kind === "sticky") return store.writeSticky(canvasId, itemId, stickyFileOf(item)).catch(showError);
       if (kind === "note") return store.writeNoteText(canvasId, itemId, item.source || "").catch(showError);
       if (kind === "picture")
         return store.writePicture(canvasId, itemId, item.cmds || [], item.symbols || {}).catch(showError);
@@ -4187,7 +3857,6 @@ async function loadBlockContents() {
     current.items
       .filter(
         (item) =>
-          item.type === "sticky" ||
           (item.type === "note" && !item.linked) ||
           item.type === "picture" ||
           item.type === "scene" ||
@@ -4195,12 +3864,6 @@ async function loadBlockContents() {
       )
       .map(async (item) => {
         try {
-          if (item.type === "sticky") {
-            const file = await store.readSticky(canvasId, item.id);
-            if (file) applyStickyFile(item, file);
-            else await store.writeSticky(canvasId, item.id, stickyFileOf(item));
-            return;
-          }
           if (item.type === "picture") {
             /* 老数据把指令记在 items.json 的块上，块里还留着：读不到文件就补写一份，
                下一次 items.json 落盘自然把它们清出去 */
@@ -4213,8 +3876,6 @@ async function loadBlockContents() {
             } else {
               await store.writePicture(canvasId, item.id, item.cmds || [], item.symbols || {});
             }
-            pictureCmdBank.set(item.id, item.cmds || []);
-            pictureSymbolBank.set(item.id, item.symbols || {});
             return;
           }
           if (item.type === "scene") {
@@ -4228,7 +3889,6 @@ async function loadBlockContents() {
             } else {
               await store.writeScene(canvasId, item.id, item.parts || []);
             }
-            scenePartsBank.set(item.id, item.parts || []);
             return;
           }
           if (item.type === "gen") {
@@ -4247,6 +3907,8 @@ async function loadBlockContents() {
               item.strength = Number.isFinite(file.strength)
                 ? Math.min(1, Math.max(0, file.strength))
                 : item.strength;
+              item.style = typeof file.style === "string" ? file.style : "";
+              item.shots = GEN_SHOTS_CHOICES.includes(file.shots) ? file.shots : 1;
             } else {
               await store.writeGen(canvasId, item.id, genContentOf(item));
             }
@@ -4273,8 +3935,16 @@ async function loadBlockContents() {
 
 const GEN_PLACE_GAP = 24;
 
-/* 这个路径还有谁指着（独立图片块、别的面板各算一个）：回收旧图之前问一句 */
-const srcInUse = (src) => Boolean(current) && current.items.some((other) => other.src === src);
+/* 这个路径还有谁指着（独立图片块、别的面板、画面块垫的位图都算一份）：
+   回收旧图之前问一句，有人指着的就别动 */
+const srcInUse = (src) =>
+  Boolean(current) &&
+  current.items.some(
+    (other) =>
+      other.src === src ||
+      (other.type === "picture" &&
+        collectPictureImageSrcs(other.cmds, other.symbols).some((one) => one.src === src)),
+  );
 
 function attachGenPanel(el, item) {
   const bar = el.querySelector(".canvas-gen-bar");
@@ -4284,6 +3954,72 @@ function attachGenPanel(el, item) {
   if (!bar || !prompt || !runButton || !placeButton) return;
   /* 提示词框和按钮上的按下不能变成拖整块：整条在 pointerdown 上截住 */
   bar.addEventListener("pointerdown", (e) => e.stopPropagation());
+  /* 参数行这几颗下拉：点开一列，选中就写回块上，面板立刻跟着换字 */
+  const select = (selector, makeEntries) => {
+    const button = el.querySelector(selector);
+    if (!button) return;
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const target = findItem(item.id);
+      if (!target || target.locked) return;
+      const rect = button.getBoundingClientRect();
+      openMenu(rect.left, rect.bottom + 6, makeEntries(target), { kind: "gen-select" });
+    });
+  };
+  const check = (on) =>
+    on
+      ? '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.4 8.4 6.6 11.6 12.6 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      : "";
+  select(".canvas-gen-size", (target) => {
+    /* 常用 / 手机 / 电脑 / 证件照各一组，组之间压一条分隔线 */
+    const rows = [];
+    let group = "";
+    for (const one of GEN_SIZE_CHOICES) {
+      if (one.group !== group) {
+        if (rows.length) rows.push("-");
+        group = one.group;
+      }
+      rows.push({
+        label: `${one.label} · ${one.w}×${one.h}`,
+        trailing: check(target.imageW === one.w && target.imageH === one.h),
+        onClick: () => {
+          const now = findItem(item.id);
+          if (!now || now.locked) return;
+          now.imageW = one.w;
+          now.imageH = one.h;
+          persistGen(now);
+          refreshGenPanel(now.id);
+        },
+      });
+    }
+    return rows;
+  });
+  select(".canvas-gen-style", (target) =>
+    GEN_STYLE_CHOICES.map((one) => ({
+      label: one.label,
+      trailing: check((target.style || "") === one.label),
+      onClick: () => {
+        const now = findItem(item.id);
+        if (!now || now.locked) return;
+        now.style = one.label === "无风格" ? "" : one.label;
+        persistGen(now);
+        refreshGenPanel(now.id);
+      },
+    })),
+  );
+  select(".canvas-gen-shots", (target) =>
+    GEN_SHOTS_CHOICES.map((n) => ({
+      label: `${n} 张`,
+      trailing: check((target.shots || 1) === n),
+      onClick: () => {
+        const now = findItem(item.id);
+        if (!now || now.locked) return;
+        now.shots = n;
+        persistGen(now);
+        refreshGenPanel(now.id);
+      },
+    })),
+  );
   prompt.addEventListener("input", () => {
     const target = findItem(item.id);
     if (!target) return;
@@ -4298,7 +4034,7 @@ function attachGenPanel(el, item) {
   });
   runButton.addEventListener("click", () => runOrStopGen(item.id));
   placeButton.addEventListener("click", () => placeGenImage(item.id));
-  /* 上一张出的图跟着块一起回来：运行态记的是「这一轮」，重开空间时从 images/ 里接上 */
+  /* 上一张出的图跟着块一起回来：运行态记的是「这一轮」，重开画布时从 images/ 里接上 */
   const run = genRunOf(item.id);
   if (run.phase === "idle" && !run.imageUrl && !run.previewUrl && item.src) {
     patchGenRun(item.id, { imageUrl: imageCache.get(item.src) || "" });
@@ -4317,8 +4053,7 @@ function refreshGenPanel(id) {
 function genFeedOf(item) {
   const sources = genInputItems(item);
   const mode = genModeFor(item, sources.length);
-  const LABELS = { t2i: "文生图", i2i: "图生图", edit: "参考图编辑" };
-  return { mode, label: LABELS[mode] || mode, count: sources.length };
+  return { mode, label: GEN_MODE_LABELS[mode] || mode, count: sources.length };
 }
 
 function refreshGenFeeds() {
@@ -4359,7 +4094,7 @@ function genModeFor(item, count) {
    画面块是矢量，走导出那套光栅化。场景块这一版还不吃——three.js 抓帧是另一件事。 */
 async function genInputPng(item) {
   const space = current?.meta?.id;
-  if (!space) throw new Error("没有打开的空间");
+  if (!space) throw new Error("没有打开的画布");
   if (item.type === "image" || (item.type === "gen" && item.src)) {
     return toPngDataUrl(await store.imageData(space, item.src, Boolean(item.linked)));
   }
@@ -4380,7 +4115,16 @@ async function genInputPng(item) {
   throw new Error(`「${item.type}」这块当不了输入图`);
 }
 
-function runOrStopGen(id) {
+/* 面板上选的风格只是一个前缀句，出图时拼在用户写的词前面 */
+function promptWithStyle(item) {
+  const style = GEN_STYLE_CHOICES.find((one) => one.label === (item.style || ""));
+  return `${style?.prefix || ""}${(item.prompt || "").trim()}`;
+}
+
+/* 「一次跑几张」的队列：块 id -> 还剩几张。前几张出完自动落块，最后一张留在面板里 */
+const genBatches = new Map();
+
+function runOrStopGen(id, continuation = false) {
   const item = findItem(id);
   if (!item || item.type !== "gen" || item.locked) return;
   const run = genRunOf(id);
@@ -4390,10 +4134,14 @@ function runOrStopGen(id) {
   }
   /* 一次一张：别的块在出图就按不动（syncGen 里已经禁用了，这儿再挡一道） */
   if (isGenBusy()) return;
-  if (!(item.prompt || "").trim()) {
+  /* 放大这一档不读提示词，那句「先写一句提示词」在这儿是拦错人 */
+  const mode = genModeFor(item, genInputItems(item).length);
+  if (mode !== "upscale" && !(item.prompt || "").trim()) {
     showError("先写一句提示词");
     return;
   }
+  /* 这一轮要跑几张：只有用户按下的那一下才重新起队列，续跑沿用剩下的数 */
+  if (!continuation) genBatches.set(id, Math.max(0, (item.shots || 1) - 1));
   patchGenRun(id, {
     phase: "loading",
     step: 0,
@@ -4424,7 +4172,7 @@ async function startGenRun(item) {
     }
     body = {
       block: id,
-      prompt: item.prompt.trim(),
+      prompt: promptWithStyle(item),
       negative: item.negative || "",
       width: item.imageW,
       height: item.imageH,
@@ -4452,6 +4200,7 @@ async function startGenRun(item) {
 
 async function stopGen(id) {
   /* 点了就是停了，先按画面判；后端那边走它的硬取消，不用这儿等 */
+  genBatches.delete(id);
   patchGenRun(id, { phase: "canceled" });
   refreshGenPanel(id);
   await store.genCancel().catch(() => {});
@@ -4481,6 +4230,7 @@ async function placeGenImage(id) {
 async function onGenDone(payload) {
   const item = findItem(payload.block);
   if (!item) {
+    genBatches.delete(payload.block);
     dropGenRun(payload.block);
     return;
   }
@@ -4495,6 +4245,7 @@ async function onGenDone(payload) {
   });
   refreshGenPanel(payload.block);
   if (!dataUrl) {
+    genBatches.delete(payload.block);
     keepLastGenImage(payload.block);
     refreshGenPanel(payload.block);
     return;
@@ -4513,14 +4264,23 @@ async function onGenDone(payload) {
     const old = target.src;
     target.src = rel;
     imageCache.set(rel, dataUrl);
-    /* 上一张没人指着了才回收：跟删块同一套，等这条撤销记录挤出栈才真进回收站 */
-    if (old && old !== rel) {
-      deferFileDelete(canvasId, () => srcInUse(old), () => {
-        void store.deleteCanvasImage(canvasId, old, false).catch(() => {});
-      });
+    /* 上一张没人指着了才回收：跟删块同一套，当场进回收站 */
+    if (old && old !== rel && !srcInUse(old)) {
+      void store.deleteCanvasImage(canvasId, old, false).catch(() => {});
     }
     scheduleItemsSave();
+    /* 这一轮还要跑几张：先把这张落成图片块摆到面板旁边，再接着下一张。
+       最后一张不落，留在面板里由用户自己决定要不要落块 */
+    const left = genBatches.get(payload.block) || 0;
+    if (left > 0 && current && current.meta.id === canvasId) {
+      genBatches.set(payload.block, left - 1);
+      await placeGenImage(payload.block);
+      runOrStopGen(payload.block, true);
+    } else {
+      genBatches.delete(payload.block);
+    }
   } catch (error) {
+    genBatches.delete(payload.block);
     showError(error);
   }
 }
@@ -4565,10 +4325,9 @@ function setupGenEvents() {
 }
 
 /* ---------- 画面块：块内工具条与手绘 ----------
-   笔的状态长在块自己身上，不占空间工具栏那套一次性工具态：
+   笔的状态长在块自己身上，不占画布工具栏那套一次性工具态：
    在画面里涂一笔，不该把「选择」的蓝色从工具栏上挤走。
-   一块一套笔，加一层只归这块用的撤销栈——笔画不在全局快照里（见 captureHistory），
-   全局 Ctrl+Z 管的是这块的位置、尺寸、边框和纸色。 */
+   一块一套笔，撤销重做只退这块画过的笔画。 */
 
 const PICTURE_TOOL_LABELS = {
   select: "选择：这一笔完了，挪块缩放回到平常用法",
@@ -4581,7 +4340,7 @@ const PICTURE_TOOL_LABELS = {
   redo: "把这一步笔画放回来",
 };
 
-/* 图形跟空间工具栏那套一个画法：currentColor 描边、不填色、不加装饰 */
+/* 图形跟画布工具栏那套一个画法：currentColor 描边、不填色、不加装饰 */
 const PICTURE_TOOL_ICONS = {
   select:
     '<path d="M6.4 3.4l7.2 7.2-3.1.4 1.7 3.6-1.6.7-1.7-3.6-2.2 2.2z" fill="currentColor" stroke="none"/>',
@@ -4619,7 +4378,7 @@ function pictureEditorOf(id) {
 }
 
 /* 手里正捏着笔的那一块：只认「单选 + 工具不是选择」。
-   键盘的 Ctrl+Z 要先问它，才知道这一下是撤笔画还是撤块的位置尺寸。 */
+   键盘的 Ctrl+Z 只在这一块里生效，退的是画过的笔画。 */
 function paintingTarget() {
   if (selectedIds.size !== 1) return null;
   const id = [...selectedIds][0];
@@ -4840,8 +4599,6 @@ function onPicturePointerDown(e, id) {
   closeMenu();
   e.preventDefault();
   e.stopPropagation();
-  /* 舞台那一层的按下没跑到，它那句 hold(true) 也没机会执行，这儿自己挂上 */
-  history.hold(true);
   if (!selectedIds.has(id)) select(id);
   const point = picturePointAt(item, e.clientX, e.clientY);
   drag = {
@@ -4935,87 +4692,10 @@ function finishPaint(finished) {
   pictureAfterChange(finished.id);
 }
 
-/* ---------- 便签 / 笔记块 ---------- */
+/* ---------- 笔记块 ---------- */
 
-function caretEnd(el) {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  range.collapse(false);
-  const selection = window.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(range);
-}
-
-function startStickyEdit(id) {
-  if (editingId === id) return;
-  if (editingId || edgeLabelEditor) commitEditing();
-  const item = findItem(id);
-  const el = itemEls.get(id);
-  if (!item || !el || item.type !== "sticky") return;
-  editingId = id;
-  select(id);
-  el.classList.add("is-editing");
-  const body = el.querySelector(".canvas-sticky-body");
-  body.contentEditable = "plaintext-only";
-  body.spellcheck = false;
-  body.focus({ preventScroll: true });
-  caretEnd(body);
-  body.addEventListener("input", onStickyInput);
-  body.addEventListener("keydown", onStickyKeyDown);
-  body.addEventListener("blur", onStickyBlur);
-  body.addEventListener("paste", onStickyPaste);
-  updateSelection();
-}
-
-function onStickyInput() {
-  if (!editingId) return;
-  const item = findItem(editingId);
-  if (!item || item.type !== "sticky") return;
-  const el = itemEls.get(editingId);
-  const body = el?.querySelector(".canvas-sticky-body");
-  if (!body) return;
-  item.text = body.innerText.replace(/\n$/, "");
-  persistSticky(item);
-}
-
-function onStickyKeyDown(e) {
-  if (e.key === "Escape") {
-    e.preventDefault();
-    e.stopPropagation();
-    commitEditing();
-  }
-}
-
-function onStickyBlur() {
-  if (editingId || edgeLabelEditor) commitEditing();
-}
-
-function onStickyPaste(e) {
-  e.preventDefault();
-  const text = e.clipboardData?.getData("text/plain") || "";
-  if (text) document.execCommand("insertText", false, text);
-}
-
-function commitStickyEditing() {
-  const id = editingId;
-  editingId = null;
-  const item = findItem(id);
-  const el = itemEls.get(id);
-  if (!item || !el || item.type !== "sticky") return;
-  const body = el.querySelector(".canvas-sticky-body");
-  item.text = body.innerText.replace(/\n$/, "");
-  body.contentEditable = "false";
-  body.removeEventListener("input", onStickyInput);
-  body.removeEventListener("keydown", onStickyKeyDown);
-  body.removeEventListener("blur", onStickyBlur);
-  body.removeEventListener("paste", onStickyPaste);
-  el.classList.remove("is-editing");
-  updateSelection();
-  persistSticky(item);
-}
-
-/* 笔记块内联编辑器：工具栏、撤销重做、粘贴图片全部复用笔记页那一套。
- * 引用块默认只读——双击先问清楚「改源文件 / 转成空间副本 / 算了」，取消就一个字都不动。 */
+/* 笔记块内联编辑器：工具栏、撤销重做、粘贴图片都走 markdown-editor 那一套。
+ * 引用块默认只读——双击先问清楚「改源文件 / 转成画布副本 / 算了」，取消就一个字都不动。 */
 async function startNoteEdit(id) {
   if (editingId === id) {
     noteEditor?.editor.focus();
@@ -5034,16 +4714,16 @@ async function startNoteEdit(id) {
       mode = await choiceDialog({
         title: "请确认编辑对象",
         message: `「${item.name}」引用的是 ${item.path}。这次编辑要改哪一份？`,
-        note: "改源文件会把正文直接写回那份 .md；复制进空间则把正文收进块里，原文件不动，之后随便改。",
+        note: "改源文件会把正文直接写回那份 .md；复制进画布则把正文收进块里，原文件不动，之后随便改。",
         options: [
           { value: "write", label: "修改源文件", hint: "直接写回那份 Markdown" },
-          { value: "copy", label: "复制进空间", hint: "原文件不动，之后随便改" },
+          { value: "copy", label: "复制进画布", hint: "原文件不动，之后随便改" },
         ],
       });
     } finally {
       noteAskId = null;
     }
-    /* 弹层期间可能切了空间 / 关了页面，块早就不存在了 */
+    /* 弹层期间可能切了画布 / 关了页面，块早就不存在了 */
     if (!current || current.meta.id !== canvasId || !findItem(id)) return;
     if (!mode) return;
     if (mode === "copy") convertNoteToCopy(item);
@@ -5065,11 +4745,11 @@ async function startNoteEdit(id) {
     const box = document.createElement("div");
     box.className = "canvas-note-editor";
     const toolbar = document.createElement("div");
-    toolbar.className = "notes-toolbar canvas-note-toolbar";
+    toolbar.className = "md-toolbar canvas-note-toolbar";
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "Markdown 工具栏");
     const textarea = document.createElement("textarea");
-    textarea.className = "notes-textarea canvas-note-textarea";
+    textarea.className = "md-textarea canvas-note-textarea";
     textarea.spellcheck = false;
     textarea.setAttribute("aria-label", "Markdown 源码");
     box.append(toolbar, textarea);
@@ -5078,10 +4758,10 @@ async function startNoteEdit(id) {
     const editor = createMarkdownEditor({
       textarea,
       toolbar,
-      /* 引用块贴图会把空间目录下的相对路径写进用户原文件，那份 .md 挪个窝图就全断了。
-         真要贴图就先转成空间副本，图片才跟着块走。 */
+      /* 引用块贴图会把画布目录下的相对路径写进用户原文件，那份 .md 挪个窝图就全断了。
+         真要贴图就先转成画布副本，图片才跟着块走。 */
       saveImage: async (data, ext) => {
-        if (findItem(item.id)?.linked) throw new Error("引用块请先选「复制进空间」再贴图");
+        if (findItem(item.id)?.linked) throw new Error("引用块请先选「复制进画布」再贴图");
         return store.saveCanvasNoteImage(canvasId, item.id, data, ext);
       },
       onChange: (value) => {
@@ -5188,8 +4868,8 @@ function renderNoteBody(item, el) {
   hydrateNoteImages(item, el);
 }
 
-/* 「复制进空间」：正文落到空间自己的 notes/<块id>.md，链接断掉，原 .md 一个字节都不动。
-   图片另说——引用期间本来就禁止贴图，块里不会有指向空间目录的图片路径。 */
+/* 「复制进画布」：正文落到画布自己的 notes/<块id>.md，链接断掉，原 .md 一个字节都不动。
+   图片另说——引用期间本来就禁止贴图，块里不会有指向画布目录的图片路径。 */
 function convertNoteToCopy(item) {
   item.linked = false;
   item.path = "";
@@ -5234,17 +4914,17 @@ async function startFileEdit(id) {
       mode = await choiceDialog({
         title: "请确认编辑对象",
         message: `「${item.name}」引用的是 ${item.src}。这次编辑要改哪一份？`,
-        note: "改源文件会把整份正文写回那个文件；复制进空间则先把副本收进空间，原文件不动，之后随便改。",
+        note: "改源文件会把整份正文写回那个文件；复制进画布则先把副本收进画布，原文件不动，之后随便改。",
         options: [
           { value: "write", label: "修改源文件", hint: "直接写回那份文本" },
-          { value: "copy", label: "复制进空间", hint: "原文件不动，编辑空间里的副本" },
+          { value: "copy", label: "复制进画布", hint: "原文件不动，编辑画布里的副本" },
         ],
       });
     } finally {
       modalOpen = false;
       fileAskId = null;
     }
-    /* 弹层期间可能切了空间 / 关了页面，块早就不存在了 */
+    /* 弹层期间可能切了画布 / 关了页面，块早就不存在了 */
     if (!current || current.meta.id !== canvasId || !findItem(id)) return;
     if (!mode) return;
     if (mode === "copy" && !(await copyFileBlockIntoCanvas(findItem(id)))) return;
@@ -5262,7 +4942,7 @@ async function startFileEdit(id) {
   openFileEditor(id, el, body);
 }
 
-/* 「复制进空间」：把副本收进 files/，块改指副本，原文件一个字节都不动。 */
+/* 「复制进画布」：把副本收进 files/，块改指副本，原文件一个字节都不动。 */
 async function copyFileBlockIntoCanvas(item) {
   if (!item || !current) return false;
   const canvasId = current.meta.id;
@@ -5293,7 +4973,7 @@ function openFileEditor(id, el, body) {
   const box = document.createElement("div");
   box.className = "canvas-file-editor";
   const textarea = document.createElement("textarea");
-  textarea.className = "notes-textarea canvas-file-textarea";
+  textarea.className = "md-textarea canvas-file-textarea";
   textarea.spellcheck = false;
   textarea.setAttribute("aria-label", "文件正文");
   textarea.value = body.text;
@@ -5367,7 +5047,7 @@ async function closeFileEdit() {
   return true;
 }
 
-/* 切空间、关页面、重画整个空间、删块：编辑框跟着没了，稿子仍要落盘。
+/* 切画布、关页面、重画整个画布、删块：编辑框跟着没了，稿子仍要落盘。
    这几处调用点后面都跟着把整块 DOM 换掉，所以只摘状态、不收尾，写盘在后台跑完。 */
 function flushFileEditor() {
   const state = fileEditor;
@@ -5393,7 +5073,7 @@ async function persistFileEdit(state) {
       modalOpen = true;
       const overwrite = await confirmDialog({
         title: "原文件已经变了",
-        message: `「${state.item.name}」在你编辑期间被别的程序改过。要用空间里这份覆盖吗？`,
+        message: `「${state.item.name}」在你编辑期间被别的程序改过。要用画布里这份覆盖吗？`,
         okText: "覆盖",
         cancelText: "不覆盖",
         danger: true,
@@ -5407,7 +5087,7 @@ async function persistFileEdit(state) {
     state.body = { ...state.body, text, stamp: result.stamp || "" };
     state.refreshed = true;
     filePreviewCache.delete(previewKey(state.item));
-    /* 空间已经切走时不碰 items：那份 items 不再会落盘，改了只会让内存和盘上对不上 */
+    /* 画布已经切走时不碰 items：那份 items 不再会落盘，改了只会让内存和盘上对不上 */
     if (current?.meta.id === state.canvasId) {
       state.item.size = Number(result.size) || state.item.size;
       scheduleItemsSave();
@@ -5429,9 +5109,9 @@ function refreshFileBlock(item) {
   updateSelection();
 }
 
-/* 引用块的正文只是显示缓存，进空间时现读一次原文件，用户在外面改了也能看到。
+/* 引用块的正文只是显示缓存，进画布时现读一次原文件，用户在外面改了也能看到。
  * 读不到就当原文件没了：块和最后一次读到的正文都留着，只把角标换成那句话，
- * 别把整个空间卡在这。返回这些读不到的块，renderAll 之后再改角标。 */
+ * 别把整个画布卡在这。返回这些读不到的块，renderAll 之后再改角标。 */
 async function refreshLinkedNotes() {
   if (!current) return [];
   const stale = [];
@@ -5484,38 +5164,6 @@ function decodeRel(raw) {
   }
 }
 
-function splitDataUrl(dataUrl) {
-  const comma = dataUrl.indexOf(",");
-  if (comma < 0) throw new Error("图片数据有误");
-  const mime = /^data:([^;]+)/.exec(dataUrl.slice(0, comma))?.[1] || "image/png";
-  const ext = (mime.split("/")[1] || "png").toLowerCase().replace("jpeg", "jpg");
-  return { data: dataUrl.slice(comma + 1), ext };
-}
-
-/* 把原笔记里的本地图片读出来，复制进空间自己的 notes/<块id>/，返回映射。 */
-async function snapshotNoteImages(canvasId, item) {
-  const host = document.createElement("div");
-  host.innerHTML = renderMarkdown(item.source);
-  const raws = [
-    ...new Set(
-      [...host.querySelectorAll("img.md-local-img")]
-        .map((img) => decodeRel(img.dataset.src || ""))
-        .filter(Boolean),
-    ),
-  ];
-  const assets = {};
-  for (const raw of raws) {
-    try {
-      const dataUrl = await store.readNoteImage(item.path, raw);
-      const { data, ext } = splitDataUrl(dataUrl);
-      assets[raw] = await store.saveCanvasNoteImage(canvasId, item.id, data, ext);
-    } catch {
-      /* 原图缺失：这个链接保留原样，渲染时显示占位 */
-    }
-  }
-  return assets;
-}
-
 function noteImageRel(item, raw) {
   if (item.assets && item.assets[raw]) return item.assets[raw];
   if (raw.startsWith(`notes/${item.id}/`)) return raw;
@@ -5556,9 +5204,9 @@ async function hydrateNoteImages(item, el) {
 }
 
 /* ---------- 复制 / 粘贴块 ----------
-   Ctrl+C 存下这批块的一份快照（连它来自哪个空间一起记），Ctrl+V 落一批全新的块。
-   便签和笔记各带上自己那份 json / .md，拷贝态媒体真再拷一份副本，引用态还是指着同一份原文件；
-   连线不复制。同空间落在原块右下方一格，跨空间跟着鼠标落。 */
+   Ctrl+C 存下这批块的一份快照（连它来自哪个画布一起记），Ctrl+V 落一批全新的块。
+   笔记带上自己那份 .md，拷贝态媒体真再拷一份副本，引用态还是指着同一份原文件；
+   连线不复制。同画布落在原块右下方一格，跨画布跟着鼠标落。 */
 
 const BLOCK_CLIPBOARD = "workbench.canvas.blocks";
 const PASTE_OFFSET = 24;
@@ -5580,15 +5228,13 @@ function selectionBox(items) {
 
 /* 粘出去的块不能跟原块共用同一份文件——删一块会把另一块的副本一起带走，
    指着用户自己原文件的引用块还会让人以为动的是两份东西。
-   所以媒体一律真再拷一份，引用态那块粘过来就地转成空间自己的副本。
-   返回 false 表示这块落不了地（原文件都找不着），只报错，不摆一块假的上空间。 */
+   所以媒体一律真再拷一份，引用态那块粘过来就地转成画布自己的副本。
+   返回 false 表示这块落不了地（原文件都找不着），只报错，不摆一块假的上画布。 */
 async function landBlock(item, fromId, sourceId) {
   const canvasId = current.meta.id;
-  /* 便签的正文由 placeBlock 写成新块自己的 json，这里什么都不用做 */
-  if (item.type === "sticky") return true;
 
   if (item.type === "note") {
-    /* 引用外部 .md 的那一块，复制出来是空间里的新副本，不再连着原文件 */
+    /* 引用外部 .md 的那一块，复制出来是画布里的新副本，不再连着原文件 */
     if (item.linked) {
       item.linked = false;
       item.path = "";
@@ -5608,7 +5254,7 @@ async function landBlock(item, fromId, sourceId) {
 
   if (item.type === "picture") {
     /* 垫进画面的位图跟着块走：粘到哪儿就在哪儿落一份自己的副本，
-       引用本机绝对路径的那种也一并收进空间——不然换个空间就只剩虚线框。
+       引用本机绝对路径的那种也一并收进画布——不然换个画布就只剩虚线框。
        拷不动的那几张不改写，块照粘、画出来是占位框，报一句就行：
        几百条矢量指令不该被一张丢了的原图连累得整块粘不出来。 */
     const map = new Map();
@@ -5635,7 +5281,7 @@ async function landBlock(item, fromId, sourceId) {
 
   if (item.type === "gen") {
     /* 面板出的那张图跟着块落一份自己的副本：删原块不该把粘出来的那块一起清空。
-       这条命令就是「把源空间 images/ 里的那个文件拷进目标空间」，画面块也用同一份 */
+       这条命令就是「把源画布 images/ 里的那个文件拷进目标画布」，画面块也用同一份 */
     if (item.src) {
       const rel = await store
         .duplicatePictureImage(fromId, item.src, false, canvasId)
@@ -5681,7 +5327,7 @@ function copyItems(ids) {
   };
   /* 后端认的是 items.json 里那条记录：刚建的块还没落盘就先催一次，不然马上复制粘贴会找不着 */
   void flushItems();
-  /* 顺手写进系统剪贴板，换个空间、换个窗口也还能粘；写不写得成本地这份照旧能用 */
+  /* 顺手写进系统剪贴板，换个画布、换个窗口也还能粘；写不写得成本地这份照旧能用 */
   navigator.clipboard
     ?.writeText(JSON.stringify({ [BLOCK_CLIPBOARD]: copiedBlocks }))
     ?.catch(() => {});
@@ -5706,7 +5352,7 @@ async function pasteBlocks(payload) {
   if (editingId || edgeLabelEditor) commitEditing();
   const canvasId = current.meta.id;
   const blocks = payload.blocks.filter((raw) => raw && typeof raw === "object");
-  /* 同空间右下挪一格，跨空间落在鼠标这儿 */
+  /* 同画布右下挪一格，跨画布落在鼠标这儿 */
   const box = selectionBox(blocks.filter((raw) => raw.type !== "connector"));
   const anchor =
     payload.canvasId === canvasId
@@ -5714,7 +5360,7 @@ async function pasteBlocks(payload) {
       : pastePoint();
   const placed = [];
   for (const raw of blocks) {
-    /* 拷贝副本那几下是异步的：期间切了空间就别再把块往原来那个空间上摆 */
+    /* 拷贝副本那几下是异步的：期间切了画布就别再把块往原来那个画布上摆 */
     if (!current || current.meta.id !== canvasId) return;
     const item = normalizeItem({ ...raw, id: newId(), z: null });
     if (!item || item.type === "connector") continue;
@@ -5867,10 +5513,10 @@ function imageSize(src, fallback = { width: 320, height: 200 }) {
 }
 
 /* 四条入口（工具栏的图片/音频/视频/文件按钮 + 资源管理器拖入）都汇到这里：
- * 一批路径先问一次「拷进空间还是只引用」，答案整批通用，取消就一个都不插；
+ * 一批路径先问一次「拷进画布还是只引用」，答案整批通用，取消就一个都不插；
  * 再按扩展名分流——能显示的直接显示，显示不了的才做附件卡片。
  * 一次进来好几个就整排铺开（见 batchRowPoint），单个才按入口给的位置落。
- * origin 是拖入的落点：单个文件落在这儿，一批文件在空白空间上也从这儿起排。 */
+ * origin 是拖入的落点：单个文件落在这儿，一批文件在空白画布上也从这儿起排。 */
 async function insertPaths(paths, origin) {
   if (!active || !current || !paths.length) return;
   if (editingId || edgeLabelEditor) commitEditing();
@@ -5890,7 +5536,7 @@ async function insertPaths(paths, origin) {
       else if (VIDEO_EXTS.has(ext)) placed = await addVideoBlock(path, at, mode);
       else if (EBOOK_EXTS.has(ext)) placed = await addEbookBlock(path, at, mode);
       else placed = await addDroppedFile(await store.fileInfo(path), at, mode);
-      /* 中途切了空间就别往新空间里插东西 */
+      /* 中途切了画布就别往新画布里插东西 */
       if (!current || current.meta.id !== canvasId) return;
       /* 没插成（失败或用户喊停拷贝）就别跟着排下一个的位置 */
       if (!placed) continue;
@@ -5903,7 +5549,7 @@ async function insertPaths(paths, origin) {
   revealItem(firstPlaced);
 }
 
-/* 插完把视野带到第一个新块那儿，不然空间一大就不知道东西落去了哪里。
+/* 插完把视野带到第一个新块那儿，不然画布一大就不知道东西落去了哪里。
    它本来就整个在视野里就不动，免得用户明明看得见还给他跳一下；要挪就把块心对准视野心。 */
 function revealItem(item) {
   const bounds = item && (boundsOfItem(item.id) || itemBounds(item, null));
@@ -5925,9 +5571,9 @@ function revealItem(item) {
   scheduleCameraSave();
 }
 
-/* 一批文件的整排落点：左端对齐到空间上最靠左那块，顶边落在最靠下那块的底边再空一档。
+/* 一批文件的整排落点：左端对齐到画布上最靠左那块，顶边落在最靠下那块的底边再空一档。
    排下一个时按前一块的实际宽度往右走，块与块之间同样空一档，所以混着类型也不会压在一起。
-   空间还空着（或只有连线）没有参照，就从拖入落点起排，落点也没有就按视野正中。 */
+   画布还空着（或只有连线）没有参照，就从拖入落点起排，落点也没有就按视野正中。 */
 function batchRowPoint(origin) {
   let left = Infinity;
   let bottom = -Infinity;
@@ -5959,6 +5605,38 @@ async function pickAndInsert(pick) {
 
 function insertImageFromFile() {
   return pickAndInsert(store.pickCanvasImage);
+}
+
+/* 工具栏右端的「AI 出图」下拉：一列纯文字，点哪一项就摆一块对应档位的生图面板 */
+function openInsertGenMenu() {
+  if (!current) return;
+  const rect = ui.insertGen.getBoundingClientRect();
+  openMenu(
+    rect.left,
+    rect.bottom + 8,
+    [
+      { label: "文生图", onClick: () => insertGenPanel("t2i") },
+      { label: "图生图", onClick: () => insertGenPanel("i2i") },
+      { label: "图片高清放大", onClick: () => insertGenPanel("upscale") },
+    ],
+    { kind: "gen-insert" },
+  );
+}
+
+/* 面板摆在视口正中，档位按入口预设；提示词和参数从这一刻起就归 genpanels/ 那份文件管 */
+function insertGenPanel(mode) {
+  if (!current) return;
+  const at = insertPoint(GEN_DEFAULT_WIDTH, GEN_DEFAULT_HEIGHT);
+  const item = makeGen(at.x, at.y);
+  item.mode = mode;
+  placeBlock(item);
+  showToast(
+    mode === "upscale"
+      ? "高清放大面板已摆好：把要放大的图连进来，点开始"
+      : mode === "i2i"
+        ? "图生图面板已摆好：把底图连进来，写清要改成什么样"
+        : "文生图面板已摆好：写一句提示词就能出图",
+  );
 }
 
 function insertAudioFromFile() {
@@ -6030,7 +5708,7 @@ function placeVideo(info, src, topLeft, linked) {
 /* ---------- 电子书块 ---------- */
 
 /* 先把整本读一遍目录再决定要不要拷：DRM、KF8 这类读不了的在这里当场报错，
-   不会先往空间塞一份 20MB 的副本才发现打不开。科目已读到的目录顺手留给阅读块，
+   不会先往画布塞一份 20MB 的副本才发现打不开。科目已读到的目录顺手留给阅读块，
    免得刚放上去又解析一遍。 */
 async function addEbookBlock(path, point, mode) {
   if (!current) return null;
@@ -6066,16 +5744,16 @@ async function askInsertMode(count) {
   const who = count > 1 ? `本批 ${count} 个文件` : "这个文件";
   return choiceDialog({
     title: count > 1 ? `插入 ${count} 个文件` : "插入文件",
-    message: `${who}要拷进空间，还是只引用原文件？`,
-    note: "拷进来是在磁盘上再存一份，空间自带；只引用不占地方，但原文件挪走或删掉后这里就只剩个占位。",
+    message: `${who}要拷进画布，还是只引用原文件？`,
+    note: "拷进来是在磁盘上再存一份，画布自带；只引用不占地方，但原文件挪走或删掉后这里就只剩个占位。",
     options: [
-      { value: "copy", label: "拷进空间", hint: "占磁盘，空间自带这份文件" },
+      { value: "copy", label: "拷进画布", hint: "占磁盘，画布自带这份文件" },
       { value: "link", label: "只引用原文件", hint: "不占磁盘，原文件得留在原地" },
     ],
   });
 }
 
-/* 图片/音频/视频之外的文件怎么进空间：Markdown 变成一个笔记块，
+/* 图片/音频/视频之外的文件怎么进画布：Markdown 变成一个笔记块，
  * 其它当附件卡片；两种都按 mode 决定拷副本还是记原路径。
  * topLeft 为 null 时按块类型自己的大小找落点（三种块差着量级）。
  * 返回插好的块，一批多个文件时靠它排偏移。 */
@@ -6090,7 +5768,7 @@ async function addDroppedFile(info, topLeft, mode) {
 }
 
 /* .md 拷贝态：正文抄进 items.json，之后编辑不再看原文件，原文件删了这块照样能读能改。
- * 引用态：块里只记原文件绝对路径，正文是显示缓存，进空间现读刷新，编辑时问要不要写回。 */
+ * 引用态：块里只记原文件绝对路径，正文是显示缓存，进画布现读刷新，编辑时问要不要写回。 */
 async function placeMarkdownFile(info, topLeft, mode) {
   const canvasId = current.meta.id;
   const file = await store.readFileText(info.path);
@@ -6138,11 +5816,11 @@ async function addFileBlock(info, topLeft, mode) {
   return item;
 }
 
-/* 哪块指向磁盘上的一个文件、以及它在哪儿：笔记的 path 是笔记库里的绝对路径，
-   不在空间目录里，所以一律按引用态去定位；其余块的 src 拷贝态是空间内相对路径。 */
+/* 哪块指向磁盘上的一个文件、以及它在哪儿：引用外部 .md 的笔记块 path 是原文件的绝对路径，
+   不在画布目录里，所以一律按引用态去定位；其余块的 src 拷贝态是画布内相对路径。 */
 function revealTarget(item) {
-  /* 便签和空间自己的笔记：那块的内容文件叫 <块id>.json / <块id>.md，路径后端自己拼 */
-  if (item.type === "sticky" || (item.type === "note" && !item.linked)) return { block: true };
+  /* 画布自己的笔记：那块的内容文件叫 <块id>.md，路径后端自己拼 */
+  if (item.type === "note" && !item.linked) return { block: true };
   if (item.type === "note") return item.path ? { rel: item.path, linked: true } : null;
   if (
     item.type === "image" ||
@@ -6160,7 +5838,7 @@ function revealFileBlock(item) {
   if (!current) return;
   const target = revealTarget(item);
   if (!target) return;
-  /* 便签/笔记那块的文件名就是块 id，空间目录后端知道，前端一个字都不用递 */
+  /* 笔记那块的文件名就是块 id，画布目录后端知道，前端一个字都不用递 */
   const call = target.block
     ? store.revealBlock(current.meta.id, item.id)
     : store.revealCanvasFile(current.meta.id, target.rel, target.linked);
@@ -6169,7 +5847,7 @@ function revealFileBlock(item) {
 
 /* ---------- 播不出来时的兜底 ---------- */
 
-/* 探测结果按「空间 + src + 存在方式」留一份：同一块片子反复问 ffmpeg 没意义。 */
+/* 探测结果按「画布 + src + 存在方式」留一份：同一块片子反复问 ffmpeg 没意义。 */
 const probeCache = new Map();
 
 async function probeVideoBlock(item) {
@@ -6251,8 +5929,8 @@ function finishAudioFix(item, rel) {
   showError("音轨转好了，再点播放就有声音。");
 }
 
-/* 大文件拷进空间在后台线程跑，进度走 canvas-video-copy 事件，随时能停：
- * 停了后端把 .part 半截文件删掉，空间里不会留下看不懂的残骸。
+/* 大文件拷进画布在后台线程跑，进度走 canvas-video-copy 事件，随时能停：
+ * 停了后端把 .part 半截文件删掉，画布里不会留下看不懂的残骸。
  * 视频和文件共用这一根进度条，同一时刻只跑一个。 */
 function copyIntoCanvas(canvasId, info, kind) {
   if (copyTask) {
@@ -6347,273 +6025,6 @@ function paintFixProgress(percent) {
   ui.copyText.textContent = `${Math.round(fraction * 100)}%`;
 }
 
-function stemOfPath(path) {
-  const name = String(path || "").split(/[\\/]/).pop() || path;
-  return name.replace(/\.md$/i, "");
-}
-
-function flattenNotes(nodes, out = []) {
-  for (const node of nodes || []) {
-    if (node.kind === "file") out.push(node);
-    else flattenNotes(node.children, out);
-  }
-  return out;
-}
-
-let activePickerClose = null;
-
-/* 命中的片段用 <mark> 包住；文字一律走 textContent，不把用户内容当 HTML 解析 */
-function appendHighlighted(target, text, query) {
-  const haystack = String(text ?? "");
-  const needle = query.trim().toLowerCase();
-  if (!needle) {
-    target.textContent = haystack;
-    return;
-  }
-  const lower = haystack.toLowerCase();
-  let from = 0;
-  for (;;) {
-    const at = lower.indexOf(needle, from);
-    if (at < 0) break;
-    if (at > from) target.append(document.createTextNode(haystack.slice(from, at)));
-    const mark = document.createElement("mark");
-    mark.textContent = haystack.slice(at, at + needle.length);
-    target.append(mark);
-    from = at + needle.length;
-  }
-  if (from < haystack.length) target.append(document.createTextNode(haystack.slice(from)));
-}
-
-/* 便签 / 笔记选择框共用的外壳：搜索框过滤 + 方向键改选中（网格按行列走，走不动就不动）+ 回车插入，
- * Esc、点遮罩、右上角 × 都能取消。
- * entries: [{ search 可搜索文本, value 选中后回传的数据, card(query) => 按钮 }]
- * create: 可选，置顶的「新建」那一项，只在搜索框空着时出现 */
-function openPickerShell({ title, hint, placeholder, container, entries, emptyText, create }) {
-  return new Promise((resolve) => {
-    const mask = document.createElement("div");
-    mask.className = "dialog-mask canvas-picker-mask";
-    const dialog = document.createElement("div");
-    dialog.className = "dialog canvas-picker";
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("aria-modal", "true");
-
-    const head = document.createElement("div");
-    head.className = "canvas-picker-head";
-    const heading = document.createElement("p");
-    heading.className = "dialog-title canvas-picker-title";
-    heading.textContent = title;
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "canvas-picker-close";
-    close.setAttribute("aria-label", "关闭");
-    close.innerHTML = CLOSE_X_SVG;
-    head.append(heading, close);
-
-    const search = document.createElement("input");
-    search.type = "text";
-    search.className = "dialog-input canvas-picker-search";
-    search.placeholder = placeholder;
-    search.spellcheck = false;
-    search.autocomplete = "off";
-
-    const list = document.createElement("div");
-    list.className = "canvas-picker-list";
-    const results = document.createElement("div");
-    results.className = container;
-    const empty = document.createElement("p");
-    empty.className = "canvas-picker-empty";
-    list.append(results, empty);
-
-    const foot = document.createElement("p");
-    foot.className = "canvas-picker-hint";
-    foot.textContent = hint || "";
-    foot.hidden = !hint;
-
-    dialog.append(head, search, list, foot);
-    mask.append(dialog);
-
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      document.removeEventListener("keydown", onKey, true);
-      mask.remove();
-      if (activePickerClose === cancel) activePickerClose = null;
-      resolve(value);
-    };
-    const cancel = () => finish(null);
-    const onKey = (e) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      finish(null);
-    };
-
-    close.addEventListener("click", cancel);
-    mask.addEventListener("pointerdown", (e) => {
-      if (!dialog.contains(e.target)) cancel();
-    });
-    document.addEventListener("keydown", onKey, true);
-    activePickerClose = cancel;
-
-    let shown = create ? [create, ...entries] : entries;
-    let activeIndex = 0;
-
-    const markActive = () => {
-      [...results.children].forEach((el, i) => el.classList.toggle("is-active", i === activeIndex));
-      results.children[activeIndex]?.scrollIntoView({ block: "nearest" });
-    };
-    const moveActive = (dx, dy) => {
-      /* 便签是一行好几个的网格，笔记是一列：数一下第一行有几张卡就是列数 */
-      const first = results.children[0];
-      let cols = 0;
-      if (first) {
-        while (results.children[cols] && results.children[cols].offsetTop === first.offsetTop) cols += 1;
-      }
-      cols = Math.max(cols, 1);
-      const row = Math.floor(activeIndex / cols) + dy;
-      const col = (activeIndex % cols) + dx;
-      if (row < 0 || col < 0 || col >= cols) return;
-      const next = row * cols + col;
-      if (next >= shown.length) return;
-      activeIndex = next;
-      markActive();
-    };
-    const render = () => {
-      const query = search.value;
-      const needle = query.trim().toLowerCase();
-      const matched = needle
-        ? entries.filter((entry) => entry.search.toLowerCase().includes(needle))
-        : entries;
-      /* 「新建」只在没打字时置顶：一旦打了字，回车该命中搜到的第一条，不是新建 */
-      shown = needle || !create ? matched : [create, ...matched];
-      results.textContent = "";
-      for (const entry of shown) {
-        const card = entry.card(query);
-        card.addEventListener("click", () => finish(entry.value));
-        results.append(card);
-      }
-      empty.hidden = shown.length > 0;
-      empty.textContent = entries.length ? "没有匹配的项，换个关键词试试。" : emptyText;
-      activeIndex = 0;
-      if (shown.length) markActive();
-    };
-
-    search.addEventListener("input", render);
-    search.addEventListener("keydown", (e) => {
-      const steps = {
-        ArrowUp: [0, -1],
-        ArrowDown: [0, 1],
-        ArrowLeft: [-1, 0],
-        ArrowRight: [1, 0],
-      };
-      if (steps[e.key]) {
-        e.preventDefault();
-        moveActive(...steps[e.key]);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        if (shown[activeIndex]) finish(shown[activeIndex].value);
-      }
-    });
-
-    render();
-    document.body.append(mask);
-    requestAnimationFrame(() => search.focus({ preventScroll: true }));
-  });
-}
-
-/* 置顶那张「新建」卡：跟下面的真卡片同款尺寸，虚线描边、只写一句话 */
-function createEntry({ cardClass, lines }) {
-  return {
-    search: "",
-    value: { fresh: true },
-    card: () => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `${cardClass} canvas-picker-create`;
-      lines.forEach((text, index) => {
-        const span = document.createElement("span");
-        span.className = index ? "canvas-picker-create-note" : "canvas-picker-create-label";
-        span.textContent = text;
-        button.append(span);
-      });
-      return button;
-    },
-  };
-}
-
-function showNotePicker(files) {
-  return openPickerShell({
-    title: "选择笔记",
-    hint: "第一项新建一篇空白笔记；选已有笔记会复制到空间，编辑不会修改原笔记。",
-    placeholder: "搜索笔记名或所在文件夹…",
-    container: "canvas-picker-notes",
-    emptyText: "还没有笔记，直接新建一篇就行。",
-    create: createEntry({
-      cardClass: "canvas-picker-note",
-      lines: ["新建空白笔记", "只在空间上，不写进笔记库"],
-    }),
-    entries: files.map((node) => {
-      const parts = String(node.path || "").split("/");
-      const folder = parts.length > 1 ? parts.slice(0, -1).join(" / ") : "根目录";
-      return {
-        search: parts.join(" "),
-        value: node.path,
-        card: (query) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "canvas-picker-note";
-          const name = document.createElement("span");
-          name.className = "canvas-picker-note-name";
-          appendHighlighted(name, stemOfPath(node.name), query);
-          const parent = document.createElement("span");
-          parent.className = "canvas-picker-note-path";
-          appendHighlighted(parent, folder, query);
-          button.append(name, parent);
-          return button;
-        },
-      };
-    }),
-  });
-}
-
-async function insertNoteFromPicker() {
-  if (!active || !current) return;
-  if (editingId || edgeLabelEditor) commitEditing();
-  let tree;
-  try {
-    tree = await store.listNotes();
-  } catch (error) {
-    showError(error);
-    return;
-  }
-  if (!current) return;
-  modalOpen = true;
-  const pick = await showNotePicker(flattenNotes(tree));
-  modalOpen = false;
-  if (!pick || !current) return;
-  const at = insertPoint(NOTE_DEFAULT_WIDTH, NOTE_DEFAULT_HEIGHT);
-  /* 空白笔记块：path 和正文都留空，只活在这个空间上，不碰笔记库里任何一个 .md */
-  if (pick.fresh) {
-    const item = makeNote(at.x, at.y, "", "未命名笔记", "");
-    placeBlock(item);
-    startNoteEdit(item.id);
-    return;
-  }
-  const path = pick;
-  const canvasId = current.meta.id;
-  try {
-    const source = await store.readNote(path);
-    if (!current || current.meta.id !== canvasId) return;
-    const item = makeNote(at.x, at.y, path, stemOfPath(path), source);
-    item.assets = await snapshotNoteImages(canvasId, item);
-    if (!current || current.meta.id !== canvasId) return;
-    placeBlock(item);
-  } catch (error) {
-    showError(error);
-  }
-}
-
 /* 工具栏和「选文件」插进来的块都落在视野正中，连着插就叠成一坨，看着像没插进去。
    每插一个往右下错开一档；相机一动说明用户重新对准了视野，回到正中从头起算。
    拖入和粘贴不走这里——那是用户指着哪儿就要落哪儿。 */
@@ -6638,8 +6049,7 @@ function placeBlock(item) {
   addItemElement(item);
   select(item.id);
   scheduleItemsSave();
-  /* 便签/笔记/画面/场景从建下来那一刻就有自己那份文件，内容以后只认文件 */
-  if (item.type === "sticky") persistSticky(item);
+  /* 笔记/画面/场景从建下来那一刻就有自己那份文件，内容以后只认文件 */
   if (item.type === "note") persistNote(item);
   if (item.type === "picture") persistPicture(item);
   if (item.type === "scene") persistScene(item);
@@ -6757,25 +6167,21 @@ function onKeyDown(e) {
   ) {
     return;
   }
-  /* Ctrl+Z / Ctrl+Shift+Z（Ctrl+Y 也行）：撤销、重做画布上的操作。
+  /* Ctrl+Z / Ctrl+Shift+Z（Ctrl+Y 也行）只在画面块里退笔画：
+     画笔自己那层栈还在，画布本身没有撤销了。
      焦点在输入框/正文里时上面已经 return 了，那里归浏览器自己的撤销管。 */
   if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
-    e.preventDefault();
-    /* 手里正捏着笔的那块：这一下归笔画栈，不该跳到块的位置尺寸上去 */
     const id = paintingTarget();
-    if (id) {
-      pictureStepMove(id, e.shiftKey ? "redo" : "undo");
-      return;
-    }
-    if (e.shiftKey) redoHistory();
-    else undoHistory();
+    if (!id) return;
+    e.preventDefault();
+    pictureStepMove(id, e.shiftKey ? "redo" : "undo");
     return;
   }
   if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) {
-    e.preventDefault();
     const id = paintingTarget();
-    if (id) pictureStepMove(id, "redo");
-    else redoHistory();
+    if (!id) return;
+    e.preventDefault();
+    pictureStepMove(id, "redo");
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key === "0") {
@@ -6831,9 +6237,6 @@ function scheduleItemsSave() {
   if (!current) return;
   clearTimeout(itemsTimer);
   itemsTimer = setTimeout(flushItems, 500);
-  /* 每一次会改块的操作都会走到这儿，撤销栈挂在这一句上，
-     不用去每个动作里各记一笔 */
-  history.touch();
   /* 块的位置/尺寸/增减都会改鸟瞰窗里的方框，跟着重画一次 */
   refreshMinimap();
 }
@@ -6888,7 +6291,7 @@ const numOr = (value, fallback) => (Number.isFinite(Number(value)) ? Number(valu
 const agentSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function agentRequireSpace() {
-  if (!current) throw new Error("当前没有打开的空间");
+  if (!current) throw new Error("当前没有打开的画布");
   return current;
 }
 
@@ -6958,17 +6361,6 @@ function agentSummary(item) {
   }
   if (item.type === "line" || item.type === "arrow") {
     return { ...base, x2: item.x2, y2: item.y2, borderColor: item.borderColor };
-  }
-  if (item.type === "sticky") {
-    return {
-      ...base,
-      text: item.text,
-      color: item.color,
-      textColor: item.textColor,
-      borderColor: item.borderColor,
-      borderWidth: item.borderWidth,
-      radius: item.radius,
-    };
   }
   if (item.type === "picture") {
     return {
@@ -7071,8 +6463,7 @@ function agentSummary(item) {
 
 /* 演示用的光带：只加一圈外发光，不动块自己的颜色和尺寸 */
 /* 批量模式：agent 一次提交一串操作时打开。
-   这期间不运镜、不打光带——一个块一次镜头跳动，看的人只会晕。
-   撤销也靠 history.hold 挂住，整批落成一步。 */
+   这期间不运镜、不打光带——一个块一次镜头跳动，看的人只会晕。 */
 let batching = false;
 
 function agentHighlight(ids, ms = 900) {
@@ -7212,7 +6603,7 @@ async function agentFindSpace(ref) {
   await loadList();
   const key = String(ref ?? "").trim();
   const target = canvases.find((meta) => meta.id === key || meta.name === key);
-  if (!target) throw new Error(`找不到空间「${key}」`);
+  if (!target) throw new Error(`找不到画布「${key}」`);
   return target;
 }
 
@@ -7231,16 +6622,16 @@ async function agentOpenSpace(ref) {
     await agentSleep(250);
   }
   await switchTo(target.id);
-  if (!current || current.meta.id !== target.id) throw new Error(`打开空间「${target.name}」失败`);
+  if (!current || current.meta.id !== target.id) throw new Error(`打开画布「${target.name}」失败`);
   return { space: { id: current.meta.id, name: current.meta.name }, blocks: current.items.length };
 }
 
 async function agentCreateSpace(name) {
   const clean = String(name ?? "").trim();
-  if (!clean) throw new Error("空间名不能为空");
+  if (!clean) throw new Error("画布名不能为空");
   const data = await store.createCanvas(clean);
   const meta = data?.meta;
-  if (!meta) throw new Error("空间建好了，但没拿到它的信息");
+  if (!meta) throw new Error("画布建好了，但没拿到它的信息");
   await loadList();
   if (active) await switchTo(meta.id);
   return { id: meta.id, name: meta.name, opened: Boolean(current && current.meta.id === meta.id) };
@@ -7262,7 +6653,7 @@ async function agentRenameSpace(ref, newName) {
   try {
     meta = await store.renameCanvas(target.id, clean);
   } catch (error) {
-    /* 改名没成：把刚才放下的空间重新打开，别让界面停在无空间的样子 */
+    /* 改名没成：把刚才放下的画布重新打开，别让界面停在无画布的样子 */
     if (mine) {
       await loadList();
       if (canvases.some((entry) => entry.id === target.id)) await switchTo(target.id);
@@ -7349,7 +6740,7 @@ async function agentCreateBlock(spec = {}) {
     }
     if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
     const placed = placeBlock(item);
-    if (!placed) throw new Error("这块没落进空间");
+    if (!placed) throw new Error("这块没落进画布");
     return agentSummary(placed);
   }
 
@@ -7379,24 +6770,6 @@ async function agentCreateBlock(spec = {}) {
     const y2 = hasEnds ? Number(spec.y2) : y1;
     const item = withLock(makeLine(type, x1, y1, x2, y2));
     if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
-    const placed = placeBlock(item);
-    return agentSummary(placed);
-  }
-
-  if (type === "sticky") {
-    const w = Math.max(STICKY_MIN_WIDTH, numOr(spec.w, 280));
-    const h = Math.max(STICKY_MIN_HEIGHT, numOr(spec.h, 280));
-    const at = agentPlacePoint(w, h, spec);
-    const item = withLock(makeSticky(at.x, at.y, String(spec.text ?? "")));
-    item.w = w;
-    item.h = h;
-    if (spec.color) item.color = String(spec.color);
-    if (spec.textColor) item.textColor = String(spec.textColor);
-    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
-    if (spec.borderWidth !== undefined) {
-      item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
-    }
-    if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
     const placed = placeBlock(item);
     return agentSummary(placed);
   }
@@ -7470,18 +6843,12 @@ async function agentCreateBlock(spec = {}) {
     const w = Math.max(NOTE_MIN_WIDTH, numOr(spec.w, NOTE_DEFAULT_WIDTH));
     const h = Math.max(NOTE_MIN_HEIGHT, numOr(spec.h, NOTE_DEFAULT_HEIGHT));
     const at = agentPlacePoint(w, h, spec);
-    let markdown = String(spec.markdown ?? "");
-    let name = String(spec.name ?? "未命名笔记");
-    if (spec.notePath) {
-      markdown = await store.readNote(String(spec.notePath));
-      if (!current || current.meta.id !== canvasId) throw new Error("读笔记时空间被切走了");
-      name = spec.name ? name : String(spec.notePath).split("/").pop().replace(/\.md$/i, "");
-    }
+    const markdown = String(spec.markdown ?? "");
+    const name = String(spec.name ?? "未命名笔记");
     const item = withLock(makeNote(at.x, at.y, "", name, markdown));
     item.w = w;
     item.h = h;
-    if (spec.notePath) item.assets = await snapshotNoteImages(canvasId, item);
-    if (!current || current.meta.id !== canvasId) throw new Error("插笔记时空间被切走了");
+    if (!current || current.meta.id !== canvasId) throw new Error("插笔记块时画布被切走了");
     if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
     if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
     if (spec.borderWidth !== undefined) {
@@ -7620,8 +6987,8 @@ async function agentDuplicateBlock(id, patch = {}) {
   const source = agentRequireItem(id);
   if (source.type === "connector") throw new Error("连线不复制，直接重新连一条");
   if (editingId || edgeLabelEditor) commitEditing();
-  /* 换空间复制是让另一个空间的落盘记录去取文件，防抖里那点改动必须先催下去；
-     同空间复制沿用原来的口径：只有笔记要催（副本读的是它那份 .md 和图片目录）。 */
+  /* 换画布复制是让另一个画布的落盘记录去取文件，防抖里那点改动必须先催下去；
+     同画布复制沿用原来的口径：只有笔记要催（副本读的是它那份 .md 和图片目录）。 */
   const wanted = String(patch.space ?? "").trim();
   const target = wanted ? await agentFindSpace(wanted) : null;
   const elsewhere = Boolean(target && target.id !== current.meta.id);
@@ -7634,7 +7001,7 @@ async function agentDuplicateBlock(id, patch = {}) {
   const item = normalizeItem({ ...raw, id: newId(), z: null });
   if (!item) throw new Error("这块没法复制");
   if (elsewhere) {
-    /* 目标空间没有「原块右下一格」这回事：给了落点就照着摆，没给就摆在镜头正中 */
+    /* 目标画布没有「原块右下一格」这回事：给了落点就照着摆，没给就摆在镜头正中 */
     const point =
       Number.isFinite(Number(patch.x)) && Number.isFinite(Number(patch.y))
         ? { x: Number(patch.x), y: Number(patch.y) }
@@ -7687,17 +7054,17 @@ function agentSetLayer(id, direction) {
 }
 
 /* 边框宽度/圆角按块类型认：连线和不带边框外观的音视频、电子书不接 */
-const BORDER_WIDTH_KINDS = new Set(["text", "rect", "ellipse", "image", "sticky", "note", "file", "picture", "scene", "gen"]);
+const BORDER_WIDTH_KINDS = new Set(["text", "rect", "ellipse", "image", "note", "file", "picture", "scene", "gen"]);
 
 async function agentUpdateBlock(id, patch = {}) {
   const item = agentRequireItem(id);
   if (item.type === "connector") return agentUpdateConnector(item, patch);
-  /* 画面里垫的那张位图要先拷进空间、量好尺寸，归一化才认得这条 image。
+  /* 画面里垫的那张位图要先拷进画布、量好尺寸，归一化才认得这条 image。
      这一步放在任何改动落地之前：拷不动就抛，块还是原来那块，不会留下改到一半的样子 */
   const canvasId = current.meta.id;
   if (item.type === "picture" && (patch.cmds !== undefined || patch.symbols !== undefined)) {
     await resolvePictureImages(patch, canvasId);
-    if (!current || current.meta.id !== canvasId) throw new Error("改这块的时候空间被切走了，什么都没改");
+    if (!current || current.meta.id !== canvasId) throw new Error("改这块的时候画布被切走了，什么都没改");
   }
   /* 锁住的块只认解锁（可以顺带在同一次 patch 里改别的）；其余修改先解锁 */
   const unlocking = patch.locked === false;
@@ -7747,20 +7114,11 @@ async function agentUpdateBlock(id, patch = {}) {
   if (patch.color !== undefined) {
     applyColor(item, "color", String(patch.color || ""));
   }
-  if (patch.textColor !== undefined && item.type === "sticky") {
-    item.textColor = String(patch.textColor || STICKY_DEFAULT_TEXT);
-    if (el) syncItemElement(el, item);
-  }
   if (patch.text !== undefined && item.type === "text") {
     item.text = String(patch.text);
     const body = el?.querySelector(".canvas-text-body");
     if (body) body.textContent = item.text;
     if (el) item.h = el.offsetHeight;
-  }
-  if (patch.text !== undefined && item.type === "sticky") {
-    item.text = String(patch.text);
-    const body = el?.querySelector(".canvas-sticky-body");
-    if (body) body.textContent = item.text;
   }
   if (patch.markdown !== undefined && item.type === "note") {
     if (item.linked) throw new Error("这是引用外部 .md 的笔记块，写正文请用 note_write_back");
@@ -7833,14 +7191,13 @@ async function agentUpdateBlock(id, patch = {}) {
     refreshConnectors();
   }
   scheduleItemsSave();
-  if (item.type === "sticky") persistSticky(item);
   if (item.type === "note" && patch.borderColor !== undefined) void persistNote(item);
   return pictureDropped.length ? { ...agentSummary(item), dropped: pictureDropped } : agentSummary(item);
 }
 
-/* ---------- 文件 / 便签 / 笔记内容 ---------- */
+/* ---------- 文件 / 笔记内容 ---------- */
 
-/* agent 插文件不走弹窗：拷进空间还是引用原文件由调用方直接给 mode。 */
+/* agent 插文件不走弹窗：拷进画布还是引用原文件由调用方直接给 mode。 */
 async function agentImportFile(spec = {}) {
   agentRequireSpace();
   if (editingId || edgeLabelEditor) commitEditing();
@@ -7866,7 +7223,7 @@ async function agentImportFile(spec = {}) {
       placed = await addEbookBlock(path, point, mode);
     } else {
       const info = await store.fileInfo(path);
-      if (!current || current.meta.id !== canvasId) throw new Error("导入时空间被切走了");
+      if (!current || current.meta.id !== canvasId) throw new Error("导入时画布被切走了");
       if (force === "file") {
         const size = fileBlockSize(info);
         placed = await addFileBlock(info, point || insertPoint(size.w, size.h), mode);
@@ -7875,33 +7232,16 @@ async function agentImportFile(spec = {}) {
       }
     }
   } catch (error) {
-    throw new Error(`没能把这份文件放进空间：${error?.message || error}`);
+    throw new Error(`没能把这份文件放进画布：${error?.message || error}`);
   }
-  if (!current || current.meta.id !== canvasId) throw new Error("导入时空间被切走了");
-  if (!placed) throw new Error("没能把这份文件放进空间");
+  if (!current || current.meta.id !== canvasId) throw new Error("导入时画布被切走了");
+  if (!placed) throw new Error("没能把这份文件放进画布");
   if (spec.borderColor !== undefined) applyColor(placed, "borderColor", String(spec.borderColor || ""));
   if (spec.fillColor !== undefined) applyColor(placed, "fillColor", String(spec.fillColor || ""));
   if (spec.borderColor !== undefined || spec.fillColor !== undefined) scheduleItemsSave();
   agentRevealBlock(placed.id);
   agentHighlight([placed.id], 1400);
   return agentSummary(placed);
-}
-
-function agentStickyOf(id) {
-  const item = agentRequireItem(id);
-  if (item.type !== "sticky") throw new Error("这不是便签块");
-  return item;
-}
-
-function agentStickyRead(id) {
-  const item = agentStickyOf(id);
-  return { ...agentSummary(item), text: item.text || "" };
-}
-
-async function agentStickyWrite(id, patch = {}) {
-  const item = agentStickyOf(id);
-  agentHighlight([item.id]);
-  return agentUpdateBlock(item.id, patch);
 }
 
 function agentPictureOf(id) {
@@ -8023,7 +7363,7 @@ function pictureSymbolUses(cmds, name) {
 
 /* 画面里垫一张位图，发过来最常见的两种写法是「只有本机路径」和「没写多大」。
    归一化那一步是同步的、量不了图，所以三个写入口（block_create / block_update / picture_draw）
-   先异步补一圈：写了 path 的拷进这个空间、把回来的相对路径填进 src；w / h 缺的照原图量。
+   先异步补一圈：写了 path 的拷进这个画布、把回来的相对路径填进 src；w / h 缺的照原图量。
    拷不动、量不出都直接抛——悄悄少一块画，调用方会以为画面本来就该长这样。
    地址顺手放进 imageCache，画的第一遍就是真图，不用等下一次重画。
    src 自己写坏了的这里不动它，留给归一化去说那句 why（它会进返回的 dropped，比抛错好定位）。 */
@@ -8050,7 +7390,7 @@ async function resolvePictureImages(spec, canvasId) {
       try {
         rel = await store.importCanvasImage(canvasId, path);
       } catch (error) {
-        throw new Error(`没能把「${path.slice(0, 48)}」拷进这个空间：${error?.message || error}`);
+        throw new Error(`没能把「${path.slice(0, 48)}」拷进这个画布：${error?.message || error}`);
       }
       parsed = pictureImageSrc(rel);
     }
@@ -8064,7 +7404,7 @@ async function resolvePictureImages(spec, canvasId) {
         throw new Error(`读不到这张垫图：${parsed.src}——${error?.message || error}`);
       }
     }
-    if (!current || current.meta.id !== canvasId) throw new Error("垫图进画面的时候空间被切走了");
+    if (!current || current.meta.id !== canvasId) throw new Error("垫图进画面的时候画布被切走了");
     imageCache.set(parsed.src, url);
     if (!needsSize) continue;
     const size = await imageSize(url, null);
@@ -8109,7 +7449,7 @@ async function agentPictureDraw(id, patch = {}) {
   /* 垫的位图得先拷进来、量好尺寸，下面归一化才认得这条 image */
   const canvasId = current.meta.id;
   await resolvePictureImages(patch, canvasId);
-  if (!current || current.meta.id !== canvasId) throw new Error("画这一笔的时候空间被切走了，什么都没改");
+  if (!current || current.meta.id !== canvasId) throw new Error("画这一笔的时候画布被切走了，什么都没改");
   const before = Array.isArray(item.cmds) ? item.cmds : [];
   const mode = String(patch.mode || "replace");
   const given = Array.isArray(patch.cmds) ? patch.cmds : [];
@@ -8164,7 +7504,7 @@ async function agentPictureDraw(id, patch = {}) {
   rejectFatalDrop(rejected);
   if (merged) item.symbols = merged.symbols;
   item.cmds = next;
-  /* 指令和素材不归 items.json 管、也不进全局撤销快照，改完单独落 pictures/<块id>.json 那一份 */
+  /* 指令和素材不归 items.json 管，改完单独落 pictures/<块id>.json 那一份 */
   persistPicture(item);
   if (patch.paperColor !== undefined) item.paperColor = String(patch.paperColor || "");
   /* 开关要在重画之前就写上，不然这一帧还是按旧的层画 */
@@ -8396,7 +7736,7 @@ async function agentGenRun(id, patch = {}) {
   const seconds = Math.min(600, Math.max(1, numOr(patch.timeout, 300)));
   const run = await waitGenRun(item.id, seconds * 1000);
   const still = findItem(item.id);
-  if (!still) throw new Error(`生图面板 ${item.id} 已经不在这块空间里了`);
+  if (!still) throw new Error(`生图面板 ${item.id} 已经不在这块画布里了`);
   return {
     ...agentSummary(still),
     waited: true,
@@ -8443,7 +7783,7 @@ async function agentNoteWrite(id, text) {
   const canvasId = current.meta.id;
   if (item.linked) {
     await store.writeBackNote(canvasId, item.id, body);
-    if (!current || current.meta.id !== canvasId) throw new Error("写回时空间被切走了");
+    if (!current || current.meta.id !== canvasId) throw new Error("写回时画布被切走了");
   } else {
     item.source = body;
     persistNote(item);
@@ -8465,7 +7805,7 @@ async function agentFileRead(id, maxChars) {
   const item = await agentFileOf(id);
   const canvasId = current.meta.id;
   const body = await store.readFileBody(canvasId, item.id);
-  if (!current || current.meta.id !== canvasId) throw new Error("读文件时空间被切走了");
+  if (!current || current.meta.id !== canvasId) throw new Error("读文件时画布被切走了");
   agentHighlight([item.id]);
   const limit = Math.max(0, Math.trunc(numOr(maxChars, 20000)));
   const full = body.text || "";
@@ -8484,11 +7824,11 @@ async function agentFileWrite(id, text, force = false) {
   const canvasId = current.meta.id;
   /* 块里的编辑框开着就先收掉，不然它手上的旧正文会把这次写回盖掉 */
   if (!(await closeFileEdit())) throw new Error("块里的编辑框还开着，先处理那边的保存");
-  if (!current || current.meta.id !== canvasId) throw new Error("写文件时空间被切走了");
+  if (!current || current.meta.id !== canvasId) throw new Error("写文件时画布被切走了");
   const body = await store.readFileBody(canvasId, item.id);
   const next = String(text ?? "");
   const result = await store.writeBackCanvasFile(canvasId, item.id, next, body, Boolean(force));
-  if (!current || current.meta.id !== canvasId) throw new Error("写文件时空间被切走了");
+  if (!current || current.meta.id !== canvasId) throw new Error("写文件时画布被切走了");
   if (result?.conflict) {
     throw new Error("原文件在读取之后被别的程序改过；确认用这份覆盖请再带 force: true 调一次");
   }
@@ -8508,6 +7848,16 @@ function agentRevealFile(id) {
     ? store.revealBlock(current.meta.id, item.id)
     : store.revealCanvasFile(current.meta.id, target.rel, target.linked);
   call.catch(showError);
+  agentHighlight([item.id]);
+  return agentSummary(item);
+}
+
+/* 用系统看图工具打开那块图：跟用户在画布上双击那一下是一回事 */
+async function agentOpenImage(id) {
+  const item = agentRequireItem(id);
+  if (item.type !== "image" && item.type !== "gen") throw new Error("这不是图片块");
+  if (!item.src) throw new Error("这块还没有图");
+  await openImageExternally(item);
   agentHighlight([item.id]);
   return agentSummary(item);
 }
@@ -8567,7 +7917,7 @@ async function agentEbookToc(id) {
   }
   const canvasId = current.meta.id;
   const info = await store.ebookToc(canvasId, item.src, item.linked);
-  if (!current || current.meta.id !== canvasId) throw new Error("读目录时空间被切走了");
+  if (!current || current.meta.id !== canvasId) throw new Error("读目录时画布被切走了");
   agentHighlight([item.id]);
   const chapters = Array.isArray(info?.chapters) ? info.chapters : [];
   return {
@@ -8678,16 +8028,12 @@ function agentResetZoom() {
 /* ---------- 汇总出口 ---------- */
 
 export const canvasAgent = {
-  /* 一次提交一串操作：期间不运镜不打光带，整批算一步撤销 */
+  /* 一次提交一串操作：期间不运镜不打光带 */
   beginBatch: () => {
-    if (batching) return;
     batching = true;
-    history.hold(true);
   },
   endBatch: () => {
-    if (!batching) return;
     batching = false;
-    history.hold(false);
   },
   /* 批量铺完之后把整批框进视野，让用户一眼看到结果 */
   batchFit: () => {
@@ -8753,16 +8099,14 @@ export const canvasAgent = {
   connectorCreate: agentCreateConnector,
   connectorUpdate: (id, patch) => agentUpdateBlock(id, patch),
   snapshot: (options) => {
-    if (!current) throw new Error("当前没有打开的空间");
+    if (!current) throw new Error("当前没有打开的画布");
     return exporter.snapshot(options || {});
   },
   exportAs: (format, options) => {
-    if (!current) throw new Error("当前没有打开的空间");
+    if (!current) throw new Error("当前没有打开的画布");
     return exporter.exportAs(format, options || {});
   },
   importFile: agentImportFile,
-  stickyRead: agentStickyRead,
-  stickyWrite: agentStickyWrite,
   pictureGet: agentPictureGet,
   pictureDraw: agentPictureDraw,
   pictureLayers: agentPictureLayers,
@@ -8776,6 +8120,7 @@ export const canvasAgent = {
   fileRead: agentFileRead,
   fileWrite: agentFileWrite,
   fileReveal: agentRevealFile,
+  imageOpen: agentOpenImage,
   pdfState: agentPdfState,
   pdfGoto: agentPdfGoto,
   ebookToc: agentEbookToc,

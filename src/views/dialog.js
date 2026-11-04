@@ -2,7 +2,7 @@
  * 浮层底色/描边/圆角/阴影，按钮也用同一套排版），保证整个应用的弹框风格统一。
  *
  * 用法：
- *   if (!(await confirmDialog({ message: "删除这张便签？", danger: true }))) return;
+ *   if (!(await confirmDialog({ message: "删除这个块？", danger: true }))) return;
  *
  * 键盘：Enter = 确定，Esc = 取消。点遮罩空白处也算取消。
  */
@@ -178,7 +178,7 @@ export function promptDialog({
   });
 }
 
-/* 多选项弹层：confirmDialog 只有两个按钮，装不下「拷进空间 / 只引用原文件」。
+/* 多选项弹层：confirmDialog 只有两个按钮，装不下「拷进画布 / 只引用原文件」。
  * 返回选中项的 value，取消返回 null。上下键换选项，Enter 确认，
  * 取消没有按钮——走右上角 × 、Esc 或点空白。 */
 export function choiceDialog({

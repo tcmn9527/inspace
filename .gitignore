@@ -47,3 +47,6 @@ tools/sdcpp-cache/
 # 临时脚本与截图（可随时删除）
 .tmp-journey/
 .tmp-test/
+
+# 本地工作流工具的临时目录
+.workbuddy/

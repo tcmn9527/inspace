@@ -60,7 +60,7 @@ marked.use({
       if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
         return `<span class="md-image-missing">[图片：${alt || "不支持"}]</span>`;
       }
-      // 相对路径：交给笔记页读成本地 data URL 再填 src
+      // 相对路径：交给画布笔记块读成本地 data URL 再填 src
       return `<img class="md-local-img" data-src="${escapeHtml(href)}" alt="${alt}"${title}>`;
     },
   },
@@ -72,12 +72,4 @@ export function renderMarkdown(source) {
   } catch (err) {
     return `<pre class="md-error">Markdown 渲染失败：${escapeHtml(err?.message || err)}</pre>`;
   }
-}
-
-/* 正文里的外链不在应用内跳转，交给系统浏览器 */
-export function externalUrlFrom(node) {
-  const anchor = node.closest?.("a[href]");
-  if (!anchor) return null;
-  const href = anchor.getAttribute("href") || "";
-  return safeUrl(href) || null;
 }

@@ -1,6 +1,6 @@
 /* MCP 工具表：给 agent 看的名字、说明和参数，以及把一次调用派给动作层的分发。
  *
- * 这里只做「参数翻译 + 切页 + 演示节奏」；真正改数据的是 canvas.js / notes.js
+ * 这里只做「参数翻译 + 切页 + 演示节奏」；真正改数据的是 canvas.js
  * 里那套和菜单、拖拽共用的动作函数，所以 agent 和用户手工操作不会写出两种状态。
  *
  * 所有会改界面的工具都默认先切到对应页面，用户能当场看见；返回前留一小拍高亮，
@@ -8,7 +8,6 @@
 
 import { GUIDE_TOPICS, guideText } from "./agent-guide.js";
 import { canvasAgent } from "./canvas.js";
-import { notesAgent } from "./notes.js";
 import { cosmosFlight, cosmosFlightControl, cosmosRoute, cosmosRouteSet } from "./cosmos.js";
 import { LIGHT_THEMES, THEMES, currentTheme, setTheme } from "./theme.js";
 
@@ -39,7 +38,7 @@ const BEND = {
   type: "boolean",
   description: "折点模式：true 打开，之后可以拖线身加折点；false 关闭并清除所有折点。连线默认关闭",
 };
-const X = { type: "number", description: "块左上角的世界坐标 x（空间坐标，原点在空间左上角）" };
+const X = { type: "number", description: "块左上角的世界坐标 x（画布坐标，原点在画布左上角）" };
 const Y = { type: "number", description: "块左上角的世界坐标 y" };
 const W = { type: "number", description: "宽度（像素）" };
 const H = { type: "number", description: "高度（像素）" };
@@ -156,8 +155,8 @@ const PICTURE_CMDS = {
       ref: { type: "string", description: "use 用哪个素材名 / tile 图案铺哪个素材，得是这块 symbols 里已经定义好的" },
       variant: { type: "string", description: "use：挑素材的哪一个变体（图层上 variants 标过的名字）。不挑就只画没标 variants 的那些常驻笔；标了变体的层只有挑中它才出现" },
       hide: { type: "array", items: { type: "string" }, description: "use：关掉素材里这几个名字的图层，其余照画" },
-      src: { type: "string", description: 'image 垫的那张图：images/xxx.png（这个空间里的，拷贝态）或本机绝对路径 C:\\某处\\参考图.png（引用原图，不拷字节）。联网地址和 data: 内联一律不认——这应用要离线也画得出来，一串 base64 还会把 pictures/<块id>.json 撑爆' },
-      path: { type: "string", description: 'image 简写：图还在本机某个位置就直接写 path，应用会把它拷进这个空间、回填 src，顺手量好 w / h；和 src 同时给以 path 为准。文件读不出来就整次报错，不会悄悄少一张' },
+      src: { type: "string", description: 'image 垫的那张图：images/xxx.png（这个画布里的，拷贝态）或本机绝对路径 C:\\某处\\参考图.png（引用原图，不拷字节）。联网地址和 data: 内联一律不认——这应用要离线也画得出来，一串 base64 还会把 pictures/<块id>.json 撑爆' },
+      path: { type: "string", description: 'image 简写：图还在本机某个位置就直接写 path，应用会把它拷进这个画布、回填 src，顺手量好 w / h；和 src 同时给以 path 为准。文件读不出来就整次报错，不会悄悄少一张' },
       fit: { type: "string", enum: ["meet", "fill"], description: 'image 的框和图片本身比例不一致时怎么办：meet（默认）等比缩到整张都在框内、居中留边；fill 硬拉成正好铺满框，会变形' },
     },
     required: ["op"],
@@ -183,7 +182,7 @@ const PICTURE_SYMBOLS = {
 };
 
 /* 一套光：整块只认一个光源，逐条指令只声明自己那面朝哪儿，明暗由这儿算。
-   挂在块上，不写进任何一条指令——改一次光要重写上千条的话，幂等和撤销都顶不住。 */
+   挂在块上，不写进任何一条指令——改一次光要重写上千条的话，幂等和性能都顶不住。 */
 const PICTURE_LIGHT = {
   type: ["object", "null"],
   description:
@@ -239,10 +238,11 @@ const GEN_PROPS = {
   seed: { type: "number", description: "种子；-1 每张换一个，给正数才能复现同一张" },
   mode: {
     type: "string",
-    enum: ["auto", "t2i", "i2i", "edit"],
+    enum: ["auto", "t2i", "i2i", "edit", "upscale"],
     description:
       "出图那一档。auto（默认）看连线自己定：没接图=文生图，接一张=图生图，接多张=参考图编辑。" +
-      "只有「一张参考图而不是底图」这种要明写 edit（画风锚点就是这种）；一张也不接却想文生图，明写 t2i 盖掉连线。",
+      "只有「一张参考图而不是底图」这种要明写 edit（画风锚点就是这种）；一张也不接却想文生图，明写 t2i 盖掉连线。" +
+      "upscale 是纯 ESRGAN 高清放大，不吃推断：连一张图、出不带提示词的 4× 那张。",
   },
   strength: { type: "number", description: "图生图改多少，0~1，默认 0.75：小=贴着原图改，大=只留个大概" },
 };
@@ -252,9 +252,12 @@ const GEN_KEYS = Object.keys(GEN_PROPS);
 /* 换档只认这两个槽位；pace 是每张工具都带的装饰参数，不能当档位传下去 */
 const GEN_MODEL_KEYS = ["dit", "encoder"];
 
-const def = (name, description, properties = {}, required = []) => ({
+/* waitSeconds：这条命令最长可能占住总线多久，只给 Rust 那头的等待上限用，
+   注册时会被摘掉，不进 tools/list。没写的走默认 120 秒。 */
+const def = (name, description, properties = {}, required = [], waitSeconds = 0) => ({
   name,
   description,
+  ...(waitSeconds ? { waitSeconds } : {}),
   inputSchema: {
     type: "object",
     properties: { ...properties, pace: PACE },
@@ -266,7 +269,7 @@ const TOOL_DEFS = [
   def("guide", "速查手册：所有工具怎么配合用、每种块怎么建、坐标与颜色约定、常用配方和易错点。第一次接手先调它；不传 topic 返回整本手册。", {
     topic: { type: "string", enum: GUIDE_TOPICS, description: "只看一章；不传返回整本" },
   }),
-  def("app_state", "看当前应用状态：正在哪一页、数据文件夹、当前主题、当前空间和相机、当前打开的笔记、MCP 服务端口。"),
+  def("app_state", "看当前应用状态：正在哪一页、数据文件夹、当前主题、当前画布和相机、MCP 服务端口。"),
   def("theme_list", "列出所有主题（id、名字、深色/浅色），并标出当前用的那套。"),
   def("theme_set", "切换应用主题。宇宙主题是一条自动飞行航线：镜头一直往前飞，路上遇到星体会绕两圈慢慢看。", {
     theme: { type: "string", description: "主题 id，从 theme_list 拿" },
@@ -306,26 +309,26 @@ const TOOL_DEFS = [
     },
     ["action"],
   ),
-  def("space_list", "列出所有空间（id、名字、文件夹路径），并标出当前打开的是哪个。"),
-  def("space_open", "切换到指定空间，等它读完再返回。space 传空间 id 或空间名。", {
-    space: { type: "string", description: "空间 id 或名字" },
+  def("space_list", "列出所有画布（id、名字、文件夹路径），并标出当前打开的是哪个。"),
+  def("space_open", "切换到指定画布，等它读完再返回。space 传画布 id 或画布名。", {
+    space: { type: "string", description: "画布 id 或名字" },
   }, ["space"]),
-  def("space_create", "新建一个空间并切过去。", {
-    name: { type: "string", description: "空间名" },
+  def("space_create", "新建一个画布并切过去。", {
+    name: { type: "string", description: "画布名" },
   }, ["name"]),
-  def("space_rename", "给空间改名（磁盘文件夹跟着改）。", {
-    space: { type: "string", description: "空间 id 或名字" },
+  def("space_rename", "给画布改名（磁盘文件夹跟着改）。", {
+    space: { type: "string", description: "画布 id 或名字" },
     name: { type: "string", description: "新名字" },
   }, ["space", "name"]),
-  def("space_delete", "删除空间：整个空间文件夹进系统回收站。", {
-    space: { type: "string", description: "空间 id 或名字" },
+  def("space_delete", "删除画布：整个画布文件夹进系统回收站。", {
+    space: { type: "string", description: "画布 id 或名字" },
   }, ["space"]),
-  def("space_scene", "看当前空间里所有块的摘要：id、类型、位置尺寸、层级、各类型的关键字段。做任何块操作前先调这个拿 id。", {
-    type: { type: "string", description: "只看某一类块（text/rect/ellipse/line/arrow/sticky/note/picture/scene/file/image/audio/video/ebook/connector），不传就全部" },
+  def("space_scene", "看当前画布里所有块的摘要：id、类型、位置尺寸、层级、各类型的关键字段。做任何块操作前先调这个拿 id。", {
+    type: { type: "string", description: "只看某一类块（text/rect/ellipse/line/arrow/note/picture/scene/file/image/audio/video/ebook/connector），不传就全部" },
   }),
   def(
     "space_snapshot",
-    "看一眼空间现在长什么样——返回一张 PNG 图片，你能直接看到画面。space_scene 给的是坐标，这个是「眼睛」：用它检查块有没有重叠、文字有没有溢出边框、连线有没有从标题中间穿过去、整张图的重心是不是歪了。画完一批东西之后调一次自查，比心算坐标可靠得多。图上的像素位置可以按返回里的 region 换算成世界坐标。",
+    "看一眼画布现在长什么样——返回一张 PNG 图片，你能直接看到画面。space_scene 给的是坐标，这个是「眼睛」：用它检查块有没有重叠、文字有没有溢出边框、连线有没有从标题中间穿过去、整张图的重心是不是歪了。画完一批东西之后调一次自查，比心算坐标可靠得多。图上的像素位置可以按返回里的 region 换算成世界坐标。",
     {
       region: {
         type: "string",
@@ -349,7 +352,7 @@ const TOOL_DEFS = [
   ),
   def(
     "space_batch",
-    "一次提交一串操作，整批算一步撤销——用户按一次 Ctrl+Z 就全退掉；期间也不会每个块都运镜打光，只在最后把整批框进视野。铺一整块区域、批量改样式、批量连线，都该用它，别一个一个调：既快，用户事后也好退。每项 {tool, args}；某项失败不会中断后面的，返回里逐项标 ok。",
+    "一次提交一串操作，期间不会每个块都运镜打光，只在最后把整批框进视野。铺一整块区域、批量改样式、批量连线，都该用它，别一个一个调：既快，画面也不会被一串镜头跳动搅乱。每项 {tool, args}；某项失败不会中断后面的，返回里逐项标 ok。",
     {
       operations: {
         type: "array",
@@ -368,22 +371,21 @@ const TOOL_DEFS = [
     ["operations"],
   ),
   def("block_get", "看单个块的摘要。", { id: ID }, ["id"]),
-  def("block_create", "在空间里新建一块。坐标不给就落在视野中央、连续创建自动错开。", {
-    type: { type: "string", description: "text/rect/ellipse/line/arrow/sticky/note/picture/scene/gen/image/audio/video/file/ebook/connector" },
+  def("block_create", "在画布里新建一块。坐标不给就落在视野中央、连续创建自动错开。", {
+    type: { type: "string", description: "text/rect/ellipse/line/arrow/note/picture/scene/gen/image/audio/video/file/ebook/connector" },
     x: X, y: Y, w: W, h: H,
-    text: { type: "string", description: "文字块/便签的正文" },
+    text: { type: "string", description: "文字块的正文" },
     markdown: { type: "string", description: "笔记块的 Markdown 正文" },
     name: { type: "string", description: "笔记块的名字" },
-    notePath: { type: "string", description: "从笔记库某篇笔记建成笔记块，传笔记库内相对路径" },
     path: { type: "string", description: "image/audio/video/file/ebook 块要的本机文件绝对路径" },
-    mode: { type: "string", enum: ["copy", "link"], description: "文件拷进空间还是只引用原文件，默认 copy" },
+    mode: { type: "string", enum: ["copy", "link"], description: "文件拷进画布还是只引用原文件，默认 copy" },
     as: { type: "string", enum: ["image", "audio", "video", "file", "ebook"], description: "按指定类型落块，覆盖按扩展名的自动判断" },
     fontSize: { type: "number", description: "文字块字号" },
-    radius: { type: "number", description: "圆角像素（px）：矩形/文字/图片/便签/笔记/文件都认，椭圆没有圆角" },
-    borderWidth: { type: "number", description: "边框宽度（px，0 为无边框）：矩形/椭圆/文字/图片默认 2，便签/笔记/文件默认 1" },
+    radius: { type: "number", description: "圆角像素（px）：矩形/文字/图片/笔记/文件都认，椭圆没有圆角" },
+    borderWidth: { type: "number", description: "边框宽度（px，0 为无边框）：矩形/椭圆/文字/图片默认 2，笔记/文件默认 1" },
     locked: { type: "boolean", description: "建好就锁住（锁住的块不能移动、缩放、改内容、删除，要先解锁）" },
     color: COLOR,
-    textColor: { type: "string", description: "便签文字颜色" },
+    textColor: { type: "string", description: "文字颜色" },
     borderColor: COLOR,
     fillColor: COLOR,
     paperColor: { type: "string", description: "画面块的画纸底色，如 #f5efdf；空串是透明" },
@@ -415,10 +417,10 @@ const TOOL_DEFS = [
     locked: { type: "boolean", description: "锁定/解锁这块；锁住的块要先传 locked:false 才能改其他字段" },
     borderColor: COLOR,
     fillColor: COLOR,
-    color: { type: "string", description: "文字色；便签上是底色" },
-    textColor: { type: "string", description: "便签文字色" },
-    text: { type: "string", description: "文字块/便签正文" },
-    markdown: { type: "string", description: "空间内笔记块的 Markdown 正文（引用外部 .md 的块用 note_write）" },
+    color: { type: "string", description: "文字色" },
+    textColor: { type: "string", description: "文字色" },
+    text: { type: "string", description: "文字块正文" },
+    markdown: { type: "string", description: "画布内笔记块的 Markdown 正文（引用外部 .md 的块用 note_write）" },
     shape: { type: "string", enum: ["curve", "elbow"], description: "连线走线" },
     arrow: { type: "string", enum: ["none", "end", "both"], description: "连线箭头" },
     label: { type: "string", description: "连线文字" },
@@ -442,13 +444,13 @@ const TOOL_DEFS = [
     ...GEN_PROPS,
   }, ["id"]),
   def("block_delete", "删除一块；挂在它身上的连线一起删。", { id: ID }, ["id"]),
-  def("block_duplicate", "复制一块（媒体文件会真拷一份副本），默认落在原块右下 24px。给 space 就复制到那个空间（会切过去），垫在画面里的位图也一并拷进那个空间。", {
+  def("block_duplicate", "复制一块（媒体文件会真拷一份副本），默认落在原块右下 24px。给 space 就复制到那个画布（会切过去），垫在画面里的位图也一并拷进那个画布。", {
     id: ID,
     dx: { type: "number", description: "横向偏移，默认 24；给了 space 时不作数" },
     dy: { type: "number", description: "纵向偏移，默认 24；给了 space 时不作数" },
-    space: { type: "string", description: "复制到哪个空间：id 或名字。不给就在本空间复制" },
-    x: { type: "number", description: "跨空间复制时的落点世界 x（不给就摆在镜头正中）" },
-    y: { type: "number", description: "跨空间复制时的落点世界 y" },
+    space: { type: "string", description: "复制到哪个画布：id 或名字。不给就在本画布复制" },
+    x: { type: "number", description: "跨画布复制时的落点世界 x（不给就摆在镜头正中）" },
+    y: { type: "number", description: "跨画布复制时的落点世界 y" },
   }, ["id"]),
   def("block_select", "选中一块或一组块；additive 为 true 时加入现有多选。", {
     ids: IDS,
@@ -494,20 +496,12 @@ const TOOL_DEFS = [
     id: ID,
     zoom: { type: "number", description: "目标缩放" },
   }, ["id"]),
-  def("camera_fit", "缩放到刚好看见空间里所有块。"),
+  def("camera_fit", "缩放到刚好看见画布里所有块。"),
   def("camera_reset", "回到 100% 缩放，视野中心不动。"),
-  def("sticky_read", "读便签正文和颜色。", { id: ID }, ["id"]),
-  def("sticky_write", "写便签正文/底色/字色/边框色。", {
-    id: ID,
-    text: { type: "string" },
-    color: { type: "string", description: "便签底色" },
-    textColor: { type: "string", description: "便签文字色" },
-    borderColor: COLOR,
-  }, ["id"]),
   def("picture_get", "读一块画面的全部绘制指令和素材表：每条带号 i、类型和几何，symbols 是这块已经定义过的素材。改某一条之前先调它拿号，picture_screenshot 上看到的东西在这里都能按号对上。", {
     id: ID,
   }, ["id"]),
-  def("picture_draw", "往画面块里画矢量指令。mode=replace（默认）整幅换掉、append 追加、delete 按 ids 删掉那几条。画歪了别整幅重画：picture_screenshot 看一眼，再 delete 那几条重新 append。字段写坏（颜色、半径、朝向词）不会报错、那一条整条丢掉并在返回的 dropped 里给出 at 和 why，条数对不上就是被丢了；但名字写错是致命的——素材名、变体名、图层名、tile / 剪刀点的素材名，只要一个对不上，这一笔请求整个失败并把这块现有的名字列回来，别指望少几条还能悄悄画完。用户自己在块左缘工具条上手绘的笔迹也是 op:stroke 的点串，要洗画就按号 delete 掉那几笔、换成精确指令。要重复摆同一个东西（人、船、瓦）就先用 symbols 定义一次、再摆 use，别把同一段几何重算几十遍。要照着已有的画就垫一张位图当底：{op:\"image\",path:\"C:\\\\某处\\\\参考图.png\"}，应用会把它拷进这个空间、照原图量好尺寸，再配 opacity 压淡、filter 去色；参考图也是一条指令，橡皮擦和按号 delete 都删得掉。笔画想带飞白就给那条 stroke 加 grain（0~1，0.5 上下最像写干了）：一笔会自己散成几根丝，中间露纸、末端分叉，不用你算丝。要遮、要裁就给那条加 clip（剪刀，形状里面才画得出来）或 mask（拿渐变当透镜子，做渐隐）；一百个窗就定义一个素材当剪刀，每个窗只写 ref 和落点。要把一幅画分开管就给指令起同一个 name 分层（远 / 中 / 近、城楼 / 河面），开关用 hidden 或 picture_layers，别为关一层把整幅 replace 一遍。明暗别自己心算：给块上挂一套光（picture_light），指令只声明那面朝哪个方向 face。", {
+  def("picture_draw", "往画面块里画矢量指令。mode=replace（默认）整幅换掉、append 追加、delete 按 ids 删掉那几条。画歪了别整幅重画：picture_screenshot 看一眼，再 delete 那几条重新 append。字段写坏（颜色、半径、朝向词）不会报错、那一条整条丢掉并在返回的 dropped 里给出 at 和 why，条数对不上就是被丢了；但名字写错是致命的——素材名、变体名、图层名、tile / 剪刀点的素材名，只要一个对不上，这一笔请求整个失败并把这块现有的名字列回来，别指望少几条还能悄悄画完。用户自己在块左缘工具条上手绘的笔迹也是 op:stroke 的点串，要洗画就按号 delete 掉那几笔、换成精确指令。要重复摆同一个东西（人、船、瓦）就先用 symbols 定义一次、再摆 use，别把同一段几何重算几十遍。要照着已有的画就垫一张位图当底：{op:\"image\",path:\"C:\\\\某处\\\\参考图.png\"}，应用会把它拷进这个画布、照原图量好尺寸，再配 opacity 压淡、filter 去色；参考图也是一条指令，橡皮擦和按号 delete 都删得掉。笔画想带飞白就给那条 stroke 加 grain（0~1，0.5 上下最像写干了）：一笔会自己散成几根丝，中间露纸、末端分叉，不用你算丝。要遮、要裁就给那条加 clip（剪刀，形状里面才画得出来）或 mask（拿渐变当透镜子，做渐隐）；一百个窗就定义一个素材当剪刀，每个窗只写 ref 和落点。要把一幅画分开管就给指令起同一个 name 分层（远 / 中 / 近、城楼 / 河面），开关用 hidden 或 picture_layers，别为关一层把整幅 replace 一遍。明暗别自己心算：给块上挂一套光（picture_light），指令只声明那面朝哪个方向 face。", {
     id: ID,
     mode: { type: "string", enum: ["replace", "append", "delete"], description: "默认 replace" },
     cmds: PICTURE_CMDS,
@@ -539,13 +533,13 @@ const TOOL_DEFS = [
     ...(PICTURE_LIGHT.properties || {}),
     off: { type: "boolean", description: "true 就是关掉这块的光，回到没有光的原样" },
   }, ["id"]),
-  def("gen_status", "问出图引擎现在什么状况：权重进没进内存、哪一块生图面板正占着它、要用的那几个文件在不在盘上、当前用的是哪一档（dit / encoder）、空闲多久自动放掉。顺带把这块空间里每一面生图面板的摘要都列出来（提示词、参数、那一档 mode 和改动幅度 strength、进料 feed={mode,label,count} 说清这次真会走哪档、接了几张输入图、相位、最近那张的相对路径）。"),
-  def("gen_models", "检测出图模型这一整套的现状，一次全给：模型目录（modelsDir，用户在设置页定的，可能在数据根之外）+ 目录里可换的两列文件（dit 画图模型、encoder 文本编码器，各带字节数，小的在前）+ fixed 两件跟着模型定死的 + 当前选的档 + missing 缺哪些 + machine 这台机器的数字（显卡名、显存、内存总量与空闲、该盘剩余）+ advice 为什么建议某一档 + needed 建议那一套要放的四个文件（名字、字节数、下载页、在不在盘上，视觉投影标 optional）+ tiers 全部量化档。头一次调用会探显卡，稍慢一两秒。这是引擎级的全局配置，和当前空间无关。"),
+  def("gen_status", "问出图引擎现在什么状况：权重进没进内存、哪一块生图面板正占着它、要用的那几个文件在不在盘上、当前用的是哪一档（dit / encoder）、空闲多久自动放掉。顺带把这块画布里每一面生图面板的摘要都列出来（提示词、参数、那一档 mode 和改动幅度 strength、进料 feed={mode,label,count} 说清这次真会走哪档、接了几张输入图、相位、最近那张的相对路径）。"),
+  def("gen_models", "检测出图模型这一整套的现状，一次全给：模型目录（modelsDir，用户在设置页定的，可能在数据根之外）+ 目录里可换的两列文件（dit 画图模型、encoder 文本编码器，各带字节数，小的在前）+ fixed 两件跟着模型定死的 + 当前选的档 + missing 缺哪些 + machine 这台机器的数字（显卡名、显存、内存总量与空闲、该盘剩余）+ advice 为什么建议某一档 + needed 建议那一套要放的四个文件（名字、字节数、下载页、在不在盘上，视觉投影标 optional）+ tiers 全部量化档。头一次调用会探显卡，稍慢一两秒。这是引擎级的全局配置，和当前画布无关。"),
   def("gen_models_set", "换出图档位：dit / encoder 各给一个模型文件夹里的文件名，没给的槽位不动。选了立刻落库并放掉已载入的权重——下一次出图按新档重新载入，头一次会慢一两分钟。正在出图时换不了（先 gen_cancel 或等这张跑完）。文件名必须是 gen_models 扫出来的那一个，且不能跨槽位（拿编码器当 DiT 会报回）。模型目录不由这条工具改：要挪地方是用户在设置页「换个目录」。", {
     dit: { type: "string", description: "画图模型文件名，取自 gen_models 的 dit 列" },
     encoder: { type: "string", description: "文本编码器文件名，取自 gen_models 的 encoder 列" },
   }),
-  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个空间的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。", {
+  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个画布的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。mode 给 upscale 是另一条路：纯 ESRGAN 放大，连一张图、不读提示词也不看步数，出来就是 4× 那张（864×1152 那种输入约十秒）。", {
     id: ID,
     prompt: { type: "string", description: "这一张要什么，一句话到一段话" },
     negative: { type: "string", description: "不想要什么" },
@@ -556,13 +550,14 @@ const TOOL_DEFS = [
     seed: { type: "number", description: "种子；-1 每张换一个，给正数才能同一张复现" },
     mode: {
       type: "string",
-      enum: ["auto", "t2i", "i2i", "edit"],
-      description: "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑",
+      enum: ["auto", "t2i", "i2i", "edit", "upscale"],
+      description:
+        "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑。upscale 是纯 ESRGAN 高清放大，不参与推断、要明说：连一张图进来，出不带提示词的 4× 那张",
     },
     strength: { type: "number", description: "图生图改多少 0~1，默认 0.75" },
     wait: { type: "boolean", description: "false 只起一轮就返回（马上拿 phase 判断），默认 true 等到出完" },
     timeout: { type: "number", description: "等多少秒，默认 300，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问" },
-  }, ["id"]),
+  }, ["id"], 630),
   def("gen_cancel", "掐掉正在出的那一张。载入权重那几分钟也能停（那边一出来看到取消标志就自己收）。没有图在跑返回 canceled:false。"),
   def("gen_place", "把一块生图面板最近出的那张落成一块独立图片块，落在面板右边。落出去的是复制：面板接着显示它那张、也接着能改词重出，图片块自己带一份文件，删哪一块都不影响另一块。", { id: ID }, ["id"]),
   def("gen_screenshot", "看一块生图面板现在是什么样，返回一张 PNG——取景窗里就是最近那张成品，正在跑的时候是逐步预览的那一帧。比 space_snapshot 近得多，改完提示词、出了图想确认画面对不对，调它。", {
@@ -578,15 +573,16 @@ const TOOL_DEFS = [
     id: ID,
     maxChars: { type: "number", description: "最多返回多少个字符，默认 20000，0 表示整份" },
   }, ["id"]),
-  def("file_write", "把正文写回文本文件块对应的文件（拷贝态写空间副本，引用态写原文件）。", {
+  def("file_write", "把正文写回文本文件块对应的文件（拷贝态写画布副本，引用态写原文件）。", {
     id: ID,
     text: { type: "string", description: "完整的新正文" },
     force: { type: "boolean", description: "原文件在读取后被外部改过时，是否仍然覆盖" },
   }, ["id", "text"]),
   def("file_reveal", "在系统文件管理器里定位一块指向的磁盘文件。", { id: ID }, ["id"]),
-  def("file_import", "把本机文件作为一块插进空间：图片、音频、视频、电子书、附件、Markdown 自动分类型。", {
+  def("image_open", "用系统默认的看图工具打开一块图（用户在画布上双击那块图是一回事）。", { id: ID }, ["id"]),
+  def("file_import", "把本机文件作为一块插进画布：图片、音频、视频、电子书、附件、Markdown 自动分类型。", {
     path: { type: "string", description: "本机文件绝对路径" },
-    mode: { type: "string", enum: ["copy", "link"], description: "拷进空间还是只引用原文件，默认 copy" },
+    mode: { type: "string", enum: ["copy", "link"], description: "拷进画布还是只引用原文件，默认 copy" },
     as: { type: "string", enum: ["image", "audio", "video", "file", "ebook"], description: "按指定类型落块" },
     x: X, y: Y,
     borderColor: COLOR,
@@ -608,55 +604,12 @@ const TOOL_DEFS = [
     action: { type: "string", enum: ["play", "pause", "toggle", "seek", "volume"] },
     value: { type: "number", description: "seek 是目标秒数，volume 是 0 到 1" },
   }, ["id", "action"]),
-  def("notes_tree", "列出笔记库整棵文件树（文件夹和 .md 文件）。"),
-  def("notes_read", "读一篇笔记的 Markdown 正文。", {
-    path: { type: "string", description: "笔记库内相对路径，如 想法/某篇.md" },
-  }, ["path"]),
-  def("notes_write", "写一篇笔记的 Markdown 正文（整篇覆盖）。", {
-    path: { type: "string" },
-    text: { type: "string" },
-  }, ["path", "text"]),
-  def("notes_attach_image", "把一张本机图片复制进这篇笔记自己的图片目录，并插入到正文末尾。", {
-    path: { type: "string", description: "本机图片路径" },
-    notePath: { type: "string", description: "贴到哪篇笔记，不传就用当前打开的笔记" },
-    append: { type: "boolean", description: "默认 true 插到正文末尾；false 只存图片不插入" },
-  }, ["path"]),
-  def("notes_create", "新建一篇笔记，可带初始正文。", {
-    name: { type: "string", description: "笔记名，不用带 .md" },
-    dir: { type: "string", description: "放进哪个文件夹（相对路径），不传放根目录" },
-    text: { type: "string", description: "初始 Markdown 正文" },
-  }, ["name"]),
-  def("notes_create_folder", "在笔记库里新建文件夹。", {
-    name: { type: "string" },
-    dir: { type: "string", description: "放在哪个文件夹下，不传放根目录" },
-  }, ["name"]),
-  def("notes_rename", "给笔记或文件夹改名。", {
-    path: { type: "string" },
-    name: { type: "string", description: "新名字；笔记不用带 .md" },
-  }, ["path", "name"]),
-  def("notes_move", "把笔记或文件夹移到另一个文件夹。", {
-    path: { type: "string" },
-    dir: { type: "string", description: "目标文件夹相对路径，空字符串表示笔记根" },
-  }, ["path"]),
-  def("notes_delete", "永久删除一篇笔记或整个文件夹（不进回收站，谨慎）。", {
-    path: { type: "string" },
-  }, ["path"]),
-  def("notes_open", "在笔记页打开一篇笔记给用户看。", {
-    path: { type: "string" },
-  }, ["path"]),
-  def("notes_current", "看笔记页当前打开的笔记和编辑状态。"),
-  def("notes_edit", "切笔记页的阅读/编辑状态。", {
-    editing: { type: "boolean", description: "true 进入编辑，false 回到阅读" },
-  }, ["editing"]),
-  def("notes_reveal", "在系统文件管理器里定位笔记或文件夹。", {
-    path: { type: "string", description: "空字符串表示笔记根目录" },
-  }, ["path"]),
 ];
 
 export const TOOL_LIST = TOOL_DEFS;
 
 function viewNow() {
-  return document.querySelector(".rail-item.is-active")?.dataset.route || "canvas";
+  return window.__inspace?.route || "canvas";
 }
 
 async function ensureView(view) {
@@ -681,13 +634,6 @@ async function onCanvas(args, run) {
   return data;
 }
 
-async function onNotes(args, run) {
-  await ensureView("notes");
-  const data = await run();
-  await beat(args);
-  return data;
-}
-
 function pick(args, keys) {
   const out = {};
   for (const key of keys) {
@@ -706,9 +652,8 @@ const BLOCK_FIELDS = [
 ];
 
 async function appState() {
-  const [dataRoot, notesRoot, mcpInfo] = await Promise.all([
+  const [dataRoot, mcpInfo] = await Promise.all([
     invoke("data_root").catch(() => ""),
-    invoke("notes_dir").catch(() => ""),
     invoke("mcp_info").catch(() => null),
   ]);
   let space = null;
@@ -727,11 +672,9 @@ async function appState() {
   return {
     route: viewNow(),
     dataRoot,
-    notesRoot,
     theme: currentTheme(),
     mcp: mcpInfo ? { running: mcpInfo.running, port: mcpInfo.port, url: mcpInfo.url, error: mcpInfo.error } : null,
     space,
-    notes: notesAgent.current(),
   };
 }
 
@@ -818,7 +761,7 @@ function cosmosRouteTool(args) {
   return { ...route, note: "当前不是宇宙主题；名单已存下，切过去就按这条航线飞" };
 }
 
-/* 档位和航线同理：引擎级的全局配置，不为它把用户从当前空间拽走。
+/* 档位和航线同理：引擎级的全局配置，不为它把用户从当前画布拽走。
    这一个还带机器规格和本机建议档，所以缺文件时能把「该下什么」直接说清楚。 */
 async function genModelsTool() {
   const models = await invoke("gen_models");
@@ -907,12 +850,12 @@ async function blockScreenshot(args, type, label) {
   };
 }
 
-/* 批量里只放画布上的块操作。切空间、换主题、写笔记这些会跳页或者把撤销栈搅乱，
-   混进来「一次撤销全退」就不成立了，所以按白名单放行。
+/* 批量里只放画布上的块操作。切画布、换主题这些会跳页，
+   混进来会把这一批的观感打散，所以按白名单放行。
    生图那一头只放看和落块：gen_run 一次只吃一张、一批排三十秒一张没意义，gen_cancel 掐的是唯一那一张，
    都不该藏在批量里。 */
 const BATCH_ALLOWED =
-  /^(block_|connector_|sticky_|picture_|scene_|gen_(status$|screenshot$|place$)|note_read$|note_write$|file_import$|pdf_goto$|ebook_goto$|camera_)/;
+  /^(block_|connector_|picture_|scene_|gen_(status$|screenshot$|place$)|note_read$|note_write$|file_import$|pdf_goto$|ebook_goto$|camera_)/;
 
 /* 一项的结果只留 id 和类型：200 项把完整摘要都塞回去，这个回复会大到没法看 */
 function briefResult(data) {
@@ -963,7 +906,7 @@ async function runBatch(args) {
   return {
     done: results.length - failed,
     failed,
-    note: "整批算一步撤销，Ctrl+Z 一次全退",
+    note: "整批不运镜不打光带",
     operations: results,
   };
 }
@@ -1012,7 +955,7 @@ async function dispatch(name, args) {
            （第一版就是这样把 parts / light / camera / groundColor 落掉的——五件东西回来是 0 件） */
         canvasAgent.blockCreate(
           pick(args, [
-            "type", "x", "y", "w", "h", "text", "markdown", "name", "notePath", "path", "mode", "as",
+            "type", "x", "y", "w", "h", "text", "markdown", "name", "path", "mode", "as",
             "fontSize", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
             "paperColor", "cmds", "symbols", "light", "parts", "camera", "groundColor",
             ...GEN_KEYS,
@@ -1051,10 +994,6 @@ async function dispatch(name, args) {
     case "camera_reset":
       return onCanvas(args, () => canvasAgent.cameraResetZoom());
 
-    case "sticky_read":
-      return onCanvas(args, () => canvasAgent.stickyRead(args.id));
-    case "sticky_write":
-      return onCanvas(args, () => canvasAgent.stickyWrite(args.id, pick(args, ["text", "color", "textColor", "borderColor"])));
     case "picture_get":
       return onCanvas(args, () => canvasAgent.pictureGet(args.id));
     case "picture_draw":
@@ -1096,6 +1035,8 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.fileWrite(args.id, args.text, Boolean(args.force)));
     case "file_reveal":
       return onCanvas(args, () => canvasAgent.fileReveal(args.id));
+    case "image_open":
+      return onCanvas(args, () => canvasAgent.imageOpen(args.id));
     case "file_import":
       return onCanvas(args, () => canvasAgent.importFile(pick(args, ["path", "mode", "as", "x", "y", "borderColor", "fillColor"])));
 
@@ -1111,33 +1052,6 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.mediaState(args.id));
     case "media_control":
       return onCanvas(args, () => canvasAgent.mediaControl(args.id, args.action, args.value));
-
-    case "notes_tree":
-      return onNotes(args, () => notesAgent.tree());
-    case "notes_read":
-      return onNotes(args, () => notesAgent.read(args.path));
-    case "notes_write":
-      return onNotes(args, () => notesAgent.write(args.path, args.text));
-    case "notes_attach_image":
-      return onNotes(args, () => notesAgent.attachImage(args.path, args.notePath, args.append));
-    case "notes_create":
-      return onNotes(args, () => notesAgent.create(args.name, args.dir, args.text));
-    case "notes_create_folder":
-      return onNotes(args, () => notesAgent.createFolder(args.name, args.dir));
-    case "notes_rename":
-      return onNotes(args, () => notesAgent.rename(args.path, args.name));
-    case "notes_move":
-      return onNotes(args, () => notesAgent.move(args.path, args.dir));
-    case "notes_delete":
-      return onNotes(args, () => notesAgent.remove(args.path));
-    case "notes_open":
-      return onNotes(args, () => notesAgent.open(args.path));
-    case "notes_current":
-      return onNotes(args, () => notesAgent.current());
-    case "notes_edit":
-      return onNotes(args, () => notesAgent.edit(args.editing));
-    case "notes_reveal":
-      return onNotes(args, () => notesAgent.reveal(args.path));
 
     default:
       throw new Error(`没有这个工具：${name}`);

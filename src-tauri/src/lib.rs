@@ -5,7 +5,6 @@ mod ebook;
 mod ffmpeg;
 mod imagegen;
 mod mcp;
-mod notes;
 pub mod sdcpp; // 引擎绑定：examples 和后续的生图面板都从这里进
 mod store;
 
@@ -31,7 +30,7 @@ pub fn run() {
             let db_state = db::init_state(dir.clone())?;
             let store_state = store::init(dir.clone());
             // migrate 顺手把 SQLite 里记的数据根目录同步进 DataRoot 镜像，
-            // 之后空间、笔记、便签读的是同一个路径
+            // 之后画布读的是同一个路径
             store::migrate(&db_state, &store_state)?;
             let data_root = store::root_handle(&store_state);
             app.manage(canvas::init(
@@ -89,25 +88,10 @@ pub fn run() {
             store::data_set_root,
             store::data_root_cancel,
             store::data_reveal,
-            notes::notes_dir,
-            notes::notes_tree,
-            notes::notes_read,
-            notes::notes_write,
-            notes::notes_create,
-            notes::notes_create_dir,
-            notes::notes_rename,
-            notes::notes_move,
-            notes::notes_delete,
-            notes::notes_save_image,
-            notes::notes_read_image,
-            notes::image_read_base64,
-            notes::notes_reveal,
             canvas::canvas_list,
             canvas::canvas_create,
             canvas::canvas_open,
             canvas::canvas_save_items,
-            canvas::canvas_history_list,
-            canvas::canvas_history_read,
             canvas::canvas_search,
             canvas::canvas_save_camera,
             canvas::canvas_rename,
@@ -116,13 +100,10 @@ pub fn run() {
             canvas::canvas_pick_image,
             canvas::canvas_import_image,
             canvas::canvas_image_url,
+            canvas::canvas_open_image,
             canvas::canvas_delete_image,
             canvas::canvas_save_note_image,
             canvas::canvas_read_note_image,
-            canvas::canvas_read_sticky,
-            canvas::canvas_write_sticky,
-            canvas::canvas_duplicate_sticky,
-            canvas::canvas_delete_sticky,
             canvas::canvas_read_note,
             canvas::canvas_write_note,
             canvas::canvas_duplicate_note,

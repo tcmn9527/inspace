@@ -18,10 +18,8 @@
   --danger: #ff6b60; /* 危险操作 */
 
   --titlebar-h: 45px;
-  --rail-w: 48px; /* 左栏宽：原设计 132 设计 px，按需求调小至 96 设计 px（含 1px 右边界） */
-  --rail-item: 30px; /* 图标块：与搜索/＋工具条控件同尺寸 30px */
   --label-h: 36px; /* 标签行高 72 设计 px */
-  --pad-x: 9px; /* 内容左边距：随左栏收窄（48）后与栏右边界仍保持 9px 间距 */
+  --pad-x: 9px; /* 内容左边距 */
 
   color: var(--fg);
   background: var(--bg);
@@ -136,91 +134,6 @@ button {
   flex: 1 1 auto;
   display: flex;
   min-height: 0;
-}
-
-/* 左侧图标栏 */
-.rail {
-  flex: 0 0 var(--rail-w);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 0;
-  border-right: 1px solid var(--line);
-}
-
-.rail-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--rail-item);
-  height: var(--rail-item);
-  border: 1.5px solid color-mix(in srgb, var(--fg) 8%, transparent);
-  border-radius: 50%; /* 正圆，与 ＋ 圆按钮同款 */
-  padding: 0;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-  cursor: pointer;
-  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
-}
-
-.rail-item svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* 房子图标视觉偏大，单独缩小一档；笔记/齿轮保持 20px */
-.rail-item[data-route="canvas"] svg {
-  width: 16px;
-  height: 16px;
-}
-
-.rail-item:hover {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 13%, transparent);
-  border-color: color-mix(in srgb, var(--fg) 22%, transparent);
-}
-
-.rail-item:focus-visible {
-  outline: 1px solid color-mix(in srgb, var(--fg) 35%, transparent);
-  outline-offset: 2px;
-}
-
-/* 选中态：设计稿里首页图标是白底圆角反色块 */
-.rail-item.is-active {
-  color: var(--bg);
-  background: var(--fg);
-}
-
-.rail-spacer {
-  flex: 1 1 auto;
-}
-
-/* ---------- 可拖动分隔条 ---------- */
-.splitter {
-  position: absolute;
-  z-index: 6;
-  transition: background-color 0.12s ease;
-}
-
-.splitter:hover,
-.splitter.is-dragging {
-  background: color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-/* 笔记文件树右边界：左右拖，改文件树宽度（骑在树的右边框上，热区才不会跑到左栏图标下） */
-.splitter-v {
-  right: -4px;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-  cursor: col-resize;
-}
-
-/* 拖尺寸时整窗统一光标、禁掉选中，避免拖到卡片上出现文字选择 */
-body.is-resizing {
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 .section-label {
@@ -555,7 +468,7 @@ body.is-resizing {
   font-size: 12px;
 }
 
-/* 就地编辑的数字，和空间工具栏里的缩放数字同一套规格：平时只是个数，
+/* 就地编辑的数字，和画布工具栏里的缩放数字同一套规格：平时只是个数，
    悬停才有一点底，进编辑才更亮——它不是表单控件，别做成一个空着的输入框 */
 .settings-input {
   width: 40px;
@@ -1166,146 +1079,6 @@ body.is-resizing {
   user-select: text;
 }
 
-/* ---------- 空间笔记选择框 ---------- */
-.canvas-picker {
-  display: flex;
-  flex-direction: column;
-  width: 560px;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 120px);
-  padding: 14px 16px 12px;
-}
-
-.canvas-picker-head {
-  display: flex;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.canvas-picker-title {
-  margin: 0;
-}
-
-.canvas-picker-close {
-  width: 26px;
-  height: 26px;
-  margin-left: auto;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.canvas-picker-close:hover {
-  border-color: var(--line);
-  color: var(--fg);
-}
-
-.canvas-picker-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px;
-  scrollbar-width: thin;
-}
-
-.canvas-picker-hint {
-  margin: 10px 2px 0;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.canvas-picker-empty {
-  margin: 36px 0;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: center;
-}
-
-.canvas-picker-notes {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.canvas-picker-note {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg);
-  text-align: left;
-  cursor: pointer;
-}
-
-.canvas-picker-note:hover,
-.canvas-picker-note:focus-visible {
-  border-color: color-mix(in srgb, var(--line) 55%, transparent);
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  outline: none;
-}
-
-.canvas-picker-note-name {
-  font-size: 13px;
-}
-
-.canvas-picker-note-path {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-/* 置顶的「新建」那一项：一行虚线条目 */
-.canvas-picker-create {
-  border-style: dashed;
-  background: transparent;
-  color: var(--muted);
-}
-
-.canvas-picker-note.canvas-picker-create {
-  border-color: color-mix(in srgb, var(--line) 55%, transparent);
-}
-
-.canvas-picker-create:hover {
-  border-color: var(--accent);
-  color: var(--fg);
-}
-
-.canvas-picker-create-label {
-  font-size: 13px;
-}
-
-.canvas-picker-create-note {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.canvas-picker-search {
-  height: 32px;
-  margin-bottom: 10px;
-}
-
-.canvas-picker-note.is-active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-
-.canvas-picker mark {
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
-  color: inherit;
-}
-
 /* ---------- 主题选择框 ---------- */
 .theme-pop {
   position: fixed;
@@ -1456,206 +1229,9 @@ body.is-resizing {
   color: var(--danger);
 }
 
-/* ---------- 笔记页 ---------- */
-.notes-page {
-  position: relative;
-  flex: 1 1 auto;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-}
-
-.notes-tree-pane {
-  position: relative;
-  flex: 0 0 var(--notes-tree-w, 280px);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  border-right: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
-}
-
-.notes-tree-head {
-  flex: 0 0 var(--label-h);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 6px 0 var(--pad-x);
-}
-
-.notes-root-btn {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 4px 6px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--fg);
-  font-size: 13px;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.notes-root-btn:hover {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-}
-
-.notes-tree-actions {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 2px;
-}
-
-.notes-icon-btn {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.notes-icon-btn:hover {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-}
-
-.notes-tree-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 2px 0 14px;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
-}
-
-.notes-tree-scroll.is-drop-root {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.notes-tree-empty {
-  position: absolute;
-  inset: var(--label-h) 0 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  pointer-events: none;
-}
-
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  margin: 0 4px;
-  padding-right: 8px;
-  border-radius: 5px;
-  color: var(--fg);
-  font-size: 13px;
-  user-select: none;
-  cursor: pointer;
-}
-
-.tree-row:hover {
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-}
-
-.tree-row.is-active {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-}
-
-.tree-row.is-drop {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-.tree-row.is-dragging {
-  opacity: 0.45;
-}
-
-.tree-caret {
-  flex: 0 0 14px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1;
-  text-align: center;
-}
-
-.tree-row:hover .tree-caret {
-  color: var(--fg);
-}
-
-.tree-dot {
-  flex: 0 0 12px;
-  position: relative;
-}
-
-.tree-dot::before {
-  content: "";
-  position: absolute;
-  left: 4px;
-  top: 50%;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--muted);
-  transform: translateY(-50%);
-}
-
-.tree-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* 右侧内容区 */
-.notes-main {
-  position: relative;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
 
-.notes-main-head {
-  flex: 0 0 var(--label-h);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 var(--pad-x);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
-}
-
-.notes-crumb {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.notes-main-actions {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 6px;
-}
-
-.notes-btn {
+.plain-btn {
   height: 26px;
   padding: 0 12px;
   border: 1px solid var(--line);
@@ -1667,27 +1243,27 @@ body.is-resizing {
   transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
-.notes-btn:hover {
+.plain-btn:hover {
   background: color-mix(in srgb, var(--fg) 10%, transparent);
 }
 
-.notes-btn-primary {
+.plain-btn-primary {
   border-color: transparent;
   background: var(--accent);
   color: var(--accent-fg);
   font-weight: 600;
 }
 
-.notes-btn-primary:hover {
+.plain-btn-primary:hover {
   background: color-mix(in srgb, var(--accent) 82%, var(--fg));
 }
 
-.notes-btn-danger:hover {
+.plain-btn-danger:hover {
   border-color: var(--danger);
   color: var(--danger);
 }
 
-.notes-body {
+.md-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1702,95 +1278,83 @@ body.is-resizing {
   scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
 }
 
-.notes-empty {
-  position: absolute;
-  inset: var(--label-h) 0 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  pointer-events: none;
-}
-
 /* ---------- Markdown 排版 ---------- */
-.notes-body > :first-child {
+.md-body > :first-child {
   margin-top: 0;
 }
 
-.notes-body h1,
-.notes-body h2,
-.notes-body h3,
-.notes-body h4,
-.notes-body h5 {
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4,
+.md-body h5 {
   margin: 1.4em 0 0.6em;
   line-height: 1.35;
   font-weight: 600;
 }
 
-.notes-body h1 {
+.md-body h1 {
   font-size: 24px;
   padding-bottom: 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
 }
 
-.notes-body h2 {
+.md-body h2 {
   font-size: 20px;
   padding-bottom: 4px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 28%, transparent);
 }
 
-.notes-body h3 {
+.md-body h3 {
   font-size: 17px;
 }
 
-.notes-body h4 {
+.md-body h4 {
   font-size: 15px;
 }
 
-.notes-body h5 {
+.md-body h5 {
   font-size: 14px;
   color: var(--muted);
 }
 
-.notes-body p {
+.md-body p {
   margin: 0.7em 0;
 }
 
-.notes-body ul,
-.notes-body ol {
+.md-body ul,
+.md-body ol {
   margin: 0.7em 0;
   padding-left: 1.6em;
 }
 
-.notes-body li {
+.md-body li {
   margin: 0.25em 0;
 }
 
-.notes-body li > input[type="checkbox"] {
+.md-body li > input[type="checkbox"] {
   margin-right: 6px;
   accent-color: var(--accent);
 }
 
-.notes-body a {
+.md-body a {
   color: var(--accent);
   text-decoration: none;
 }
 
-.notes-body a:hover {
+.md-body a:hover {
   text-decoration: underline;
 }
 
-.notes-body strong {
+.md-body strong {
   font-weight: 600;
 }
 
-.notes-body del {
+.md-body del {
   color: var(--muted);
 }
 
-.notes-body code {
+.md-body code {
   padding: 1px 5px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--fg) 9%, transparent);
@@ -1798,7 +1362,7 @@ body.is-resizing {
   font-size: 0.9em;
 }
 
-.notes-body pre {
+.md-body pre {
   margin: 0.9em 0;
   padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
@@ -1807,44 +1371,44 @@ body.is-resizing {
   overflow-x: auto;
 }
 
-.notes-body pre code {
+.md-body pre code {
   padding: 0;
   background: transparent;
   font-size: 12.5px;
   line-height: 1.6;
 }
 
-.notes-body blockquote {
+.md-body blockquote {
   margin: 0.9em 0;
   padding: 2px 0 2px 14px;
   border-left: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
   color: var(--muted);
 }
 
-.notes-body table {
+.md-body table {
   margin: 0.9em 0;
   border-collapse: collapse;
   font-size: 13px;
 }
 
-.notes-body th,
-.notes-body td {
+.md-body th,
+.md-body td {
   padding: 6px 12px;
   border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
 }
 
-.notes-body th {
+.md-body th {
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   font-weight: 600;
 }
 
-.notes-body hr {
+.md-body hr {
   margin: 1.6em 0;
   border: none;
   border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
 }
 
-.notes-body img {
+.md-body img {
   max-width: 100%;
   border-radius: 6px;
 }
@@ -1859,14 +1423,8 @@ body.is-resizing {
 }
 
 /* ---------- 编辑态 ---------- */
-.notes-editor {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
 
-.notes-toolbar {
+.md-toolbar {
   flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
@@ -1912,7 +1470,7 @@ body.is-resizing {
   background: color-mix(in srgb, var(--line) 55%, transparent);
 }
 
-.notes-textarea {
+.md-textarea {
   flex: 1 1 auto;
   min-height: 0;
   resize: none;
@@ -1926,104 +1484,11 @@ body.is-resizing {
   line-height: 1.75;
 }
 
-.notes-status {
-  flex: 0 0 24px;
-  display: flex;
-  align-items: center;
-  padding: 0 var(--pad-x);
-  border-top: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
-  font-size: 11px;
-  color: var(--muted);
-}
 
-.notes-status .is-error {
-  color: var(--danger);
-}
-
-.notes-error {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 10px;
-  margin: 0;
-  padding: 7px 12px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--danger) 20%, var(--surface));
-  color: var(--danger);
-  font-size: 12px;
-}
-
-/* ---------- 首次引导 ---------- */
-.notes-guide {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg);
-}
-
-.notes-guide-card {
-  width: 430px;
-  padding: 30px 28px 24px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  text-align: center;
-}
-
-.notes-guide-card h2 {
-  margin: 0 0 12px;
-  font-size: 17px;
-  font-weight: 600;
-}
-
-.notes-guide-card p {
-  margin: 0 0 20px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.8;
-}
-
-.notes-guide-card code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
-}
-/* 树上的就地重命名：只多一个光标和很淡的底，样式不变 */
-.tree-name.is-editing {
-  outline: none;
-  padding: 0 4px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
-  cursor: text;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.tree-row.is-renaming {
-  cursor: default;
-}
-
-.notes-btn:disabled {
+.plain-btn:disabled {
   opacity: 0.45;
   cursor: default;
 }
-/* 笔记标题：只读展示，右边的小图标负责在资源管理器里打开它 */
-.notes-root-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 0 2px;
-  font-size: 13px;
-  color: var(--fg);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* 输入框弹层（新建文件夹 / 重命名等）：和菜单、确认框同一套视觉 */
 .dialog-prompt {
   width: 340px;
@@ -2102,41 +1567,7 @@ body.is-resizing {
   border-color: color-mix(in srgb, var(--fg) 55%, transparent);
 }
 
-/* 隐藏文件树：左侧整块（含分隔条）一起收起来，内容区铺满 */
-.notes-page.is-tree-hidden .notes-tree-pane {
-  display: none;
-}
-
-.notes-tree-toggle {
-  flex: 0 0 auto;
-}
-/* 笔记右上角的编辑/显示按钮：图标切换，保持和其它图标按钮同样的 26px 高度 */
-.notes-btn-icon {
-  width: 30px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-}
-
-.notes-btn-icon .icon-view {
-  display: none;
-}
-
-.notes-btn-icon.is-editing .icon-edit {
-  display: none;
-}
-
-.notes-btn-icon.is-editing .icon-view {
-  display: block;
-}
-/* 文件树可拖到很窄，但两头都保底 20px：树本身 20px，右边内容区也留 20px */
-.notes-tree-pane {
-  min-width: 20px;
-  max-width: calc(100% - 20px);
-}
-/* ---------- 无限空间 ---------- */
+/* ---------- 无限画布 ---------- */
 .canvas-page {
   position: relative;
   flex: 1 1 auto;
@@ -2154,7 +1585,7 @@ body.is-resizing {
   background-color: var(--bg);
 }
 
-/* 主题背景层（宇宙）：压在空间最底下，块和连线都在它上面 */
+/* 主题背景层（宇宙）：压在画布最底下，块和连线都在它上面 */
 .canvas-backdrop {
   position: absolute;
   inset: 0;
@@ -2177,7 +1608,7 @@ body.is-resizing {
   cursor: grabbing;
 }
 
-/* 从资源管理器拖文件进来时，给空间一圈提示 */
+/* 从资源管理器拖文件进来时，给画布一圈提示 */
 .canvas-stage.is-file-over::after {
   content: "";
   position: absolute;
@@ -2373,7 +1804,7 @@ body.is-resizing {
 }
 
 /* 图元 */
-/* 空间上的卡片型面板（便签/笔记/音频/文件/电子书/视频）共用同一套外壳：
+/* 画布上的卡片型面板（笔记/音频/文件/电子书/视频）共用同一套外壳：
    1px --line 40% 边框、10px 圆角、--surface 底色，一律不投影。 */
 .canvas-item {
   position: absolute;
@@ -2467,40 +1898,6 @@ body.is-resizing {
 }
 
 .canvas-item-text.is-editing .canvas-text-body {
-  cursor: text;
-}
-
-/* 空间上的便签块：底色、文字色、内边距、字号都照卡片那套走 */
-.canvas-item-sticky {
-  cursor: move;
-}
-
-.canvas-sticky-card {
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  padding: 16px 12px;
-  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
-  border-radius: 10px;
-  overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
-}
-
-.canvas-sticky-body {
-  margin: 0;
-  font-size: 13px;
-  line-height: 19px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.canvas-item-sticky.is-editing {
-  cursor: text;
-}
-
-.canvas-item-sticky.is-editing .canvas-sticky-body {
-  outline: none;
   cursor: text;
 }
 
@@ -2634,6 +2031,57 @@ body.is-resizing {
   gap: 6px;
   padding: 8px 10px 10px;
   border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+}
+
+/* 档位一行：纯文字说「这张怎么出」，规格跟下面「开始/落块」同一档 */
+/* 参数行：档位三个字 + 尺寸、风格、张数三颗小下拉，排成一行 */
+.canvas-gen-mode-label {
+  font-size: 12.5px;
+  line-height: 1;
+  color: var(--fg);
+  margin-right: 2px;
+}
+
+.canvas-gen-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.canvas-gen-controls[hidden] {
+  display: none;
+}
+
+.canvas-gen-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.canvas-gen-select:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.canvas-gen-select:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.canvas-gen-select-arrow {
+  opacity: 0.55;
 }
 
 /* 进料提示：接了几张输入图、这一张按哪档走。只在真接了图（或明写了要图）时出现 */
@@ -2796,7 +2244,7 @@ body.is-resizing {
   pointer-events: none;
 }
 
-/* 笔记块：阅读态直接复用 .notes-body 的 Markdown 排版 */
+/* 笔记块：阅读态直接复用 .md-body 的 Markdown 排版 */
 .canvas-item-note {
   cursor: move;
 }
@@ -4394,6 +3842,13 @@ body.is-resizing {
   border-top: 1px dashed var(--accent);
 }
 
+/* 直线/箭头吸角度时的参考线：整条从起点朝两头铺出去，靠 rotate 摆方向 */
+.canvas-guide-angle {
+  height: 0;
+  border-top: 1px dashed var(--accent);
+  transform-origin: 0 0;
+}
+
 .canvas-handle {
   position: absolute;
   width: calc(10px * var(--canvas-inv, 1));
@@ -4543,7 +3998,7 @@ body.is-resizing {
   pointer-events: auto;
 }
 
-/* 顶栏里只有名字和右侧那一组是「排进去」的：左上角名字、右上角缩放 + 撤销/导出。
+/* 顶栏里只有名字和右侧那一组是「排进去」的：左上角名字、右上角缩放 + 导出。
    工具条自己绝对居中，不参与这条流。 */
 .canvas-topbar .canvas-zoom {
   margin-left: auto;
@@ -4614,6 +4069,23 @@ body.is-resizing {
   color: var(--accent-fg);
 }
 
+/* 带下拉的工具栏按钮：「AI出图」三个字后面跟一颗小三角，点开是一列文字 */
+.canvas-tool-menu {
+  width: auto;
+  gap: 3px;
+  padding: 0 6px 0 7px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.canvas-tool-menu::after {
+  content: "";
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid currentColor;
+  opacity: 0.55;
+}
+
 .canvas-zoom {
   display: flex;
   align-items: center;
@@ -4674,7 +4146,7 @@ body.is-resizing {
   pointer-events: none;
 }
 
-/* 撤销 / 重做 / 导出：和缩放条同一套浮层质感，紧挨在它右边 */
+/* 导出：和缩放条同一套浮层质感，紧挨在它右边 */
 .canvas-actions {
   display: flex;
   align-items: center;
@@ -4713,13 +4185,6 @@ body.is-resizing {
 .canvas-act:disabled {
   opacity: 0.3;
   cursor: default;
-}
-
-.canvas-act-sep {
-  width: 1px;
-  height: 16px;
-  margin: 0 2px;
-  background: color-mix(in srgb, var(--fg) 18%, transparent);
 }
 
 /* ---------- 搜索面板 ---------- */
@@ -4895,12 +4360,12 @@ body.is-resizing {
   position: absolute;
   right: 14px;
   bottom: 14px;
-  width: 220px;
-  height: 150px;
+  width: 132px;
+  height: 90px;
   z-index: 6;
   border: 1px solid color-mix(in srgb, var(--line) 34%, transparent);
   border-radius: 8px;
-  /* 必须不透明：透出底下的空间网格和块会跟鸟瞰窗里的小方框混成一片 */
+  /* 必须不透明：透出底下的画布网格和块会跟鸟瞰窗里的小方框混成一片 */
   background: var(--surface);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
   overflow: hidden;
@@ -4989,7 +4454,7 @@ body.is-resizing {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-/* ---- 空状态：还没有空间 ---- */
+/* ---- 空状态：还没有画布 ---- */
 .canvas-empty {
   position: absolute;
   inset: 0;
@@ -5094,13 +4559,6 @@ body.is-resizing {
 
 /* 只加一圈外发光，不改块自己的颜色、边框和尺寸 */
 .canvas-item.is-agent-target,
-.tree-row.is-agent-target {
-  outline: 2px solid color-mix(in srgb, var(--accent) 82%, transparent);
-  outline-offset: 3px;
-  box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent),
-    0 0 26px color-mix(in srgb, var(--accent) 42%, transparent);
-}
 
 /* 连线是 SVG，box-shadow 不生效，用 drop-shadow 沿线条发光 */
 .canvas-connector.is-agent-target {

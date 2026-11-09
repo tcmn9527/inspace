@@ -35,6 +35,8 @@ pub const SPACE_DIR: &str = "spaces";
 pub const COSMOS_DIR: &str = "cosmos";
 /// 生图面板的权重（gen/models/），十几 GB，换数据文件夹时同样跟着搬
 pub const GEN_DIR: &str = "gen";
+/// 本地素材库：3D 家具模型住 library/models/，体积也不小，跟着数据根走
+pub const LIBRARY_DIR: &str = "library";
 /// 旧版把画布放在 canvases/ 下，启动时整批改名
 pub const LEGACY_CANVAS_DIR: &str = "canvases";
 

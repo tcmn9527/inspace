@@ -147,6 +147,33 @@ export const FILE_MIN_WIDTH = 160;
 export const FILE_MIN_HEIGHT = 56;
 export const NOTE_MIN_WIDTH = 160;
 export const NOTE_MIN_HEIGHT = 120;
+/* 产品/材料卡：一件家具在画布上的名片。户型脚印、3D 模型和清单都指回这一块的字段，
+   所以它不是一张普通图片卡——名字、品牌、SKU、规格、单价这些都得能单独改。 */
+export const PRODUCT_DEFAULT_WIDTH = 300;
+export const PRODUCT_DEFAULT_HEIGHT = 132;
+export const PRODUCT_MIN_WIDTH = 220;
+export const PRODUCT_MIN_HEIGHT = 96;
+/* 清单块：按当前画布里的产品卡自动汇总，自己只记标题和外观 */
+export const QUOTE_DEFAULT_WIDTH = 620;
+export const QUOTE_DEFAULT_HEIGHT = 320;
+export const QUOTE_MIN_WIDTH = 380;
+export const QUOTE_MIN_HEIGHT = 160;
+/* 户型块：一张户型图 + 真实比例 + 家具脚印 + 面积 + 3D 机位标记。
+   坐标分三层：图片像素（图片原始尺寸）、毫米（真实世界）、块内像素（显示时按块尺寸拉伸）。 */
+export const PLAN_DEFAULT_WIDTH = 820;
+export const PLAN_DEFAULT_HEIGHT = 620;
+export const PLAN_MIN_WIDTH = 320;
+export const PLAN_MIN_HEIGHT = 240;
+const PLAN_MAX_FOOTPRINTS = 400;
+const PLAN_MAX_CAMERAS = 80;
+const PLAN_MAX_AREAS = 40;
+/* 提案页框：一块就是一张客户要看的页。尺寸按 96dpi 的纸面给，导出时整页抓图 */
+export const PAGE_RATIOS = {
+  a4: { label: "A4 竖", w: 794, h: 1123 },
+  a4l: { label: "A4 横", w: 1123, h: 794 },
+  "16:9": { label: "16:9", w: 1280, h: 720 },
+  "4:3": { label: "4:3", w: 1024, h: 768 },
+};
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -234,6 +261,8 @@ function normalizeBlock(raw) {
   const type = raw.type;
   /* seq 是画布内的固定编号：右下角坐标条和 agent 对块说话都靠它 */
   const base = { id: raw.id, type, seq: Number.isFinite(raw.seq) ? Math.trunc(raw.seq) : 0 };
+  /* 客户版隐藏：所有能出现在页面上的块都认，连线不参与 */
+  if (raw.internal === true && type !== "connector") base.internal = true;
   if (type === "connector") {
     const from = normalizeEnd(raw.from);
     const to = normalizeEnd(raw.to);
@@ -514,6 +543,105 @@ function normalizeBlock(raw) {
       z: layerOf(raw),
     };
   }
+  if (type === "product") {
+    const dims = raw.dims && typeof raw.dims === "object" ? raw.dims : {};
+    return {
+      ...base,
+      x: num(raw.x),
+      y: num(raw.y),
+      w: Math.max(PRODUCT_MIN_WIDTH, num(raw.w, PRODUCT_DEFAULT_WIDTH)),
+      h: Math.max(PRODUCT_MIN_HEIGHT, num(raw.h, PRODUCT_DEFAULT_HEIGHT)),
+      name: typeof raw.name === "string" && raw.name.trim() ? raw.name : "未命名产品",
+      brand: typeof raw.brand === "string" ? raw.brand : "",
+      sku: typeof raw.sku === "string" ? raw.sku : "",
+      spec: typeof raw.spec === "string" ? raw.spec : "",
+      price: Math.max(0, num(raw.price, 0)),
+      qty: Math.max(1, Math.trunc(num(raw.qty, 1))),
+      source: typeof raw.source === "string" ? raw.source : "",
+      note: typeof raw.note === "string" ? raw.note : "",
+      /* 产品图是画布 images/ 里的副本，不是引用态 */
+      src: typeof raw.src === "string" ? raw.src : "",
+      /* 下面两样先存着，P2/P3 的 3D 模型和户型脚印会指回来 */
+      model: typeof raw.model === "string" ? raw.model : "",
+      dims: {
+        w: Math.max(0, num(dims.w, 0)),
+        d: Math.max(0, num(dims.d, 0)),
+        h: Math.max(0, num(dims.h, 0)),
+      },
+      internal: raw.internal === true,
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
+      fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
+      borderWidth: Math.min(
+        BORDER_MAX_WIDTH,
+        Math.max(0, Math.round(num(raw.borderWidth, CARD_DEFAULT_BORDER_WIDTH))),
+      ),
+      radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),
+      z: layerOf(raw),
+    };
+  }
+  if (type === "quote") {
+    return {
+      ...base,
+      x: num(raw.x),
+      y: num(raw.y),
+      w: Math.max(QUOTE_MIN_WIDTH, num(raw.w, QUOTE_DEFAULT_WIDTH)),
+      h: Math.max(QUOTE_MIN_HEIGHT, num(raw.h, QUOTE_DEFAULT_HEIGHT)),
+      title: typeof raw.title === "string" && raw.title.trim() ? raw.title : "家具清单",
+      internal: raw.internal === true,
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
+      fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
+      borderWidth: Math.min(
+        BORDER_MAX_WIDTH,
+        Math.max(0, Math.round(num(raw.borderWidth, CARD_DEFAULT_BORDER_WIDTH))),
+      ),
+      radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),
+      z: layerOf(raw),
+    };
+  }
+  if (type === "plan") {
+    const w = Math.max(PLAN_MIN_WIDTH, num(raw.w, PLAN_DEFAULT_WIDTH));
+    const h = Math.max(PLAN_MIN_HEIGHT, num(raw.h, PLAN_DEFAULT_HEIGHT));
+    return {
+      ...base,
+      x: num(raw.x),
+      y: num(raw.y),
+      w,
+      h,
+      /* 户型图是画布 images/ 里的副本 */
+      src: typeof raw.src === "string" ? raw.src : "",
+      imageW: Math.max(0, num(raw.imageW, 0)),
+      imageH: Math.max(0, num(raw.imageH, 0)),
+      calibration: normalizePlanCalibration(raw.calibration),
+      footprints: normalizePlanFootprints(raw.footprints),
+      cameras: normalizePlanCameras(raw.cameras),
+      areas: normalizePlanAreas(raw.areas),
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
+      fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
+      borderWidth: Math.min(
+        BORDER_MAX_WIDTH,
+        Math.max(0, Math.round(num(raw.borderWidth, CARD_DEFAULT_BORDER_WIDTH))),
+      ),
+      radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),
+      z: layerOf(raw),
+    };
+  }
+  if (type === "page") {
+    const ratio = PAGE_RATIOS[raw.ratio] ? raw.ratio : "a4";
+    const preset = PAGE_RATIOS[ratio];
+    return {
+      ...base,
+      x: num(raw.x),
+      y: num(raw.y),
+      w: Math.max(200, num(raw.w, preset.w)),
+      h: Math.max(200, num(raw.h, preset.h)),
+      title: typeof raw.title === "string" && raw.title.trim() ? raw.title : "未命名页",
+      ratio,
+      order: Math.max(0, Math.trunc(num(raw.order, 0))),
+      fillColor: typeof raw.fillColor === "string" && raw.fillColor ? raw.fillColor : "#ffffff",
+      internal: raw.internal === true,
+      z: layerOf(raw),
+    };
+  }
   return null;
 }
 
@@ -614,6 +742,94 @@ export function makeImage(x, y, w, h, src, linked = false) {
   };
 }
 
+/* 产品/材料卡：一件家具一行字段。户型脚印和 3D 模型以后都按这个 id 找回来。 */
+export function makeProduct(x, y, name = "未命名产品", src = "") {
+  return {
+    id: newId(),
+    type: "product",
+    x,
+    y,
+    w: PRODUCT_DEFAULT_WIDTH,
+    h: PRODUCT_DEFAULT_HEIGHT,
+    name,
+    brand: "",
+    sku: "",
+    spec: "",
+    price: 0,
+    qty: 1,
+    source: "",
+    note: "",
+    src,
+    model: "",
+    dims: { w: 0, d: 0, h: 0 },
+    internal: false,
+    borderColor: "",
+    fillColor: "",
+    borderWidth: CARD_DEFAULT_BORDER_WIDTH,
+    radius: CARD_DEFAULT_RADIUS,
+  };
+}
+
+export function makeQuote(x, y, title = "家具清单") {
+  return {
+    id: newId(),
+    type: "quote",
+    x,
+    y,
+    w: QUOTE_DEFAULT_WIDTH,
+    h: QUOTE_DEFAULT_HEIGHT,
+    title,
+    internal: false,
+    borderColor: "",
+    fillColor: "",
+    borderWidth: CARD_DEFAULT_BORDER_WIDTH,
+    radius: CARD_DEFAULT_RADIUS,
+  };
+}
+
+/* 提案页框：一块就是一张客户要看的页，内容按「块心落在页里」归页 */
+export function makePage(x, y, ratio = "a4", title = "未命名页", order = 0) {
+  const preset = PAGE_RATIOS[ratio] || PAGE_RATIOS.a4;
+  return {
+    id: newId(),
+    type: "page",
+    x,
+    y,
+    w: preset.w,
+    h: preset.h,
+    title,
+    ratio: PAGE_RATIOS[ratio] ? ratio : "a4",
+    order: Math.max(0, Math.trunc(Number(order) || 0)),
+    fillColor: "#ffffff",
+    internal: false,
+    /* 页框永远垫在内容底下：新建时给负层，后来的块自然盖在它上面 */
+    z: -1,
+  };
+}
+
+/* 户型块：一张图 + 一套真实比例（两点定标），家具脚印和机位都按毫米记 */
+export function makePlan(x, y, src, imageW, imageH) {
+  return {
+    id: newId(),
+    type: "plan",
+    x,
+    y,
+    w: PLAN_DEFAULT_WIDTH,
+    h: PLAN_DEFAULT_HEIGHT,
+    src,
+    imageW: Math.max(0, Number(imageW) || 0),
+    imageH: Math.max(0, Number(imageH) || 0),
+    calibration: null,
+    footprints: [],
+    cameras: [],
+    areas: [],
+    borderColor: "",
+    fillColor: "",
+    borderWidth: CARD_DEFAULT_BORDER_WIDTH,
+    radius: CARD_DEFAULT_RADIUS,
+  };
+}
+
 export function makeAudio(x, y, name, src, linked = false) {
   return {
     id: newId(),
@@ -703,21 +919,50 @@ function sceneRing(label, raw) {
 function normalizeScenePart(raw) {
   if (!raw || typeof raw !== "object") return { why: "不是对象" };
   /* 先认 op 再挑毛病：一件「sphere」报「h 得是正数」，写的人会被带去改 h，改完还是不认 */
-  if (raw.op !== "box" && raw.op !== "poly" && raw.op !== "roof") {
-    return { why: `op「${String(raw.op).slice(0, 12)}」不认：现在只有 "box"（长方体）、"poly"（底面轮廓 + h 挤成真棱柱）、"roof"（底面轮廓 + h 立成屋顶）` };
+  if (raw.op !== "box" && raw.op !== "poly" && raw.op !== "roof" && raw.op !== "model") {
+    return { why: `op「${String(raw.op).slice(0, 12)}」不认：现在只有 "box"（长方体）、"poly"（底面轮廓 + h 挤成真棱柱）、"roof"（底面轮廓 + h 立成屋顶）和 "model"（模型库里的 GLB）` };
   }
   /* 落点：永远指底面那个中心点，h 从这儿往上立起来。轮廓里的点相对它，rotate 绕它转。 */
   const foot = { x: num(raw.x), y: num(raw.y), z: Math.max(0, num(raw.z)) };
+  const rotate = Number(raw.rotate);
+  if (raw.op === "model") {
+    const src = typeof raw.src === "string" ? raw.src.trim() : "";
+    if (!src || src.includes("/") || src.includes("\\") || src.startsWith(".")) {
+      return { why: "model 的 src 只写模型库里的 .glb 文件名（不带路径、不能以点开头）" };
+    }
+    /* 尺寸是「期望的真实尺寸（厘米）」：模型自带的单位五花八门，渲染器按它等比缩放。
+       w/d/h 都可省：省了就按高 80cm 放。 */
+    const w = Number(raw.w);
+    const d = Number(raw.d);
+    const h = Number(raw.h);
+    const scale = Number(raw.scale);
+    return {
+      part: {
+        op: "model",
+        ...foot,
+        src,
+        w: w > 0 ? Math.min(w, SCENE_MAX_SIZE) : 0,
+        d: d > 0 ? Math.min(d, SCENE_MAX_SIZE) : 0,
+        h: h > 0 ? Math.min(h, SCENE_MAX_SIZE) : 80,
+        scale: scale > 0 ? scale : 1,
+        rotate: Number.isFinite(rotate) ? ((rotate % 360) + 360) % 360 : 0,
+        color: colorOr(raw.color, ""),
+        name: typeof raw.name === "string" ? raw.name : "",
+      },
+    };
+  }
   const h = Number(raw.h);
   if (!(h > 0) || h > SCENE_MAX_SIZE) {
     return { why: `h（立起来多高）得是正数、不超过 ${SCENE_MAX_SIZE}（现在是 ${String(raw.h).slice(0, 12)}）` };
   }
-  const rotate = Number(raw.rotate);
   const body = {
     h,
     rotate: Number.isFinite(rotate) ? ((rotate % 360) + 360) % 360 : 0,
     color: colorOr(raw.color, ""),
     name: typeof raw.name === "string" ? raw.name : "",
+    /* 材质：画布 images/ 里的图片路径 + 每格多少厘米；空串就是纯色 */
+    tex: typeof raw.tex === "string" ? raw.tex : "",
+    texRepeat: Math.max(10, Math.min(2000, num(raw.texRepeat, 100))),
   };
   const rect = () => {
     const w = Number(raw.w);
@@ -792,6 +1037,85 @@ export function normalizeSceneCamera(value) {
     tz: Math.max(0, num(value.tz)),
     fov: clamp(num(value.fov, 45), 8, 100),
   };
+}
+
+/* ---------- 户型块 ---------- */
+
+const PLAN_CAMERA_PRESETS = ["front", "left", "right", "top", "auto"];
+const frac01 = (value) => Math.min(1, Math.max(0, num(value)));
+
+function normalizePlanCalibration(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const x1 = Number(raw.x1);
+  const y1 = Number(raw.y1);
+  const x2 = Number(raw.x2);
+  const y2 = Number(raw.y2);
+  const mm = Number(raw.mm);
+  if (![x1, y1, x2, y2, mm].every(Number.isFinite) || !(mm > 0)) return null;
+  const cal = { x1: frac01(x1), y1: frac01(y1), x2: frac01(x2), y2: frac01(y2), mm };
+  if (Math.hypot(cal.x2 - cal.x1, cal.y2 - cal.y1) < 1e-4) return null;
+  return cal;
+}
+
+function normalizePlanFootprints(raw) {
+  const out = [];
+  for (const one of Array.isArray(raw) ? raw : []) {
+    if (out.length >= PLAN_MAX_FOOTPRINTS) break;
+    if (!one || typeof one !== "object") continue;
+    const product = typeof one.product === "string" ? one.product : "";
+    if (!product) continue;
+    const w = Number(one.w);
+    const d = Number(one.d);
+    out.push({
+      id: typeof one.id === "string" && one.id ? one.id : newId(),
+      product,
+      name: typeof one.name === "string" ? one.name : "",
+      x: num(one.x),
+      y: num(one.y),
+      w: w > 0 ? w : 600,
+      d: d > 0 ? d : 600,
+      rotate: Number.isFinite(Number(one.rotate)) ? ((Number(one.rotate) % 360) + 360) % 360 : 0,
+    });
+  }
+  return out;
+}
+
+function normalizePlanCameras(raw) {
+  const out = [];
+  for (const one of Array.isArray(raw) ? raw : []) {
+    if (out.length >= PLAN_MAX_CAMERAS) break;
+    if (!one || typeof one !== "object") continue;
+    const scene = typeof one.scene === "string" ? one.scene : "";
+    if (!scene) continue;
+    const preset = PLAN_CAMERA_PRESETS.includes(one.preset) ? one.preset : "front";
+    out.push({
+      id: typeof one.id === "string" && one.id ? one.id : newId(),
+      scene,
+      x: num(one.x),
+      y: num(one.y),
+      rotate: Number.isFinite(Number(one.rotate)) ? ((Number(one.rotate) % 360) + 360) % 360 : 0,
+      preset,
+    });
+  }
+  return out;
+}
+
+function normalizePlanAreas(raw) {
+  const out = [];
+  for (const one of Array.isArray(raw) ? raw : []) {
+    if (out.length >= PLAN_MAX_AREAS) break;
+    if (!one || typeof one !== "object" || !Array.isArray(one.points)) continue;
+    const points = [];
+    for (const p of one.points) {
+      if (!p || typeof p !== "object") continue;
+      const x = Number(p.x);
+      const y = Number(p.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) points.push({ x, y });
+    }
+    if (points.length < 3) continue;
+    out.push({ id: typeof one.id === "string" && one.id ? one.id : newId(), points });
+  }
+  return out;
 }
 
 /* 场景块：一块真 3D 视口。刚建出来是空的——地面由渲染器垫，相机按内容自动框。 */
@@ -2599,6 +2923,12 @@ export function createItemElement(item, mediaSrc, options = {}) {
     view.append(hint);
     card.append(view);
     el.append(card);
+    /* 画面里拖是转视角，块本身靠这颗小把手拖 */
+    const grip = document.createElement("span");
+    grip.className = "canvas-scene-grip";
+    grip.textContent = "场景";
+    grip.title = "拖动这里移动场景；在画面里拖动是转视角，滚轮推拉";
+    el.append(grip);
   } else if (item.type === "gen") {
     /* 上面是取景窗、下面是提示词和一颗开始。出图要几十秒，这一上半截就是给「等」留的。 */
     const card = document.createElement("div");
@@ -2668,6 +2998,117 @@ export function createItemElement(item, mediaSrc, options = {}) {
     el.append(createFileCard(item, options));
   } else if (item.type === "ebook") {
     el.append(createEbookCard(item, options));
+  } else if (item.type === "product") {
+    const card = document.createElement("div");
+    card.className = "canvas-product-card";
+    const media = document.createElement("div");
+    media.className = "canvas-product-media";
+    if (mediaSrc) {
+      const img = document.createElement("img");
+      img.className = "canvas-product-img";
+      img.src = mediaSrc;
+      img.draggable = false;
+      img.alt = "";
+      media.append(img);
+    } else {
+      const hint = document.createElement("span");
+      hint.className = "canvas-product-noimg";
+      hint.textContent = "无图";
+      media.append(hint);
+    }
+    const info = document.createElement("div");
+    info.className = "canvas-product-info";
+    const name = document.createElement("p");
+    name.className = "canvas-product-name";
+    name.dataset.field = "name";
+    const meta = document.createElement("p");
+    meta.className = "canvas-product-meta";
+    const brand = document.createElement("span");
+    brand.dataset.field = "brand";
+    const dot = document.createElement("span");
+    dot.className = "canvas-product-dot";
+    dot.textContent = "·";
+    const sku = document.createElement("span");
+    sku.dataset.field = "sku";
+    meta.append(brand, dot, sku);
+    const spec = document.createElement("p");
+    spec.className = "canvas-product-spec";
+    spec.dataset.field = "spec";
+    const foot = document.createElement("div");
+    foot.className = "canvas-product-foot";
+    const price = document.createElement("span");
+    price.className = "canvas-product-price";
+    price.dataset.field = "price";
+    const qty = document.createElement("span");
+    qty.className = "canvas-product-qty";
+    qty.dataset.field = "qty";
+    foot.append(price, qty);
+    info.append(name, meta, spec, foot);
+    card.append(media, info);
+    el.append(card);
+  } else if (item.type === "quote") {
+    const card = document.createElement("div");
+    card.className = "canvas-quote-card";
+    const head = document.createElement("div");
+    head.className = "canvas-quote-head";
+    const title = document.createElement("span");
+    title.className = "canvas-quote-title";
+    title.dataset.field = "title";
+    const count = document.createElement("span");
+    count.className = "canvas-quote-count";
+    head.append(title, count);
+    const table = document.createElement("div");
+    table.className = "canvas-quote-table";
+    const headRow = document.createElement("div");
+    headRow.className = "canvas-quote-row is-head";
+    for (const label of ["名称", "规格", "单价", "数量", "小计"]) {
+      const cell = document.createElement("span");
+      cell.textContent = label;
+      headRow.append(cell);
+    }
+    const rows = document.createElement("div");
+    rows.className = "canvas-quote-rows";
+    table.append(headRow, rows);
+    const total = document.createElement("div");
+    total.className = "canvas-quote-total";
+    const totalLabel = document.createElement("span");
+    totalLabel.textContent = "合计";
+    const totalValue = document.createElement("b");
+    totalValue.className = "canvas-quote-total-value";
+    total.append(totalLabel, totalValue);
+    card.append(head, table, total);
+    el.append(card);
+  } else if (item.type === "plan") {
+    const card = document.createElement("div");
+    card.className = "canvas-plan-card";
+    if (mediaSrc) {
+      const img = document.createElement("img");
+      img.className = "canvas-plan-img";
+      img.src = mediaSrc;
+      img.draggable = false;
+      img.alt = "";
+      card.append(img);
+    } else {
+      const hint = document.createElement("span");
+      hint.className = "canvas-plan-noimg";
+      hint.textContent = "户型图没找到";
+      card.append(hint);
+    }
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "canvas-plan-svg");
+    svg.setAttribute("preserveAspectRatio", "none");
+    card.append(svg);
+    const badge = document.createElement("span");
+    badge.className = "canvas-plan-badge";
+    card.append(badge);
+    el.append(card);
+  } else if (item.type === "page") {
+    const card = document.createElement("div");
+    card.className = "canvas-page-card";
+    const label = document.createElement("span");
+    label.className = "canvas-page-label";
+    card.append(label);
+    el.append(card);
   }
 
   if (item.type !== "connector") {
@@ -5197,6 +5638,217 @@ function syncFileColors(el, item) {
   card.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
 }
 
+/* ---------- 产品 / 材料卡 ---------- */
+
+export function formatPrice(value) {
+  const amount = Number.isFinite(Number(value)) ? Number(value) : 0;
+  return `¥${amount.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
+}
+
+function productField(el, field) {
+  return el.querySelector(`[data-field="${field}"]`);
+}
+
+function syncProductElement(el, item) {
+  const card = el.querySelector(".canvas-product-card");
+  if (!card) return;
+  card.style.borderColor = item.borderColor || "";
+  card.style.background = item.fillColor || "";
+  card.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
+  card.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
+  /* 正在改的那一格别被重画冲掉 */
+  const editing = el.querySelector(".canvas-product-edit");
+  const editingField = editing?.dataset.field || "";
+  const name = productField(el, "name");
+  if (name && editingField !== "name") name.textContent = item.name || "未命名产品";
+  const brand = productField(el, "brand");
+  if (brand && editingField !== "brand") brand.textContent = item.brand || "";
+  const sku = productField(el, "sku");
+  if (sku && editingField !== "sku") sku.textContent = item.sku || "";
+  const meta = el.querySelector(".canvas-product-meta");
+  if (meta) meta.hidden = !item.brand && !item.sku;
+  const dot = el.querySelector(".canvas-product-dot");
+  if (dot) dot.hidden = !item.brand || !item.sku;
+  const spec = productField(el, "spec");
+  if (spec && editingField !== "spec") {
+    spec.textContent = item.spec || "";
+    spec.hidden = !item.spec;
+  }
+  const price = productField(el, "price");
+  if (price && editingField !== "price") price.textContent = formatPrice(item.price);
+  const qty = productField(el, "qty");
+  if (qty && editingField !== "qty") qty.textContent = `×${item.qty}`;
+  const img = el.querySelector(".canvas-product-img");
+  if (img) img.alt = item.name || "";
+}
+
+function syncQuoteColors(el, item) {
+  const card = el.querySelector(".canvas-quote-card");
+  if (!card) return;
+  card.style.borderColor = item.borderColor || "";
+  card.style.background = item.fillColor || "";
+  card.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
+  card.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
+  const title = card.querySelector(".canvas-quote-title");
+  if (title && !el.querySelector(".canvas-quote-edit")) title.textContent = item.title || "家具清单";
+}
+
+/* 清单按当前画布的产品卡现算；产品一改，canvas.js 会整块重画 */
+export function refreshQuoteCard(el, item, products = []) {
+  const card = el.querySelector(".canvas-quote-card");
+  if (!card) return;
+  syncQuoteColors(el, item);
+  const list = products.filter((product) => product.type === "product");
+  const count = card.querySelector(".canvas-quote-count");
+  if (count) count.textContent = `${list.length} 项`;
+  const rows = card.querySelector(".canvas-quote-rows");
+  if (!rows) return;
+  rows.textContent = "";
+  let total = 0;
+  for (const product of list) {
+    const line = product.price * product.qty;
+    total += line;
+    const row = document.createElement("div");
+    row.className = "canvas-quote-row";
+    row.dataset.id = product.id;
+    for (const text of [
+      product.name || "未命名产品",
+      product.spec || "",
+      formatPrice(product.price),
+      String(product.qty),
+      formatPrice(line),
+    ]) {
+      const cell = document.createElement("span");
+      cell.textContent = text;
+      row.append(cell);
+    }
+    rows.append(row);
+  }
+  if (!list.length) {
+    const hint = document.createElement("p");
+    hint.className = "canvas-quote-empty";
+    hint.textContent = "还没有产品卡";
+    rows.append(hint);
+  }
+  const totalValue = card.querySelector(".canvas-quote-total-value");
+  if (totalValue) totalValue.textContent = formatPrice(total);
+}
+
+/* ---------- 户型块 ---------- */
+
+/* 图片像素 / 毫米：两点定标那段的像素距离除以它代表的毫米数；没定标就是 0 */
+export function planPixelsPerMm(item) {
+  const cal = item.calibration;
+  if (!cal || !(item.imageW > 0) || !(item.imageH > 0)) return 0;
+  const dist = Math.hypot((cal.x2 - cal.x1) * item.imageW, (cal.y2 - cal.y1) * item.imageH);
+  return dist > 0 ? dist / cal.mm : 0;
+}
+
+function planAreaM2(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2 / 1_000_000;
+}
+
+/* 脚印、面积、机位都画进同一张 SVG：viewBox 就是图片原始像素，
+   图片按 fill 拉伸到块里，这层 SVG 用同样的拉伸，两层永远对得上。 */
+function syncPlanElement(el, item) {
+  const card = el.querySelector(".canvas-plan-card");
+  if (!card) return;
+  card.style.borderColor = item.borderColor || "";
+  card.style.background = item.fillColor || "";
+  card.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
+  card.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
+  const svg = card.querySelector(".canvas-plan-svg");
+  const badge = card.querySelector(".canvas-plan-badge");
+  if (!svg) return;
+  svg.textContent = "";
+  const iw = item.imageW;
+  const ih = item.imageH;
+  if (!(iw > 0) || !(ih > 0)) {
+    if (badge) badge.textContent = "";
+    return;
+  }
+  svg.setAttribute("viewBox", `0 0 ${iw} ${ih}`);
+  const scale = planPixelsPerMm(item);
+  if (badge) {
+    badge.textContent =
+      scale > 0
+        ? `已定标 · 家具 ${item.footprints.length}${item.cameras.length ? ` · 机位 ${item.cameras.length}` : ""}${item.areas.length ? ` · 面积 ${item.areas.length}` : ""}`
+        : "未定标 · 右键「标定比例…」";
+  }
+  if (!(scale > 0)) return;
+  const mk = (tag, attrs = {}) => {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    return node;
+  };
+  for (const area of item.areas) {
+    const pts = area.points.map((p) => `${(p.x * scale).toFixed(1)},${(p.y * scale).toFixed(1)}`).join(" ");
+    svg.append(mk("polygon", { class: "canvas-plan-area", points: pts }));
+    const cx = area.points.reduce((sum, p) => sum + p.x, 0) / area.points.length;
+    const cy = area.points.reduce((sum, p) => sum + p.y, 0) / area.points.length;
+    const label = mk("text", {
+      class: "canvas-plan-area-label",
+      x: (cx * scale).toFixed(1),
+      y: (cy * scale).toFixed(1),
+      "text-anchor": "middle",
+      "dominant-baseline": "middle",
+      "font-size": Math.max(14, Math.min(iw, ih) / 34),
+    });
+    label.textContent = `${planAreaM2(area.points).toFixed(2)} m²`;
+    svg.append(label);
+  }
+  for (const fp of item.footprints) {
+    const wpx = fp.w * scale;
+    const dpx = fp.d * scale;
+    const group = mk("g", {
+      class: "canvas-plan-footprint",
+      "data-footprint": fp.id,
+      "data-product": fp.product,
+      transform: `translate(${(fp.x * scale).toFixed(1)} ${(fp.y * scale).toFixed(1)}) rotate(${fp.rotate.toFixed(1)})`,
+    });
+    group.append(
+      mk("rect", {
+        x: (-wpx / 2).toFixed(1),
+        y: (-dpx / 2).toFixed(1),
+        width: wpx.toFixed(1),
+        height: dpx.toFixed(1),
+        rx: Math.min(8, wpx * 0.08, dpx * 0.08).toFixed(1),
+      }),
+    );
+    if (wpx > 46 && fp.name) {
+      const text = mk("text", {
+        class: "canvas-plan-foot-label",
+        x: 0,
+        y: 0,
+        "text-anchor": "middle",
+        "dominant-baseline": "middle",
+        "font-size": Math.max(12, Math.min(wpx * 0.13, dpx * 0.42, 64)),
+      });
+      text.textContent = fp.name;
+      group.append(text);
+    }
+    svg.append(group);
+  }
+  for (const cam of item.cameras) {
+    const group = mk("g", {
+      class: "canvas-plan-camera",
+      "data-camera": cam.id,
+      "data-scene": cam.scene,
+      "data-preset": cam.preset,
+      transform: `translate(${(cam.x * scale).toFixed(1)} ${(cam.y * scale).toFixed(1)}) rotate(${cam.rotate.toFixed(1)})`,
+    });
+    group.append(mk("path", { class: "canvas-plan-camera-cone", d: "M0 0 L-34 -20 A40 40 0 0 1 -34 20 Z" }));
+    group.append(mk("circle", { class: "canvas-plan-camera-dot", cx: 0, cy: 0, r: Math.max(9, Math.min(iw, ih) / 70) }));
+    svg.append(group);
+  }
+}
+
 /* ---------- 画面块：指令列表 → svg ----------
    为什么是 svg 不是 <canvas>：导出和 agent 截图都是把世界层塞进一张带 viewBox 的 svg
    再按目标像素栅格化（export.js 的 buildSvg）。块里的 <canvas> 只是一张按当前缩放画好的
@@ -6313,6 +6965,49 @@ export function syncItemElement(el, item) {
     el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
     el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
     syncGen(el, item);
+    return;
+  }
+
+  if (item.type === "product") {
+    el.style.width = `${item.w}px`;
+    el.style.height = `${item.h}px`;
+    el.style.borderColor = item.borderColor || "transparent";
+    el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
+    el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
+    syncProductElement(el, item);
+    return;
+  }
+
+  if (item.type === "quote") {
+    el.style.width = `${item.w}px`;
+    el.style.height = `${item.h}px`;
+    el.style.borderColor = item.borderColor || "transparent";
+    el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
+    el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
+    syncQuoteColors(el, item);
+    return;
+  }
+
+  if (item.type === "plan") {
+    el.style.width = `${item.w}px`;
+    el.style.height = `${item.h}px`;
+    el.style.borderColor = item.borderColor || "transparent";
+    el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
+    el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
+    syncPlanElement(el, item);
+    return;
+  }
+
+  if (item.type === "page") {
+    el.style.width = `${item.w}px`;
+    el.style.height = `${item.h}px`;
+    const card = el.querySelector(".canvas-page-card");
+    if (card) {
+      card.style.background = item.fillColor || "#ffffff";
+      card.style.borderRadius = `${Math.max(0, Math.round(Number(item.radius) || 0))}px`;
+    }
+    const label = el.querySelector(".canvas-page-label");
+    if (label) label.textContent = `P${item.order || "?"} · ${item.title || "未命名页"}`;
     return;
   }
 

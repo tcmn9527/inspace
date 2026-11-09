@@ -526,7 +526,7 @@ pub fn canvas_search(
                 continue;
             };
             let kind = object.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            for key in ["name", "text", "markdown", "label", "title", "src"] {
+            for key in ["name", "brand", "sku", "spec", "note", "text", "markdown", "label", "title", "src"] {
                 let Some(value) = object.get(key).and_then(|v| v.as_str()) else {
                     continue;
                 };
@@ -1926,8 +1926,8 @@ pub async fn canvas_export_save(
     data: String,
 ) -> Result<Option<String>, String> {
     let ext = ext.to_lowercase();
-    if ext != "png" && ext != "pdf" && ext != "html" && ext != "docx" {
-        return Err("只支持导出 png、pdf、html 和 docx".to_string());
+    if ext != "png" && ext != "pdf" && ext != "html" && ext != "docx" && ext != "csv" && ext != "xlsx" {
+        return Err("只支持导出 png、pdf、html、docx、csv 和 xlsx".to_string());
     }
     let safe_name = name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], " ");
     let safe_name = if safe_name.trim().is_empty() {
@@ -1946,6 +1946,8 @@ pub async fn canvas_export_save(
                 "pdf" => "PDF",
                 "html" => "网页",
                 "docx" => "Word 文档",
+                "csv" => "CSV 表格",
+                "xlsx" => "Excel 表格",
                 _ => "PNG 图片",
             },
             &[ext.as_str()],
@@ -2040,10 +2042,53 @@ pub async fn canvas_export_write(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// 客户版网页导出：按相对路径写文件，父目录自动建。
+/// 名字只许正常的路径段（不许 ..、隐藏文件、绝对路径），最后一定落在 dir 里面。
+/// 和分段导出不同，这里允许覆盖：每次导出一个新的时间戳子文件夹，同一批文件要能互相引用。
+#[tauri::command]
+pub fn canvas_export_write_path(dir: String, rel: String, data: String) -> Result<String, String> {
+    let root = PathBuf::from(&dir);
+    if !root.is_dir() {
+        return Err("导出文件夹不在了".to_string());
+    }
+    let rel_path = Path::new(&rel);
+    if rel_path.as_os_str().is_empty() {
+        return Err("导出文件名是空的".to_string());
+    }
+    let mut out = root;
+    for component in rel_path.components() {
+        let Component::Normal(part) = component else {
+            return Err("导出文件名不合法".to_string());
+        };
+        let text = part.to_string_lossy();
+        if text.is_empty() || text.starts_with('.') {
+            return Err("导出文件名不合法".to_string());
+        }
+        out.push(part);
+    }
+    if let Some(parent) = out.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建导出目录失败：{e}"))?;
+    }
+    let bytes = BASE64
+        .decode(data.as_bytes())
+        .map_err(|e| format!("导出数据有误：{e}"))?;
+    fs::write(&out, &bytes).map_err(|e| format!("写入文件失败：{e}"))?;
+    Ok(out.to_string_lossy().to_string())
+}
+
+/// 导出完打开那个文件夹：客户版网页是一整个目录，得让用户看到它在哪。
+#[tauri::command]
+pub fn canvas_export_reveal(path: String) -> Result<(), String> {
+    let dir = PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err("这个导出文件夹不在了".to_string());
+    }
+    open::that(&dir).map_err(|e| format!("打不开这个文件夹：{e}"))
+}
+
 /// 撞名就往后加序号：`西游记-01.png` 已存在就写 `西游记-01 (2).png`。
 /// 分段导出常常整批重来，覆盖上一版不是「更新」，是「弄丢了」。
-fn unique_path(path: PathBuf) -> PathBuf {
-    if !path.exists() {
+fn unique_path(path: PathBuf) -> PathBuf {    if !path.exists() {
         return path;
     }
     let stem = path
@@ -2731,6 +2776,28 @@ pub async fn canvas_pick_file(
     describe_file(&path).map(Some)
 }
 
+/// 系统文件框选一份 CSV（清单导入用）。取消返回 null。
+#[tauri::command]
+pub async fn canvas_pick_csv(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("选择 CSV 表格")
+        .set_parent(&window)
+        .add_filter("CSV 表格", &["csv", "txt"])
+        .blocking_pick_file();
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|e| format!("无法解析所选文件：{e}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 /// 拷进画布之后的落点，卡片上的名字和体积都从这里来。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2948,6 +3015,21 @@ pub fn canvas_file_text(path: String) -> Result<FileText, String> {
         crlf: decoded.crlf,
         text: decoded.text,
     })
+}
+
+/// 读一份纯文本（CSV 清单导入用）：编码按 UTF-8/UTF-16/GB18030 自动认。
+#[tauri::command]
+pub fn canvas_read_text_file(path: String) -> Result<String, String> {
+    let file = Path::new(&path);
+    let meta = fs::metadata(file).map_err(|e| format!("读不到这个文件：{e}"))?;
+    if !meta.is_file() {
+        return Err("这个路径不是文件".to_string());
+    }
+    if meta.len() > 8 * 1024 * 1024 {
+        return Err("文件太大了（超过 8MB）".to_string());
+    }
+    let bytes = fs::read(file).map_err(|e| format!("读取失败：{e}"))?;
+    Ok(decode_text(&bytes)?.text)
 }
 
 #[derive(Serialize)]

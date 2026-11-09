@@ -214,7 +214,7 @@ region 三选一：all 整张画布（默认，看整体构图）、viewport 用
     title: "块",
     body: `## 块（9 个工具）
 
-块类型：text（画布文字）、rect（矩形）、ellipse（椭圆）、line（线）、arrow（箭头）、note（Markdown 笔记卡）、image、audio、video、file（附件/PDF/文本文件卡）、ebook、connector（连线）、picture（矢量画面，见「画面块」一章）、scene（真 3D 场景，字段见 block_create / block_update 的 parts / camera / light）、gen（生图面板，见「生图面板」一章）。
+块类型：text（画布文字）、rect（矩形）、ellipse（椭圆）、line（线）、arrow（箭头）、note（Markdown 笔记卡）、image、audio、video、file（附件/PDF/文本文件卡）、ebook、connector（连线）、picture（矢量画面，见「画面块」一章）、scene（真 3D 场景，字段见 block_create / block_update 的 parts / camera / light）、gen（生图面板，见「生图面板」一章）、product（产品/材料卡，见「产品卡与清单」一章）、quote（清单块，同上一章）。
 
 ### block_get
 单块摘要，不切页之外没有副作用。
@@ -811,6 +811,164 @@ needed 里有缺、或 missing 非空，就是这台机器还没备好模型文�
 当前档位选过一个后来被删掉的文件，也是这儿报出来。
 视觉投影（mmproj）那行标着 optional 是真的：纯文生图缺了照跑，**但图生图和参考图编辑要靠它读输入图**，
 真要走带图的档却缺这个文件，报回的话就照 needed 那行说清楚。`,
+  },
+  {
+    id: "product",
+    title: "产品卡与清单",    body: `## 产品/材料卡与清单
+
+### 一件家具只该有一个实体
+产品卡不是普通图片卡：它把 name、brand、sku、spec、price、qty、source、note、产品图（src）、
+真实尺寸 dims（毫米，w 宽 / d 深 / h 高）和 model（本机 GLB 路径）都存在同一块上。
+后面的户型脚印、3D 家具和清单都会指回这块，改一处其余跟着变。
+
+### block_create {type:"product"}
+~~~json
+{ "type": "product", "x": 120, "y": 520, "name": "斯德哥尔摩 三人沙发",
+  "brand": "宜家", "sku": "S-3021", "spec": "布艺 · 2400×900×850mm",
+  "price": 4999, "qty": 1, "source": "https://...", "note": "客户偏好浅灰",
+  "dims": { "w": 2400, "d": 900, "h": 850 }, "path": "C:\\\\...\\\\sofa.png" }
+~~~
+- price 是元；qty 是数量，清单小计 = price × qty。
+- path 是产品图，会拷进画布 images/；不给就显示「无图」。
+- dims / model 现在就能存，P2/P3 接 3D 和户型时直接读。
+
+### block_update
+同一批字段都能改：name / brand / sku / spec / price / qty / source / note / model / dims / internal。
+改 price/qty 不用管清单，清单会自动重算。
+
+### 清单块 block_create {type:"quote"}
+~~~json
+{ "type": "quote", "x": 120, "y": 120, "w": 640, "h": 340, "title": "软装清单" }
+~~~
+清单自动汇总当前画布里的**所有产品卡**（按块顺序），列是名称 / 规格 / 单价 / 数量 / 小计，底部合计。
+它自己不存行，只记 title 和外观；产品卡一增删改，清单跟着变。block_get 一个 quote 会返回 count 和 total。
+清单的标题也能改：block_update {title:"..."}。
+
+### product_import_csv
+把一份 CSV 批量变成产品卡：
+~~~json
+{ "path": "D:\\\\work\\\\...\\\\家具.csv", "x": 120, "y": 720 }
+~~~
+- 表头中文英文都认：名称/name、品牌/brand、SKU/编号/sku、规格/spec、单价/price、数量/qty、来源/source、备注/note、图片/image、模型/model。
+- 图片列写相对路径时按 CSV 所在目录找；图片会拷进画布 images/。
+- 返回 { created, skipped, imagesMissing }：名称空的行跳过；图拷不动的行照建卡，只计数。
+- 卡片从 x/y 起 3 列一排往下铺；不给坐标就落在视野里。`,
+  },
+  {
+    id: "scene",
+    title: "3D 场景与模型",
+    body: `## 3D 场景与模型（5 个工具）
+
+### 模型库
+家具存 .glb（贴图要内嵌）放在数据根 library/models。model_import {path} 把本机 .glb 收进去，model_list 看有哪些；
+产品卡的 model 字段填这里返回的 name（只写文件名，不带路径）。
+
+### 房间壳
+scene_room_shell {id, preset:"living"|"bedroom"|"dining", wallColor?, floorColor?}
+铺地板、背景墙、侧墙、窗（带窗框）、地毯和边柜；单位是厘米（客厅 6.2×5.2m、墙高 2.8m）。
+注意：它会**替换**场景里现有的 parts；已经摆好的家具要重新 place。
+
+### 把产品卡放进场景
+scene_place_product {scene, product, x?, y?, rotate?}
+按产品卡的 dims（毫米）等比缩放模型：w 是主尺度，模型水平居中、底面对齐地面。x/y 是场景地面坐标（厘米），不给就放 (0,0)；rotate 绕落点转。
+模型库里没有这张卡的 model 会直接报错，先用 model_import。
+
+### 材质：把产品卡的图贴到墙 / 地 / 柜上
+scene_apply_material {scene, product, target:"地板", repeat:80}
+target 给件名（地板 / 背景墙 / 侧墙 / 边柜 / 地毯）或 parts 序号；repeat 是每格多少厘米（默认 100）。
+clear:true 去掉贴图回到纯色。模型件不能贴；贴图只认场景块所在画布 images/ 里的图。
+
+### 灯光与机位
+scene_light_preset {id, preset:"day"|"warm"|"night"|"off"}
+scene_camera_preset {id, preset:"front"|"left"|"right"|"top"|"auto"}
+机位按当前内容框算；auto 回到按内容自动框。摆完东西先 scene_screenshot 看一眼，再决定要不要换机位。
+
+### 在画布上直接转
+用户可以在场景画面里左拖转视角、滚轮推拉；移动块用块上沿那颗「场景」把手。
+转过的视角记在块上，右键「重置视角」回到自动框，「视角」里还有正面 / 左右角 / 俯视。
+agent 改机位仍走 scene_camera_preset；两边改的是同一份 camera 字段。
+
+### 手写模型件
+parts 里也能直接写 {op:"model", x,y,z, src, w,d,h, rotate, scale, name}：
+src 是模型库文件名，w/d/h 是期望的真实尺寸（厘米，按 w 等比缩放，没给 w 就按 h，默认 80cm）。
+能用 scene_place_product 就别手拼——它会顺带检查模型库和产品尺寸。`,
+  },
+  {
+    id: "plan",
+    title: "户型图",
+    body: `## 户型图与 3D 联动（5 个工具）
+
+### 建块与定标
+block_create {type:"plan", path:"C:\\\\...\\\\户型图.png"} 把户型图拷进画布，块大小按图片比例自动定。
+plan_calibrate {id, x1, y1, x2, y2, mm}：x1~y2 是图片上两个点的**相对位置（0~1，左上角 0,0）**，mm 是这段真实长度。
+定标之前脚印、面积、机位都不显示——没有比例就没法把毫米放到图上。可以先 space_snapshot 看户型图再估两个点。
+用户可以自己右键「标定比例…」，在图上点两下再填毫米。
+
+### 家具脚印
+plan_place_product {plan, product, x?, y?, rotate?}
+脚印尺寸取产品卡的 dims（毫米）；x/y 是户型图上的毫米坐标（左上角原点），不给就放图中心。
+返回 footprint（带 id）。画布上可以直接拖脚印改位置；点一下脚印会选中对应的产品卡。
+改尺寸/角度用 plan_remove 删了重放；删脚印用 plan_remove {kind:"footprint", item:footprintId}。
+
+### 面积
+plan_area {plan, points:[{x,y},…]}
+points 是毫米坐标、按顺序围一圈（至少 3 个），返回 squareMeters。面积画成虚线多边形并标在图上。
+
+### 3D 机位
+plan_place_camera {plan, scene, x?, y?, rotate?, preset?}
+在户型图上放一个机位标记，链接一个场景块；preset 是 front / left / right / top / auto。
+用户点这个标记，场景块会切到该机位并把镜头带过去。x/y 是标记位置（毫米），rotate 是朝向。
+
+### 看现状
+block_get 一个 plan 会返回 imageW/imageH、calibration、footprints、cameras、areas（都带 id），
+用来算位置、选 id 删除。plan_remove 的 kind 只有 footprint / camera / area。`,
+  },
+  {
+    id: "proposal",
+    title: "提案页与客户版交付",
+    body: `## 提案页与客户版（按页导出）
+
+### 建页
+block_create {type:"page", ratio:"a4"|"a4l"|"16:9"|"4:3", title:"客厅方案", order:1, x, y}
+页框会垫在最底层；块心落在页里的块就算这一页的内容。页名显示在页框上沿，不进导出。
+比例：a4 794×1123、a4l 1123×794、16:9 1280×720、4:3 1024×768。
+改页名/页序/比例用 block_update 的 title / order / ratio；改比例会按新比例重设页大小。
+页面排版建议：先按页的 x/y 把页框摆成一排（页间留 200 左右），再往里摆内容。
+
+### 一键搭骨架
+proposal_template {title:"软装提案", x?, y?}
+建出 7 页一排：封面 / 客户需求 / 风格板 / 客厅方案 / 主卧方案 / 餐厅方案 / 材料与报价。
+三个空间页里已经铺好客厅、主卧、餐厅的房间壳场景，最后页带一张清单块；封面和说明页有占位文字。
+它只搭架子不出图，建完再往里填参考图、产品卡、户型和风格变体。
+
+### 复制整页
+page_duplicate {id}：把这一页和页里的块整份复制到右边，媒体各拷独立副本，连线不复制。
+做风格变体很快：复制空间页，换参考图和产品，两版并排摆着。
+
+### 客户版隐藏
+所有块都认 block_update {internal:true}（面板右键「客户版隐藏」同一个开关）。
+内部块在画布上照常显示，但按页导出 PDF / 网页时不进成品；挂在内部块上的连线也一起藏。
+
+### 预览一页
+page_screenshot {id, maxSide} 按客户版规则整页渲染成 PNG：页框底色在、页名和描边摘掉、内部块藏掉。
+排完一页先看它，比看画布准。
+
+### 按页导出 PDF
+client_pdf_export {dir, name}：把每页高清渲染成一张，按 order 拼成多页 PDF，写到 dir 下 <name>.pdf。
+dir 必须是已经存在的文件夹。界面那条在「导出 → 客户版（按页）→ 导出 PDF」，会弹保存框。
+
+### 按页导出网页（3D 可转）
+client_web_export {dir, name}：在 dir 下新建 <name> 子文件夹：
+index.html + pages/page-01.png… + scene-viewer.js。
+客户双击 index.html 就能看；页面上场景块那块是可点的虚线热区，点开能拖着转、滚轮缩放。
+场景里的 GLB 模型和材质图都内嵌成 data URL，不依赖模型库和网络，整个文件夹可以直接发走。
+界面那条在「导出 → 客户版（按页）→ 导出网页（3D 可转）」，会弹选择文件夹的框。
+
+### 注意
+- 页框尺寸大，画布上排页时留足间距；页名是唯一的拖动把手，页里的块可以正常点选。
+- 整套按页交付只认 page 块；没有页框时这两个导出会报「还没有提案页」。
+- 导出网页的查看器是预打包的 scene-viewer.bundle.js；改了 src/views/export-scene-viewer.js 之后
+  要在开发机上跑 npm run build:viewer 重新打包，否则导出的还是旧查看器。`,
   },
   {
     id: "playback",

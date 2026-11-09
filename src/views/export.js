@@ -45,7 +45,7 @@ const TILE = 4096;
 /* 选中框、端口、吸附辅助线这些只是操作时的记号，不该出现在导出的图里。
    .canvas-port 是连线两端那几颗圈，选中时才画，静态图里就是一点脏东西 */
 const OVERLAY_SELECTOR =
-  ".canvas-sel-box, .canvas-port-box, .canvas-port, .canvas-guide, .canvas-handle";
+  ".canvas-sel-box, .canvas-port-box, .canvas-port, .canvas-guide, .canvas-handle, .canvas-scene-grip";
 
 /* 卡片里那些滚动条在静态图里看着像画坏了；导出画布又没有「滚动」这回事 */
 const EXPORT_CSS = `
@@ -80,12 +80,11 @@ function base64ToBytes(data) {
 
 /* 最小 PDF：一页，里面就一张 JPEG。没有外部依赖，够用也够稳。 */
 function buildPdf(jpeg, imageW, imageH) {
-  /* 画布像素换成分（1px ≈ 0.75pt），再收进 PDF 允许的页面尺寸里 */
-  const ratio = Math.min(0.75, 14400 / Math.max(imageW, imageH));
-  const pageW = Math.max(1, Math.round(imageW * ratio));
-  const pageH = Math.max(1, Math.round(imageH * ratio));
-  const content = `q\n${pageW} 0 0 ${pageH} 0 0 cm\n/Im0 Do\nQ\n`;
+  return buildPdfPages([{ jpeg, imageW, imageH }]);
+}
 
+/* 多页 PDF：每页一张 JPEG，页尺寸按图片比例折算；每页三件对象（页 / 图 / 内容） */
+function buildPdfPages(pages) {
   const parts = [];
   let cursor = 0;
   const offsets = [];
@@ -97,6 +96,7 @@ function buildPdf(jpeg, imageW, imageH) {
   const startObject = () => {
     offsets.push(cursor);
   };
+  const count = pages.length;
 
   pushText("%PDF-1.4\n");
 
@@ -104,34 +104,43 @@ function buildPdf(jpeg, imageW, imageH) {
   pushText("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
 
   startObject();
-  pushText("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+  const kids = pages.map((_, index) => `${3 + index * 3} 0 R`).join(" ");
+  pushText(`2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${count} >>\nendobj\n`);
 
-  startObject();
-  pushText(
-    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] ` +
-      `/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n`,
-  );
+  pages.forEach((page, index) => {
+    /* 画布像素换成分（1px ≈ 0.75pt），再收进 PDF 允许的页面尺寸里 */
+    const ratio = Math.min(0.75, 14400 / Math.max(page.imageW, page.imageH));
+    const pageW = Math.max(1, Math.round(page.imageW * ratio));
+    const pageH = Math.max(1, Math.round(page.imageH * ratio));
+    const content = `q\n${pageW} 0 0 ${pageH} 0 0 cm\n/Im0 Do\nQ\n`;
+    const pageNo = 3 + index * 3;
+    const imageNo = 4 + index * 3;
+    const contentNo = 5 + index * 3;
 
-  startObject();
-  pushText(
-    `4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imageW} /Height ${imageH} ` +
-      `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode ` +
-      `/Length ${jpeg.length} >>\nstream\n`,
-  );
-  pushBytes(jpeg);
-  pushText("\nendstream\nendobj\n");
+    startObject();
+    pushText(
+      `\n${pageNo} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] ` +
+        `/Resources << /XObject << /Im0 ${imageNo} 0 R >> >> /Contents ${contentNo} 0 R >>\nendobj\n`,
+    );
 
-  startObject();
-  pushText(
-    `5 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`,
-  );
+    startObject();
+    pushText(
+      `\n${imageNo} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${page.imageW} /Height ${page.imageH} ` +
+        `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpeg.length} >>\nstream\n`,
+    );
+    pushBytes(page.jpeg);
+    pushText("\nendstream\nendobj\n");
+
+    startObject();
+    pushText(`\n${contentNo} 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`);
+  });
 
   const xref = cursor;
-  pushText("xref\n0 6\n0000000000 65535 f \n");
-  for (let i = 1; i <= 5; i += 1) {
-    pushText(`${String(offsets[i - 1]).padStart(10, "0")} 00000 n \n`);
+  pushText(`xref\n0 ${count * 3 + 3}\n0000000000 65535 f \n`);
+  for (const offset of offsets) {
+    pushText(`${String(offset).padStart(10, "0")} 00000 n \n`);
   }
-  pushText(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  pushText(`trailer\n<< /Size ${count * 3 + 3} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
 
   return concatBytes(parts);
 }
@@ -249,13 +258,15 @@ export function createExporter({
       if (src.startsWith("data:")) continue;
       const holder = img.closest("[data-id]");
       const item = holder ? getItems().find((entry) => entry.id === holder.dataset.id) : null;
-      if (!item || item.type !== "image" || !item.src) {
-        /* 认不出这张图是谁的、或者本来就没加载出来：与其留个破图标，不如留白 */
+      /* 图片、产品卡、户型图和生图面板里的图都是画布 images/ 里的真文件，导出时换成 data:；
+         认不出来的别留破图标，直接拿掉 */
+      if (!item || !item.src || !["image", "product", "plan", "gen"].includes(item.type)) {
         img.remove();
         continue;
       }
+      const linked = item.type === "image" ? Boolean(item.linked) : false;
       try {
-        img.src = await loadImageData(canvasId, item.src, item.linked);
+        img.src = await loadImageData(canvasId, item.src, linked);
       } catch {
         img.remove();
       }
@@ -279,10 +290,14 @@ export function createExporter({
 
   /* 克隆世界层，顺手把留不住、画不出的东西换掉。
      导出图片和导出网页共用这一段——两种产物要长得一样，就不该有两套准备流程。 */
-  async function prepareWorld(onlyId, { hideIds = [], stripIds = [] } = {}) {
+  async function prepareWorld(onlyId, { hideIds = [], stripIds = [], pageId = "" } = {}) {
     const world = getWorld().cloneNode(true);
     world.removeAttribute("id");
     world.setAttribute("style", "position:absolute;left:0;top:0;width:0;height:0;");
+
+    /* 导出不看当前视口：克隆里被视口裁剪藏起来的块要全部放出来，
+       不然镜头没对着的那一页会少东西 */
+    for (const el of world.querySelectorAll(".is-culled")) el.classList.remove("is-culled");
 
     /* 只导一块时，把别的块从克隆里整个摘掉：画面块底下压着的东西不该跟着进图 */
     if (onlyId) {
@@ -303,12 +318,12 @@ export function createExporter({
 
     /* 画板导出：透明模式把画板整个摘掉，含底色模式留底色只摘外框 */
     for (const id of hideIds) {
-      for (const el of world.querySelectorAll(".canvas-item")) {
+      for (const el of world.querySelectorAll("[data-id]")) {
         if (el.dataset.id === id) el.remove();
       }
     }
     for (const id of stripIds) {
-      const el = [...world.querySelectorAll(".canvas-item")].find((node) => node.dataset.id === id);
+      const el = [...world.querySelectorAll("[data-id]")].find((node) => node.dataset.id === id);
       if (!el) continue;
       el.style.border = "0";
       el.style.borderRadius = "0";
@@ -317,6 +332,17 @@ export function createExporter({
         node.style.borderWidth = "0";
         node.style.borderRadius = "0";
         node.style.boxShadow = "none";
+      }
+    }
+    /* 提案页框：页面本体留着当底色，只把页名标签、描边和投影摘掉 */
+    if (pageId) {
+      for (const el of world.querySelectorAll("[data-id]")) {
+        if (el.dataset.id !== pageId) continue;
+        el.style.border = "0";
+        el.style.borderRadius = "0";
+        el.style.boxShadow = "none";
+        el.style.outline = "none";
+        for (const label of el.querySelectorAll(".canvas-page-label")) label.remove();
       }
     }
 
@@ -1480,10 +1506,63 @@ body { font-family: ${FONT_STACK}; }
     };
   }
 
+  /* 提案页：只画这一页的范围，页框留下当底色，页名和描边摘掉；
+     hideIds 里放别的页和客户版隐藏的块。 */
+  async function exportPage(options = {}) {
+    const box = options.box;
+    if (!box || ![box.x, box.y, box.w, box.h].every((n) => Number.isFinite(n))) {
+      throw new Error("页面范围必须是 {x, y, w, h}");
+    }
+    if (box.w <= 0 || box.h <= 0) throw new Error("页面的宽高要大于 0");
+    const { scale, capped } = scaleFor(box, options.quality);
+    const prepared = await prepareWorld(undefined, {
+      hideIds: options.hideIds || [],
+      pageId: options.pageId || "",
+    });
+    const canvas = await renderRegion(
+      prepared,
+      box,
+      box.w * scale,
+      box.h * scale,
+      scale,
+      options.onProgress,
+    );
+    const jpeg = options.format === "jpeg";
+    const data = jpeg
+      ? canvas.toDataURL("image/jpeg", 0.95).split(",")[1]
+      : canvas.toDataURL("image/png").split(",")[1];
+    return {
+      format: jpeg ? "jpeg" : "png",
+      data,
+      width: canvas.width,
+      height: canvas.height,
+      scale,
+      capped,
+    };
+  }
+
+  /* 多页 PDF：一页一张，出来按顺序排好的多页文件 */
+  async function exportPagesPdf(pages, options = {}) {
+    if (!Array.isArray(pages) || !pages.length) throw new Error("没有页面可导出");
+    const built = [];
+    for (let index = 0; index < pages.length; index += 1) {
+      const shot = await exportPage({ ...pages[index], quality: options.quality, format: "jpeg" });
+      built.push({ jpeg: base64ToBytes(shot.data), imageW: shot.width, imageH: shot.height });
+      options.onProgress?.(index + 1, pages.length);
+    }
+    return {
+      format: "pdf",
+      pages: built.length,
+      data: bytesToBase64(buildPdfPages(built)),
+    };
+  }
+
   return {
     exportAs: run,
     exportSlices,
     exportRegion,
+    exportPage,
+    exportPagesPdf,
     plan,
     snapshot,
     reportError(error) {

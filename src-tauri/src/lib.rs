@@ -6,6 +6,7 @@ mod ebook;
 mod ffmpeg;
 mod imagegen;
 mod mcp;
+mod models;
 pub mod sdcpp; // 引擎绑定：examples 和后续的生图面板都从这里进
 mod store;
 
@@ -96,6 +97,8 @@ pub fn run() {
             app.manage(Arc::new(cosmos::CosmosJobs::default()));
             // 生图引擎：一个常驻 sd_ctx，一次只出一张，空闲几分钟自己放掉
             app.manage(imagegen::init(data_root.clone(), &db_state));
+            // 3D 模型库：library/models/ 下的 .glb，产品卡只记文件名
+            app.manage(models::init(data_root.clone())?);
             // 换数据目录的搬运同理：进度在后台线程报，停止只改标志
             app.manage(Arc::new(store::RootMoveJobs::default()));
             app.manage(db_state);
@@ -198,9 +201,11 @@ pub fn run() {
             canvas::canvas_delete_video,
             canvas::canvas_file_info,
             canvas::canvas_pick_file,
+            canvas::canvas_pick_csv,
             canvas::canvas_import_file,
             canvas::canvas_copy_file,
             canvas::canvas_file_text,
+            canvas::canvas_read_text_file,
             canvas::canvas_file_preview,
             canvas::canvas_file_url,
             canvas::canvas_file_body,
@@ -225,6 +230,11 @@ pub fn run() {
             imagegen::gen_models_dir_pick,
             imagegen::gen_models_dir_set,
             imagegen::gen_models_reveal,
+            models::model_library_dir,
+            models::model_library_list,
+            models::model_library_reveal,
+            models::model_library_url,
+            models::model_library_import,
             imagegen::gen_start,
             imagegen::gen_cancel,
             canvas::canvas_reveal,
@@ -233,6 +243,8 @@ pub fn run() {
             canvas::canvas_open_export,
             canvas::canvas_export_pick_dir,
             canvas::canvas_export_write,
+            canvas::canvas_export_write_path,
+            canvas::canvas_export_reveal,
             capture::webview_capture,
             mcp::mcp_register_tools,
             mcp::mcp_reply,

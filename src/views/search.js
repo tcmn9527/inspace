@@ -30,6 +30,10 @@ const TYPE_LABEL = {
   picture: "画面",
   scene: "场景",
   gen: "生图面板",
+  product: "材料卡",
+  quote: "清单",
+  plan: "户型图",
+  page: "提案页",
 };
 
 const escapeHtml = (text) =>
@@ -64,6 +68,24 @@ function describeBlock(item) {
   if (item.type === "image") return { title: "图片", body: "" };
   /* 面板能搜的就是那句提示词：出来的图还没变成文字 */
   if (item.type === "gen") return { title: (item.prompt || "").split("\n")[0] || "生图面板", body: item.prompt || "" };
+  /* 材料卡：名字当标题，品牌/货号/规格/备注都进正文，搜「斯德哥尔摩」也能找到那张卡 */
+  if (item.type === "product") {
+    return {
+      title: item.name || "材料卡",
+      body: [item.brand, item.sku, item.spec, item.note].filter(Boolean).join(" "),
+    };
+  }
+  if (item.type === "quote") return { title: item.title || "清单", body: item.title || "" };
+  if (item.type === "plan") {
+    const scale = item.calibration ? "已定标" : "未定标";
+    return {
+      title: "户型图",
+      body: `${scale} · 家具 ${(item.footprints || []).length} 件 · 机位 ${(item.cameras || []).length}`,
+    };
+  }
+  if (item.type === "page") {
+    return { title: item.title || "提案页", body: `P${item.order || "?"} · ${item.ratio}` };
+  }
   return { title: item.name || TYPE_LABEL[item.type] || item.type, body: item.name || "" };
 }
 

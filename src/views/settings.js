@@ -95,6 +95,11 @@ export function initSettings() {
   ui.genDirPick = document.querySelector("#settings-gen-dir-pick");
   ui.genDirReset = document.querySelector("#settings-gen-dir-reset");
   ui.genError = document.querySelector("#settings-gen-error");
+  ui.modelsStatus = document.querySelector("#settings-models-status");
+  ui.modelsDir = document.querySelector("#settings-models-dir");
+  ui.modelsReveal = document.querySelector("#settings-models-reveal");
+  ui.modelsImport = document.querySelector("#settings-models-import");
+  ui.modelsError = document.querySelector("#settings-models-error");
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -126,6 +131,10 @@ export function initSettings() {
   ui.genReveal.addEventListener("click", revealGenDir);
   ui.genDirPick.addEventListener("click", pickGenDir);
   ui.genDirReset.addEventListener("click", () => setGenDir(null));
+  ui.modelsReveal.addEventListener("click", () => {
+    invoke("model_library_reveal").catch((error) => showModelsError(String(error)));
+  });
+  ui.modelsImport.addEventListener("click", importModel);
   setupMoveEvents();
   setupCosmosEvents();
   setupRoute();
@@ -155,6 +164,7 @@ export async function refreshSettings() {
   refreshMcp();
   refreshCosmos();
   refreshGen();
+  refreshModels();
   paintRouteCard();
   renderRoute();
 }
@@ -987,4 +997,43 @@ function showRouteStatus(message) {
   routeStatusTimer = setTimeout(() => {
     ui.routeStatus.hidden = true;
   }, 3000);
+}
+
+/* ---------- 3D 模型库 ---------- */
+
+function showModelsError(message) {
+  ui.modelsError.textContent = message;
+  ui.modelsError.hidden = !message;
+}
+
+async function refreshModels() {
+  try {
+    const [dir, files] = await Promise.all([
+      invoke("model_library_dir"),
+      invoke("model_library_list"),
+    ]);
+    ui.modelsDir.textContent = dir;
+    ui.modelsStatus.textContent = files.length ? `${files.length} 个模型` : "还没有模型";
+    showModelsError("");
+  } catch (error) {
+    ui.modelsDir.textContent = "";
+    ui.modelsStatus.textContent = "模型库读取失败";
+    showModelsError(String(error));
+  }
+}
+
+async function importModel() {
+  ui.modelsImport.disabled = true;
+  showModelsError("");
+  try {
+    const file = await invoke("model_library_import", { path: null });
+    if (file) {
+      await refreshModels();
+      ui.modelsStatus.textContent = `已导入 ${file.name}（${formatBytes(file.size)}）`;
+    }
+  } catch (error) {
+    showModelsError(String(error));
+  } finally {
+    ui.modelsImport.disabled = false;
+  }
 }

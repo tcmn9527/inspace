@@ -205,6 +205,8 @@ const SCENE_PARTS = {
     "这两种都是「轮廓 + h 挤成真棱柱」：L 形、梯形、八角台都能立起来，直角就是直角。" +
     "{op:\"roof\",x,y,z,h,…} 是屋顶：同一圈底面立到 h 高，顶上一圈往中线收。矩形底面写 w,d 再加 ridge（屋脊多长）——ridge 不写或 = w 是双坡（悬山，脊和房子一样长）、0 < ridge < w 是四阿 / 庑殿（四角都斜下去）、ridge:0 是四角攒尖；多边形底面写 points（八角亭的攒尖就这么来），这种没有脊长可写，硬写会报回。" +
     "墙和顶是两件东西，别指望一件自带屋顶：墙 {op:\"box\",z:26,h:170} 立到 196，顶就写 {op:\"roof\",z:196,h:130}；出檐不靠参数，让顶的 w,d 各比墙宽出一圈就行（宽 100 的墙给宽 160 的顶，檐口探出去 30）。" +
+    "模型件写 {op:\"model\",x,y,z,src,w,d,h,rotate,scale,name}：src 只写模型库（数据根 library/models）里的 .glb 文件名，w/d/h 是期望的真实尺寸（厘米，按 w 等比缩放；没给 w 就按 h，默认 80cm）。产品卡落场景请用 scene_place_product，别手拼。" +
+    "实体件还能带 tex（场景块所在画布 images/ 里的图片路径）和 texRepeat（每格多少厘米，默认 100）当材质贴图；把产品卡图片套到墙/地上用 scene_apply_material。" +
     "落点 (x,y) 永远是底面那个中心，rotate 绕它转。" +
     "影子不用你画也不用来这儿要：块上有 light 就有一盏真的太阳，几何自己把影子落到地上，没光就是平光。",
   items: { type: "object" },
@@ -456,6 +458,16 @@ const TOOL_DEFS = [
     [],
   ),
   def(
+    "ui_wheel",
+    "调试用：向视口某个点派发一次滚轮（不模拟鼠标），验证块内滚动或 3D 场景推拉。",
+    {
+      x: { type: "number", description: "客户端 x" },
+      y: { type: "number", description: "客户端 y" },
+      deltaY: { type: "number", description: "滚轮量，正数往下，默认 120" },
+    },
+    ["x", "y"],
+  ),
+  def(
     "ui_scroll",
     "调试用：把匹配到的元素滚动到视野里（scrollIntoView），不模拟滚轮。",
     {
@@ -502,6 +514,15 @@ const TOOL_DEFS = [
     },
     ["selector"],
   ),
+  def(
+    "ui_hit",
+    "调试用：给屏幕坐标，返回该点从顶层到底层的元素（标签、class、z-index、背景），用来查「谁盖住了谁」。",
+    {
+      x: { type: "number", description: "客户端 x" },
+      y: { type: "number", description: "客户端 y" },
+    },
+    ["x", "y"],
+  ),
   def("ui_close", "调试用：收起当前打开的取色板和菜单。"),
   def(
     "ui_reload",
@@ -529,12 +550,29 @@ const TOOL_DEFS = [
   ),
   def("block_get", "看单个块的摘要。", { id: ID }, ["id"]),
   def("block_create", "在画布里新建一块。坐标不给就落在视野中央、连续创建自动错开。", {
-    type: { type: "string", description: "text/rect/ellipse/line/arrow/note/picture/scene/gen/image/audio/video/file/ebook/connector" },
+    type: { type: "string", description: "text/rect/ellipse/line/arrow/note/picture/scene/gen/product/quote/plan/page/image/audio/video/file/ebook/connector" },
     x: X, y: Y, w: W, h: H,
     text: { type: "string", description: "文字块的正文" },
     markdown: { type: "string", description: "笔记块的 Markdown 正文" },
-    name: { type: "string", description: "笔记块的名字" },
-    path: { type: "string", description: "image/audio/video/file/ebook 块要的本机文件绝对路径" },
+    name: { type: "string", description: "笔记块的名字；产品卡也用它当名称" },
+    brand: { type: "string", description: "产品卡：品牌" },
+    sku: { type: "string", description: "产品卡：SKU / 货号" },
+    spec: { type: "string", description: "产品卡：规格描述" },
+    price: { type: "number", description: "产品卡：单价（元）" },
+    qty: { type: "number", description: "产品卡：数量，默认 1" },
+    source: { type: "string", description: "产品卡：来源链接或出处" },
+    note: { type: "string", description: "产品卡：内部备注" },
+    model: { type: "string", description: "产品卡：本机 GLB 模型路径（P2 用）" },
+    dims: {
+      type: "object",
+      description: "产品卡：真实尺寸（毫米，宽×深×高），给户型脚印和 3D 用",
+      properties: { w: { type: "number" }, d: { type: "number" }, h: { type: "number" } },
+    },
+    internal: { type: "boolean", description: "内部块：客户版导出时隐藏（P4 用）" },
+    title: { type: "string", description: "清单块的标题；提案页也用它当页名" },
+    ratio: { type: "string", enum: ["a4", "a4l", "16:9", "4:3"], description: "提案页比例，默认 a4（竖）" },
+    order: { type: "number", description: "提案页的页序，从 1 开始" },
+    path: { type: "string", description: "image/audio/video/file/ebook 块要的本机文件绝对路径；product 块用它当产品图，plan 块用它当户型图" },
     mode: { type: "string", enum: ["copy", "link"], description: "文件拷进画布还是只引用原文件，默认 copy" },
     as: { type: "string", enum: ["image", "audio", "video", "file", "ebook"], description: "按指定类型落块，覆盖按扩展名的自动判断" },
     fontSize: { type: "number", description: "文字块字号" },
@@ -574,6 +612,16 @@ const TOOL_DEFS = [
     to: { type: "string", description: "连线的终点块 id" },
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"], description: "连线从起点的哪条边出去" },
   }, ["type"]),
+  def(
+    "product_import_csv",
+    "把一份 CSV 表格批量变成产品/材料卡：表头认中文（名称、品牌、SKU、规格、单价、数量、来源、备注、图片、模型）也认英文。图片列写相对路径时按 CSV 所在目录找，拷进画布。返回导入了几项、跳过几行、几张图没找到。",
+    {
+      path: { type: "string", description: "CSV 文件的绝对路径" },
+      x: X,
+      y: Y,
+    },
+    ["path"],
+  ),
   def("block_update", "改一块的位置、尺寸、颜色或正文。只传要改的字段。画面块也能在这儿整幅换指令（cmds），但改几条不如用 picture_draw 按号追加、删。生图面板的提示词和出图参数也能在这儿改，但那只是改块上的字，要真出一张得用 gen_run。", {
     id: ID, x: X, y: Y, w: W, h: H,
     x2: { type: "number", description: "线段终点 x" },
@@ -598,6 +646,24 @@ const TOOL_DEFS = [
     textColor: { type: "string", description: "文字色" },
     text: { type: "string", description: "文字块正文" },
     markdown: { type: "string", description: "画布内笔记块的 Markdown 正文（引用外部 .md 的块用 note_write）" },
+    name: { type: "string", description: "产品卡：名称" },
+    brand: { type: "string", description: "产品卡：品牌" },
+    sku: { type: "string", description: "产品卡：SKU / 货号" },
+    spec: { type: "string", description: "产品卡：规格描述" },
+    price: { type: "number", description: "产品卡：单价（元）" },
+    qty: { type: "number", description: "产品卡：数量" },
+    source: { type: "string", description: "产品卡：来源链接或出处" },
+    note: { type: "string", description: "产品卡：内部备注" },
+    model: { type: "string", description: "产品卡：本机 GLB 模型路径（P2 用）" },
+    dims: {
+      type: "object",
+      description: "产品卡：真实尺寸（毫米，宽×深×高）",
+      properties: { w: { type: "number" }, d: { type: "number" }, h: { type: "number" } },
+    },
+    internal: { type: "boolean", description: "内部块：客户版导出时隐藏" },
+    title: { type: "string", description: "清单块的标题；提案页也用它当页名" },
+    ratio: { type: "string", enum: ["a4", "a4l", "16:9", "4:3"], description: "提案页比例（改它会按比例重设页框大小）" },
+    order: { type: "number", description: "提案页的页序，从 1 开始" },
     shape: { type: "string", enum: ["curve", "elbow"], description: "连线走线" },
     arrow: { type: "string", enum: ["none", "end", "both"], description: "连线箭头" },
     label: { type: "string", description: "连线文字" },
@@ -700,6 +766,90 @@ const TOOL_DEFS = [
     id: ID,
     maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
   }, ["id"]),
+  def("scene_room_shell", "给一块场景铺房间壳：客厅 / 主卧 / 餐厅三种，含地板、背景墙、侧墙、窗、地毯和边柜。单位是厘米（客厅 6.2×5.2m、墙高 2.8m）。会替换场景里现有的 parts，然后按白天光、自动机位重排；摆好壳再用 scene_place_product 把产品卡里的 GLB 家具放进去。", {
+    id: ID,
+    preset: { type: "string", enum: ["living", "bedroom", "dining"], description: "房间类型，默认 living" },
+    wallColor: { type: "string", description: "墙面颜色，如 #ece7de" },
+    floorColor: { type: "string", description: "地板颜色，如 #b98a5e" },
+  }, ["id"]),
+  def("scene_light_preset", "给场景换一套现成的光：day（白天）、warm（傍晚暖光）、night（夜间暖灯）、off（平光）。", {
+    id: ID,
+    preset: { type: "string", enum: ["day", "warm", "night", "off"] },
+  }, ["id", "preset"]),
+  def("scene_camera_preset", "把场景机位摆到现成的角度：front（正面）、left（左角）、right（右角）、top（俯视）、auto（按内容自动框）。", {
+    id: ID,
+    preset: { type: "string", enum: ["front", "left", "right", "top", "auto"] },
+  }, ["id", "preset"]),
+  def("scene_place_product", "把一张产品卡上的 GLB 模型放进场景：按卡上的真实尺寸 dims（毫米）等比缩放，落点 x/y 是场景地面坐标（厘米），rotate 是绕落点转的角度；不给 x/y 就放在地面中心。产品卡的 model 必须是模型库里已有的 .glb。返回场景摘要和 partIndex。", {
+    scene: ID,
+    product: ID,
+    x: X,
+    y: Y,
+    rotate: { type: "number", description: "绕落点转的角度，0~360" },
+  }, ["scene", "product"]),
+  def("scene_apply_material", "把一张产品卡的图片当材质贴到场景的某个实体面上：target 给件名（地板 / 背景墙 / 侧墙 / 边柜 / 地毯）或 parts 序号，repeat 是每格多少厘米（默认 100）。clear:true 去掉贴图回到纯色。模型件不能贴。", {
+    scene: ID,
+    product: ID,
+    target: { type: ["string", "number"], description: "件名或 parts 序号（从 0 开始）" },
+    repeat: { type: "number", description: "每格多少厘米，默认 100" },
+    clear: { type: "boolean", description: "true 就去掉这个面的贴图" },
+  }, ["scene"]),
+  def("plan_calibrate", "给户型块定标：x1/y1/x2/y2 是图片上两个点的相对位置（0~1，左上角是 0,0），mm 是这两点的真实长度（毫米）。定标后家具脚印、面积和机位才有真实比例。可以先 space_snapshot 看户型图再估点。", {
+    id: ID,
+    x1: { type: "number", description: "第一点的横向比例 0~1" },
+    y1: { type: "number", description: "第一点的纵向比例 0~1" },
+    x2: { type: "number", description: "第二点的横向比例 0~1" },
+    y2: { type: "number", description: "第二点的纵向比例 0~1" },
+    mm: { type: "number", description: "这两点的真实长度（毫米）" },
+  }, ["id", "x1", "y1", "x2", "y2", "mm"]),
+  def("plan_place_product", "把产品卡放上户型图：脚印尺寸取卡上的 dims（毫米），x/y 是户型图上的毫米坐标（左上角原点，不给就放图中心），rotate 绕脚印中心转。返回 footprint（以后移动/删除用它的 id）。", {
+    plan: ID,
+    product: ID,
+    x: X,
+    y: Y,
+    rotate: { type: "number", description: "脚印旋转角度，0~360" },
+  }, ["plan", "product"]),
+  def("plan_place_camera", "在户型图上放一个 3D 机位标记：链接一个场景块，preset 是 front / left / right / top / auto；用户点这个标记时会把该场景切到这个机位。x/y 是户型图毫米坐标（标记位置），rotate 是朝向。", {
+    plan: ID,
+    scene: ID,
+    x: X,
+    y: Y,
+    rotate: { type: "number", description: "标记朝向，0~360" },
+    preset: { type: "string", enum: ["front", "left", "right", "top", "auto"], description: "点击时场景切到哪个机位，默认 front" },
+  }, ["plan", "scene"]),
+  def("plan_area", "在户型图上量一块面积：points 是毫米坐标 [{x,y},…]（至少 3 个点，按顺序围一圈），返回 squareMeters。", {
+    plan: ID,
+    points: { type: "array", items: { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"] } },
+  }, ["plan", "points"]),
+  def("plan_remove", "删掉户型图上的一个脚印 / 机位 / 面积区域：kind 是 footprint / camera / area，item 是它们的 id（block_get 能拿到）。", {
+    plan: ID,
+    kind: { type: "string", enum: ["footprint", "camera", "area"] },
+    item: { type: "string", description: "要删的那一项 id" },
+  }, ["plan", "kind", "item"]),
+  def("page_screenshot", "看一张提案页按客户版规则导出的样子：去掉内部块、摘掉页名和描边，整页渲染成 PNG。maxSide 越大越清楚（320~4096，默认 1400）。", {
+    id: ID,
+    maxSide: { type: "number", description: "长边像素，默认 1400，最大 4096" },
+  }, ["id"]),
+  def("proposal_template", "一键搭一套软装提案骨架：7 页（封面 / 客户需求 / 风格板 / 客厅 / 主卧 / 餐厅 / 材料与报价），客厅、主卧、餐厅三页里已经铺好房间壳场景，最后页带清单块。只建占位文字，不出图；建完再往里填参考图、产品卡和户型。", {
+    title: { type: "string", description: "提案标题，默认「软装提案」" },
+    x: X,
+    y: Y,
+  }),
+  def("page_duplicate", "复制一张提案页和页里的内容，新页排在原页右边（媒体各拷一份独立副本），用来快速做风格变体。连线不复制。", {
+    id: ID,
+  }, ["id"]),
+  def("client_web_export", "把客户版网页导出到指定文件夹：在 dir 下新开一个 name 子文件夹，写 index.html、每页一张 PNG 和一个可转 3D 的查看器。模型和材质图都内嵌，客户双击 index.html 就能看；内部块、页名、页框描边都不进成品。dir 必须已经存在。", {
+    dir: { type: "string", description: "目标文件夹的绝对路径（必须已存在）" },
+    name: { type: "string", description: "子文件夹名，默认「画布名 客户版 时间」" },
+  }, ["dir"]),
+  def("client_pdf_export", "把提案按页导出成多页 PDF，写到 dir 下的 <name>.pdf。内部块和页名不会进 PDF。", {
+    dir: { type: "string", description: "目标文件夹的绝对路径（必须已存在）" },
+    name: { type: "string", description: "PDF 文件名（不带扩展名），默认「画布名 客户版」" },
+  }, ["dir"]),
+  def("model_list", "列出 3D 模型库（数据根 library/models）里的 .glb，返回 {models:[{name,size,modified}]}。产品卡的 model 字段就填这里的 name。"),
+  def("model_import", "把一份本机 .glb 收进模型库（贴图要内嵌）；path 不给就弹文件框。返回导入后的 {name,size}。", {
+    path: { type: "string", description: "本机 .glb 的绝对路径；不给就开文件框" },
+  }),
   def(
     "picture_export",
     "把一块画面落成一张独立的图片块：只渲染这一块、存成 PNG 进画布 images/，摆在原块右边。之后它就是普通图片，能拖、能双击看大图、也能单独导出。",
@@ -836,6 +986,7 @@ function pick(args, keys) {
 const BLOCK_FIELDS = [
   "x", "y", "w", "h", "x2", "y2", "fontSize", "align", "vAlign", "radius", "borderWidth", "locked",
   "borderColor", "fillColor", "color", "textColor", "text", "markdown",
+  "name", "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
   "cmds", "symbols", "paperColor", "hidden", "light",
   "parts", "camera", "groundColor",
@@ -1207,6 +1358,12 @@ async function dispatch(name, args) {
       });
     case "ui_dblclick":
       return canvasAgent.debugDoubleClick({ selector: args.selector, text: args.text });
+    case "ui_wheel":
+      return canvasAgent.debugWheel({
+        x: Number(args.x) || 0,
+        y: Number(args.y) || 0,
+        deltaY: Number(args.deltaY) || 120,
+      });
     case "ui_scroll":
       return canvasAgent.debugScroll({ selector: args.selector, align: args.align });
     case "ui_inspect": {
@@ -1214,6 +1371,8 @@ async function dispatch(name, args) {
       if (view !== "current") await ensureView(view);
       return canvasAgent.debugInspect({ selector: args.selector, pseudo: args.pseudo });
     }
+    case "ui_hit":
+      return canvasAgent.debugHit({ x: args.x, y: args.y });
     case "ui_close":
       return canvasAgent.debugClose();
     case "ui_reload":
@@ -1231,11 +1390,16 @@ async function dispatch(name, args) {
           pick(args, [
             "type", "x", "y", "w", "h", "text", "markdown", "name", "path", "mode", "as",
             "fontSize", "align", "vAlign", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
+            "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
             "paperColor", "cmds", "symbols", "light", "parts", "camera", "groundColor",
             ...GEN_KEYS,
             "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
           ]),
         ),
+      );
+    case "product_import_csv":
+      return onCanvas(args, () =>
+        canvasAgent.productImportCsv({ path: args.path, x: args.x, y: args.y }),
       );
     case "block_update":
       return onCanvas(args, () => canvasAgent.blockUpdate(args.id, pick(args, BLOCK_FIELDS)));
@@ -1284,6 +1448,64 @@ async function dispatch(name, args) {
       return blockScreenshot(args, "picture", "画面块");
     case "scene_screenshot":
       return blockScreenshot(args, "scene", "场景块");
+    case "scene_room_shell":
+      return onCanvas(args, () =>
+        canvasAgent.sceneRoomShell(pick(args, ["id", "preset", "wallColor", "floorColor"])),
+      );
+    case "scene_light_preset":
+      return onCanvas(args, () => canvasAgent.sceneLightPreset(pick(args, ["id", "preset"])));
+    case "scene_camera_preset":
+      return onCanvas(args, () => canvasAgent.sceneCameraPreset(pick(args, ["id", "preset"])));
+    case "scene_place_product":
+      return onCanvas(args, () =>
+        canvasAgent.scenePlaceProduct(pick(args, ["scene", "product", "x", "y", "rotate"])),
+      );
+    case "scene_apply_material":
+      return onCanvas(args, () =>
+        canvasAgent.sceneApplyMaterial(pick(args, ["scene", "product", "target", "repeat", "clear"])),
+      );
+    case "plan_calibrate":
+      return onCanvas(args, () =>
+        canvasAgent.planCalibrate(pick(args, ["id", "x1", "y1", "x2", "y2", "mm"])),
+      );
+    case "plan_place_product":
+      return onCanvas(args, () =>
+        canvasAgent.planPlaceProduct(pick(args, ["plan", "product", "x", "y", "rotate"])),
+      );
+    case "plan_place_camera":
+      return onCanvas(args, () =>
+        canvasAgent.planPlaceCamera(pick(args, ["plan", "scene", "x", "y", "rotate", "preset"])),
+      );
+    case "plan_area":
+      return onCanvas(args, () => canvasAgent.planArea(pick(args, ["plan", "points"])));
+    case "plan_remove":
+      return onCanvas(args, () => canvasAgent.planRemove(pick(args, ["plan", "kind", "item"])));
+    case "page_screenshot": {
+      await ensureView("canvas");
+      const shot = await canvasAgent.pageSnapshot({ id: args.id, maxSide: args.maxSide || 1400 });
+      return {
+        __image: { data: shot.data, mimeType: "image/png" },
+        note:
+          `提案页 ${args.id}：${shot.width}×${shot.height}，整页范围 x ${shot.region.x}~${shot.region.x + shot.region.w}、` +
+          `y ${shot.region.y}~${shot.region.y + shot.region.h}`,
+      };
+    }
+    case "client_web_export":
+      return onCanvas(args, () => canvasAgent.clientWebExport(args.dir, args.name));
+    case "client_pdf_export":
+      return onCanvas(args, () => canvasAgent.clientPdfExport(args.dir, args.name));
+    case "proposal_template":
+      return onCanvas(args, () => canvasAgent.proposalTemplate(pick(args, ["title", "x", "y"])));
+    case "page_duplicate":
+      return onCanvas(args, () => canvasAgent.pageDuplicate({ id: args.id }));
+    case "model_list": {
+      const models = await invoke("model_library_list");
+      return { models };
+    }
+    case "model_import": {
+      const file = await invoke("model_library_import", { path: args.path || null });
+      return file ? { imported: file } : { imported: null };
+    }
     case "gen_models":
       return genModelsTool();
     case "gen_models_set":

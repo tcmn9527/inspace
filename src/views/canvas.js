@@ -18,7 +18,7 @@ import { confirmDialog, choiceDialog, promptDialog, progressDialog, CLOSE_X_SVG 
 import { createMarkdownEditor } from "./markdown-editor.js";
 import { openMenu, closeMenu, isMenuOpen } from "./menu.js";
 import { renderMarkdown } from "./markdown.js";
-import { disposeScene, setSceneCameraScale } from "./scene3d.js";
+import { disposeScene, setSceneCameraScale, setSceneAssetProvider, contentBox, sceneCameraState } from "./scene3d.js";
 import {
   dropGenRun,
   genBusyId,
@@ -62,6 +62,19 @@ import {
   NOTE_DEFAULT_WIDTH,
   NOTE_MIN_HEIGHT,
   NOTE_MIN_WIDTH,
+  PAGE_RATIOS,
+  PLAN_DEFAULT_HEIGHT,
+  PLAN_DEFAULT_WIDTH,
+  PLAN_MIN_HEIGHT,
+  PLAN_MIN_WIDTH,
+  PRODUCT_DEFAULT_HEIGHT,
+  PRODUCT_DEFAULT_WIDTH,
+  PRODUCT_MIN_HEIGHT,
+  PRODUCT_MIN_WIDTH,
+  QUOTE_DEFAULT_HEIGHT,
+  QUOTE_DEFAULT_WIDTH,
+  QUOTE_MIN_HEIGHT,
+  QUOTE_MIN_WIDTH,
   PICTURE_DEFAULT_HEIGHT,
   PICTURE_DEFAULT_WIDTH,
   PICTURE_ERASER_TOLERANCE,
@@ -97,6 +110,10 @@ import {
   makeLine,
   makeNote,
   makePicture,
+  makePlan,
+  makePage,
+  makeProduct,
+  makeQuote,
   makeScene,
   makeText,
   makeVideo,
@@ -113,6 +130,7 @@ import {
   pictureCmdHit,
   pictureImageSrc,
   pictureLayerCensus,
+  planPixelsPerMm,
   pictureTopLayers,
   pinConnectorSides,
   pinEbookPage,
@@ -120,6 +138,7 @@ import {
   releaseEbookPage,
   renderMissing,
   renderPictureCmd,
+  refreshQuoteCard,
   routeConnectorPreview,
   setPictureMedia,
   snapGenSize,
@@ -219,6 +238,11 @@ let imageCache = new Map();
 /* 画面块里垫的那张位图，渲染层只认 src，要能显示的地址得回来这张表拿。
    切画布时 imageCache 整个换掉，所以塞的是一个现查的函数、不是那张表本身。 */
 setPictureMedia((src) => imageCache.get(src) || "");
+/* 场景里贴的材质图也按当前画布取地址：换画布后同一个 images/xxx 不会串到上一个画布 */
+setSceneAssetProvider(async (src) => {
+  if (!current) throw new Error("没有打开的画布");
+  return store.imageUrl(current.meta.id, src, false);
+});
 let audioCache = new Map();
 /* 视频只缓存 asset 地址（一串字符），不缓存任何字节 */
 let videoCache = new Map();
@@ -337,6 +361,13 @@ function openExportMenu() {
       { label: "导出为图片…", onClick: () => void openImageExportDialog() },
       { label: "导出为 PDF", onClick: () => void runExport("pdf") },
       { label: "导出为网页", onClick: () => void runExport("html") },
+      {
+        label: "客户版（按页）",
+        children: [
+          { label: "导出 PDF…", onClick: () => void runClientPdf() },
+          { label: "导出网页（3D 可转）…", onClick: () => void runClientWeb() },
+        ],
+      },
       { label: "导出公众号文章", onClick: () => void runExport("wechat") },
       { label: "导出今日头条文章", onClick: () => void runExport("toutiao") },
     ],
@@ -915,6 +946,10 @@ async function loadImages() {
   const wanted = new Map();
   for (const item of current.items) {
     if (item.type === "image" && item.src) wanted.set(item.src, Boolean(item.linked));
+    /* 产品卡的图也是 images/ 里的副本，和图片块共用一张缓存表 */
+    else if (item.type === "product" && item.src) wanted.set(item.src, false);
+    /* 户型图同样是画布 images/ 里的副本 */
+    else if (item.type === "plan" && item.src) wanted.set(item.src, false);
     /* 生图面板最近出的那张也是 images/ 里的真文件，同一张表里取地址 */
     else if (item.type === "gen" && item.src) wanted.set(item.src, false);
     else if (item.type === "picture") {
@@ -1497,7 +1532,7 @@ function applyCamera() {
    拖动和缩放每一帧都要把整棵树重新画一遍，卡得没法操作。
    只裁普通块；场景/生图/音视频自带运行时，显示/隐藏可能把它们的上下文弄坏，不碰。 */
 const CULL_MARGIN_PX = 480;
-const CULL_TYPES = new Set(["text", "image", "rect", "ellipse", "line", "arrow", "note", "picture"]);
+const CULL_TYPES = new Set(["text", "image", "rect", "ellipse", "line", "arrow", "note", "picture", "product", "quote", "plan", "page"]);
 let cullingSuspended = 0;
 let cullFrame = 0;
 
@@ -1733,7 +1768,7 @@ function addItemElement(item) {
   if (item.type !== "connector" && !item.seq) item.seq = nextSeq();
   if (!Number.isFinite(item.z)) item.z = nextLayerZ();
   const mediaSrc =
-    item.type === "image"
+    item.type === "image" || item.type === "product" || item.type === "plan"
       ? imageCache.get(item.src)
       : item.type === "audio"
         ? audioCache.get(item.src)
@@ -1837,6 +1872,13 @@ function addItemElement(item) {
   if (item.type === "note") hydrateNoteImages(item, el);
   if (item.type === "picture") attachPictureTools(el, item);
   if (item.type === "gen") attachGenPanel(el, item);
+  if (item.type === "product") attachProductCard(el, item);
+  if (item.type === "quote") {
+    attachQuoteCard(el, item);
+    refreshQuoteCard(el, item, productItems());
+  }
+  if (item.type === "plan") attachPlanBlock(el, item);
+  if (item.type === "scene") attachSceneControls(el, item);
   scheduleCulling();
   return el;
 }
@@ -4010,6 +4052,106 @@ function itemMenuEntries(item, x, y, depth = 0) {
       label: "背景",
       children: [colorEntry(item, "fillColor")],
     });
+  } else if (item.type === "product") {
+    entries.push({ label: "更换图片…", onClick: () => void changeProductImage(item.id) });
+    entries.push({ label: "设置 3D 模型…", onClick: () => void pickProductModel(item) });
+    const scenes = current ? current.items.filter((one) => one.type === "scene") : [];
+    entries.push({
+      label: "放进 3D 场景",
+      children: scenes.length
+        ? scenes.map((scene) => ({
+            label: `场景 #${scene.seq}`,
+            onClick: () => void placeProductInSceneFlow(item, scene),
+          }))
+        : [{ label: "新建场景并放入", onClick: () => newSceneForProduct(item) }],
+    });
+    const plans = current ? current.items.filter((one) => one.type === "plan") : [];
+    entries.push({
+      label: "放到户型图",
+      children: plans.length
+        ? plans.map((plan) => ({
+            label: `#${plan.seq} 户型图`,
+            onClick: () => void placeProductOnPlanFlow(item, plan),
+          }))
+        : [{ label: "还没有户型图", disabled: true }],
+    });
+    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
+    entries.push({
+      label: "背景",
+      children: [colorEntry(item, "fillColor")],
+    });
+  } else if (item.type === "quote") {
+    entries.push({
+      label: "导出清单",
+      children: [
+        { label: "Excel 表格（.xlsx）", onClick: () => void exportQuote(item, "xlsx").catch(showError) },
+        { label: "CSV 表格（.csv）", onClick: () => void exportQuote(item, "csv").catch(showError) },
+      ],
+    });
+    entries.push({ label: "从 CSV 导入产品…", onClick: () => void importCsvFromQuote(item) });
+    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
+    entries.push({
+      label: "背景",
+      children: [colorEntry(item, "fillColor")],
+    });
+  } else if (item.type === "plan") {
+    entries.push({
+      label: planCalibration?.itemId === item.id ? "取消定标" : "标定比例…",
+      onClick: () => {
+        if (planCalibration?.itemId === item.id) cancelPlanCalibration();
+        else startPlanCalibration(item);
+      },
+    });
+    if (item.calibration) {
+      entries.push({
+        label: "清除定标",
+        onClick: () => {
+          item.calibration = null;
+          const el = itemEls.get(item.id);
+          if (el) syncItemElement(el, item);
+          scheduleItemsSave();
+        },
+      });
+    }
+    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
+    entries.push({
+      label: "背景",
+      children: [colorEntry(item, "fillColor")],
+    });
+  } else if (item.type === "page") {
+    entries.push({ label: "重命名页…", onClick: () => renamePageFlow(item) });
+    entries.push({
+      label: "页面比例",
+      children: Object.entries(PAGE_RATIOS).map(([value, preset]) => ({
+        label: `${preset.label}${item.ratio === value ? " ✓" : ""}`,
+        onClick: () => setPageRatio(item, value),
+      })),
+    });
+    entries.push({ label: "设为第几页…", onClick: () => setPageOrderFlow(item) });
+  } else if (item.type === "scene") {
+    entries.push({
+      label: "重置视角",
+      onClick: () => {
+        item.camera = null;
+        const el = itemEls.get(item.id);
+        if (el) syncItemElement(el, item);
+        scheduleItemsSave();
+      },
+    });
+    entries.push({
+      label: "视角",
+      children: [
+        ["auto", "自动"],
+        ["front", "正面"],
+        ["left", "左角"],
+        ["right", "右角"],
+        ["top", "俯视"],
+      ].map(([value, label]) => ({
+        label,
+        onClick: () => setSceneCameraPreset(item, value),
+      })),
+    });
+    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
   }
   /* 连线不复制：它两头挂着块，粘出去无处可接。
      复制的语义：正文区有文字选区 → 复制纯文字；否则复制整块（面板） */
@@ -4033,6 +4175,12 @@ function itemMenuEntries(item, x, y, depth = 0) {
   /* 属性：笔记报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行 */
   if (PROP_KIND[item.type]) {
     entries.push({ label: "属性", onClick: () => openItemProps(item) });
+  }
+  if (item.type !== "connector") {
+    entries.push({
+      label: item.internal ? "客户版：隐藏中 ✓" : "客户版隐藏",
+      onClick: () => toggleClientVisibility(item),
+    });
   }
   if (entries.length) entries.push("-");
   /* 锁定贴着删除放，都在分隔线下面 */
@@ -4325,6 +4473,17 @@ function deleteItems(ids) {
       const { src } = item;
       if (!srcInUse(src)) void store.deleteCanvasImage(canvasId, src, false).catch(() => {});
     }
+    /* 产品卡的产品图也是拷贝进画布的那份，跟着块一起回收 */
+    if (item.type === "product" && item.src && !srcInUse(item.src)) {
+      void store.deleteCanvasImage(canvasId, item.src, false).catch(() => {});
+      imageCache.delete(item.src);
+    }
+    /* 户型图同理 */
+    if (item.type === "plan" && item.src && !srcInUse(item.src)) {
+      void store.deleteCanvasImage(canvasId, item.src, false).catch(() => {});
+      imageCache.delete(item.src);
+    }
+    if (planCalibration?.itemId === item.id) cancelPlanCalibration();
     if (item.type === "audio" && item.src && !item.linked) {
       const { src } = item;
       if (!usedBy("audio", src)) void store.deleteCanvasAudio(canvasId, src, false).catch(() => {});
@@ -4390,6 +4549,7 @@ function deleteItems(ids) {
   }
   for (const removeId of doomed) selectedIds.delete(removeId);
   updateSelection();
+  refreshQuotes();
   scheduleItemsSave();
 }
 
@@ -6371,6 +6531,40 @@ async function landBlock(item, fromId, sourceId) {
     return true;
   }
 
+  if (item.type === "product" && item.src) {
+    /* 产品图跟着卡走一份自己的副本，删哪一块都不该动到另一张卡的图 */
+    const rel = await store.duplicatePictureImage(fromId, item.src, false, canvasId).catch(() => "");
+    if (rel) {
+      item.src = rel;
+      try {
+        imageCache.set(rel, await store.imageUrl(canvasId, rel, false));
+      } catch {
+        imageCache.set(rel, null);
+      }
+    } else {
+      item.src = "";
+      showError("产品图没拷过来（原图已经不在了），这张卡先只带字段");
+    }
+    return true;
+  }
+
+  if (item.type === "plan" && item.src) {
+    /* 户型图也跟着块独立拷一份 */
+    const rel = await store.duplicatePictureImage(fromId, item.src, false, canvasId).catch(() => "");
+    if (rel) {
+      item.src = rel;
+      try {
+        imageCache.set(rel, await store.imageUrl(canvasId, rel, false));
+      } catch {
+        imageCache.set(rel, null);
+      }
+    } else {
+      item.src = "";
+      showError("户型图没拷过来（原图已经不在了），脚印和定标保留");
+    }
+    return true;
+  }
+
   if (!MEDIA_TYPES.has(item.type) || !item.src) return true;
   const copied = await store.duplicateMedia(fromId, sourceId, canvasId).catch(showError);
   if (!copied?.rel) return false;
@@ -6734,6 +6928,447 @@ async function addImageBlock(path, point, mode) {
   const at = point || insertPoint(fit.w, fit.h);
   imageCache.set(src, url);
   return placeBlock(makeImage(at.x, at.y, fit.w, fit.h, src, linked));
+}
+
+/* ---------- 产品 / 材料卡与清单 ---------- */
+
+function productItems() {
+  return current ? current.items.filter((item) => item.type === "product") : [];
+}
+
+/* 产品一改，画布上的清单整块重画：清单里的数字永远按产品卡现算 */
+function refreshQuotes() {
+  if (!current) return;
+  const products = productItems();
+  for (const item of current.items) {
+    if (item.type !== "quote") continue;
+    const el = itemEls.get(item.id);
+    if (el) refreshQuoteCard(el, item, products);
+  }
+}
+
+/* 一格就地编辑：Enter / 失焦提交，Esc 放弃。提交后由调用方重画 */
+function inlineEditField(fieldEl, value, onCommit, options = {}) {
+  if (!fieldEl) return;
+  const input = document.createElement("input");
+  input.className = options.className || "canvas-product-edit";
+  if (options.field) input.dataset.field = options.field;
+  input.type = "text";
+  if (options.numeric) input.inputMode = "decimal";
+  input.spellcheck = false;
+  input.value = value;
+  fieldEl.textContent = "";
+  fieldEl.append(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  let cancelled = false;
+  const finish = (commit) => {
+    if (settled) return;
+    settled = true;
+    if (commit && !cancelled) onCommit(input.value.trim());
+    input.remove();
+    options.onSettled?.();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      input.blur();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelled = true;
+      input.blur();
+    }
+  });
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("pointerdown", (event) => event.stopPropagation());
+}
+
+function attachProductCard(el, item) {
+  const card = el.querySelector(".canvas-product-card");
+  if (!card) return;
+  card.addEventListener("dblclick", (event) => {
+    const fieldEl = event.target.closest("[data-field]");
+    if (!fieldEl || fieldEl.closest(".canvas-product-edit")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (item.locked) return;
+    startProductFieldEdit(item.id, fieldEl.dataset.field, fieldEl);
+  });
+  /* 双击图片直接换图，和右键「更换图片…」同一个入口 */
+  el.querySelector(".canvas-product-media")?.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (item.locked) return;
+    void changeProductImage(item.id);
+  });
+}
+
+function startProductFieldEdit(itemId, field, fieldEl) {
+  const item = findItem(itemId);
+  if (!item || item.locked || !["name", "brand", "sku", "spec", "price", "qty"].includes(field)) return;
+  const value =
+    field === "price" ? String(item.price) : field === "qty" ? String(item.qty) : String(item[field] ?? "");
+  const numeric = field === "price" || field === "qty";
+  inlineEditField(
+    fieldEl,
+    value,
+    (raw) => {
+      let next = raw;
+      if (field === "price") {
+        const amount = Number(raw.replace(/[¥￥,\s元]/g, ""));
+        next = Number.isFinite(amount) && amount >= 0 ? amount : item.price;
+      } else if (field === "qty") {
+        const count = Math.trunc(Number(raw.replace(/[×xX\s]/g, "")));
+        next = Number.isFinite(count) && count >= 1 ? count : item.qty;
+      } else if (field === "name") {
+        next = raw || item.name;
+      }
+      if (next !== item[field]) {
+        item[field] = next;
+        scheduleItemsSave();
+        refreshQuotes();
+      }
+    },
+    {
+      field,
+      numeric,
+      onSettled: () => {
+        const el = itemEls.get(item.id);
+        if (el) syncItemElement(el, item);
+      },
+    },
+  );
+}
+
+/* 场景块：画面里拖是转视角、滚轮推拉；块本身靠上沿那颗「场景」把手拖 */
+function attachSceneControls(el, item) {
+  const card = el.querySelector(".canvas-scene-card");
+  if (!card) return;
+  let frame = 0;
+  const renderSoon = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const target = itemEls.get(item.id);
+      if (target) syncItemElement(target, item);
+    });
+  };
+  card.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || item.locked) return;
+    event.preventDefault();
+    event.stopPropagation();
+    select(item.id);
+    const base = sceneCameraState(item);
+    const drag = { x: event.clientX, y: event.clientY, azim: base.azim, elev: base.elev };
+    card.classList.add("is-orbiting");
+    const move = (e) => {
+      const next = sceneCameraState(item);
+      item.camera = normalizeSceneCamera({
+        ...next,
+        azim: drag.azim - (e.clientX - drag.x) * 0.35,
+        elev: Math.max(2, Math.min(88, drag.elev + (e.clientY - drag.y) * 0.25)),
+      });
+      renderSoon();
+    };
+    const up = () => {
+      card.classList.remove("is-orbiting");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      scheduleItemsSave();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  });
+  card.addEventListener(
+    "wheel",
+    (event) => {
+      if (item.locked) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const base = sceneCameraState(item);
+      item.camera = normalizeSceneCamera({
+        ...base,
+        dist: base.dist * (event.deltaY > 0 ? 1.1 : 0.9),
+      });
+      renderSoon();
+      scheduleItemsSave();
+    },
+    { passive: false },
+  );
+}
+
+function attachQuoteCard(el, item) {
+  const title = el.querySelector(".canvas-quote-title");
+  title?.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (item.locked) return;
+    inlineEditField(
+      title,
+      item.title || "家具清单",
+      (raw) => {
+        const next = raw || item.title;
+        if (next !== item.title) {
+          item.title = next;
+          scheduleItemsSave();
+        }
+      },
+      {
+        className: "canvas-quote-edit",
+        onSettled: () => {
+          const target = itemEls.get(item.id);
+          if (target) refreshQuoteCard(target, item, productItems());
+        },
+      },
+    );
+  });
+}
+
+async function changeProductImage(itemId) {
+  const item = findItem(itemId);
+  if (!item || item.locked || !current) return;
+  const canvasId = current.meta.id;
+  try {
+    const path = await store.pickCanvasImage();
+    if (!path || !current || current.meta.id !== canvasId) return;
+    const rel = await store.importCanvasImage(canvasId, path);
+    if (!current || current.meta.id !== canvasId) return;
+    const url = await store.imageUrl(canvasId, rel, false);
+    const old = item.src;
+    item.src = rel;
+    imageCache.set(rel, url);
+    const media = itemEls.get(item.id)?.querySelector(".canvas-product-media");
+    if (media) {
+      media.textContent = "";
+      const img = document.createElement("img");
+      img.className = "canvas-product-img";
+      img.src = url;
+      img.draggable = false;
+      img.alt = item.name || "";
+      media.append(img);
+    }
+    if (old && old !== rel) {
+      imageCache.delete(old);
+      if (!srcInUse(old)) void store.deleteCanvasImage(canvasId, old, false).catch(() => {});
+    }
+    scheduleItemsSave();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+/* ---- CSV：表头中英文都认，图片列相对 CSV 所在目录解析 ---- */
+
+const CSV_HEADER_ALIASES = {
+  name: ["名称", "产品名称", "家具名称", "品名", "name"],
+  brand: ["品牌", "brand"],
+  sku: ["sku", "编号", "型号", "货号", "商品编码"],
+  spec: ["规格", "尺寸", "spec"],
+  price: ["单价", "价格", "报价", "price"],
+  qty: ["数量", "件数", "qty", "quantity"],
+  source: ["来源", "链接", "网址", "source", "url"],
+  note: ["备注", "说明", "note"],
+  image: ["图片", "图片路径", "图片文件", "image", "img"],
+  model: ["模型", "模型文件", "glb", "model"],
+};
+
+const normalizeCsvHeader = (value) => String(value || "").trim().toLowerCase().replace(/[\s_\-]/g, "");
+
+function parseCsvText(text) {
+  const source = String(text || "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (source[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (ch === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else if (ch !== "\r") {
+      cell += ch;
+    }
+  }
+  if (cell.length || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows.filter((line) => line.some((value) => String(value).trim()));
+}
+
+function csvColumnIndex(headerRow) {
+  const lookup = new Map();
+  for (const [field, aliases] of Object.entries(CSV_HEADER_ALIASES)) {
+    for (const alias of aliases) lookup.set(normalizeCsvHeader(alias), field);
+  }
+  const map = new Map();
+  headerRow.forEach((cell, index) => {
+    const field = lookup.get(normalizeCsvHeader(cell));
+    if (field && !map.has(field)) map.set(field, index);
+  });
+  return map;
+}
+
+const csvAmount = (value) => {
+  const amount = Number(String(value || "").replace(/[¥￥,\s元]/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+/* 图片列写相对路径时按 CSV 所在目录算；写绝对路径就照用 */
+function resolveCsvImagePath(csvPath, value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^[a-zA-Z]:[\\/]/.test(raw) || raw.startsWith("\\\\") || raw.startsWith("/")) return raw;
+  const cut = Math.max(csvPath.lastIndexOf("\\"), csvPath.lastIndexOf("/"));
+  const dir = cut > 0 ? csvPath.slice(0, cut) : "";
+  return dir ? `${dir}\\${raw.replace(/\//g, "\\")}` : raw;
+}
+
+async function importProductsFromCsv(path, origin) {
+  if (!active || !current) throw new Error("先打开一个画布");
+  const canvasId = current.meta.id;
+  const text = await store.readTextFile(path);
+  if (!current || current.meta.id !== canvasId) throw new Error("读 CSV 的时候画布被切走了");
+  const rows = parseCsvText(text);
+  if (!rows.length) throw new Error("这份 CSV 是空的");
+  const columnsMap = csvColumnIndex(rows[0]);
+  if (!columnsMap.has("name")) {
+    throw new Error("CSV 里找不到「名称」列（也认 name / 产品名称 / 品名）");
+  }
+  const start = origin || insertPoint(PRODUCT_DEFAULT_WIDTH, PRODUCT_DEFAULT_HEIGHT);
+  const gap = 20;
+  const columns = 3;
+  let created = 0;
+  let skipped = 0;
+  let imagesMissing = 0;
+  let first = null;
+  for (const row of rows.slice(1)) {
+    const get = (field) => (columnsMap.has(field) ? String(row[columnsMap.get(field)] ?? "").trim() : "");
+    const name = get("name");
+    if (!name) {
+      skipped += 1;
+      continue;
+    }
+    const product = makeProduct(0, 0, name);
+    product.brand = get("brand");
+    product.sku = get("sku");
+    product.spec = get("spec");
+    product.price = Math.max(0, csvAmount(get("price")));
+    const qty = Math.trunc(csvAmount(get("qty")));
+    product.qty = qty >= 1 ? qty : 1;
+    product.source = get("source");
+    product.note = get("note");
+    product.model = get("model");
+    const imagePath = resolveCsvImagePath(path, get("image"));
+    if (imagePath) {
+      try {
+        const rel = await store.importCanvasImage(canvasId, imagePath);
+        if (!current || current.meta.id !== canvasId) throw new Error("导入时画布被切走了");
+        product.src = rel;
+        try {
+          imageCache.set(rel, await store.imageUrl(canvasId, rel, false));
+        } catch {
+          imageCache.set(rel, null);
+        }
+      } catch {
+        imagesMissing += 1;
+      }
+    }
+    product.x = start.x + (created % columns) * (PRODUCT_DEFAULT_WIDTH + gap);
+    product.y = start.y + Math.floor(created / columns) * (PRODUCT_DEFAULT_HEIGHT + gap);
+    if (!placeBlock(product)) throw new Error("产品卡没能落进画布");
+    first = first || product;
+    created += 1;
+  }
+  refreshQuotes();
+  scheduleItemsSave();
+  if (first) {
+    select(first.id);
+    revealItem(first);
+  }
+  return { created, skipped, imagesMissing };
+}
+
+async function importCsvFromQuote(quote) {
+  if (!current) return;
+  const canvasId = current.meta.id;
+  try {
+    const path = await store.pickCsv();
+    if (!path || !current || current.meta.id !== canvasId) return;
+    const result = await importProductsFromCsv(path, { x: quote.x, y: quote.y + quote.h + 40 });
+    const parts = [`导入 ${result.created} 项`];
+    if (result.skipped) parts.push(`跳过 ${result.skipped} 行`);
+    if (result.imagesMissing) parts.push(`${result.imagesMissing} 张图没找到`);
+    showToast(parts.join("，"));
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function exportQuote(item, format) {
+  const products = productItems();
+  if (!products.length) throw new Error("清单里还没有产品卡");
+  const rows = [["名称", "品牌", "SKU", "规格", "单价", "数量", "小计"]];
+  let total = 0;
+  for (const product of products) {
+    const line = product.price * product.qty;
+    total += line;
+    rows.push([product.name, product.brand, product.sku, product.spec, product.price, product.qty, line]);
+  }
+  rows.push(["合计", "", "", "", "", "", total]);
+  const name = item.title || "清单";
+  if (format === "csv") {
+    const text = `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
+    const saved = await store.exportSave(name, "csv", bytesToBase64(new TextEncoder().encode(text)));
+    if (saved) showToast("清单已导出");
+    return;
+  }
+  const writer = window.XLSX;
+  if (!writer) throw new Error("表格组件没加载起来");
+  const book = writer.utils.book_new();
+  const sheet = writer.utils.aoa_to_sheet(rows);
+  sheet["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 16 }, { wch: 24 }, { wch: 10 }, { wch: 8 }, { wch: 12 }];
+  writer.utils.book_append_sheet(book, sheet, "清单");
+  const buffer = writer.write(book, { type: "array", bookType: "xlsx" });
+  const saved = await store.exportSave(name, "xlsx", bytesToBase64(new Uint8Array(buffer)));
+  if (saved) showToast("清单已导出");
 }
 
 /* 音频：播放器按需取地址，插块时不用先读文件。名字记原文件名，播放器上显示。 */
@@ -7111,6 +7746,8 @@ function placeBlock(item) {
   if (!current) return null;
   current.items.push(item);
   addItemElement(item);
+  /* 新进来一张产品卡，清单当场重算：粘贴、复制、批量导入都走这里 */
+  if (item.type === "product") refreshQuotes();
   select(item.id);
   scheduleItemsSave();
   /* 笔记/画面/场景从建下来那一刻就有自己那份文件，内容以后只认文件 */
@@ -7222,6 +7859,14 @@ function onKeyDown(e) {
   if (!active || !current || modalOpen) return;
   /* 全屏播放时按键是给影片的：Esc 归浏览器退全屏，Delete 不能顺手把这块删了 */
   if (document.fullscreenElement) return;
+  /* 定标时键盘只认 Esc：别让 Delete、方向键把块挪走 */
+  if (planCalibration) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancelPlanCalibration();
+    }
+    return;
+  }
   const focused = document.activeElement;
   if (
     focused &&
@@ -7458,6 +8103,65 @@ function agentSummary(item) {
       borderColor: item.borderColor,
       borderWidth: item.borderWidth,
       radius: item.radius,
+    };
+  }
+  if (item.type === "product") {
+    return {
+      ...base,
+      name: item.name,
+      brand: item.brand,
+      sku: item.sku,
+      spec: item.spec,
+      price: item.price,
+      qty: item.qty,
+      source: item.source,
+      note: item.note,
+      src: item.src,
+      model: item.model,
+      dims: item.dims,
+      internal: Boolean(item.internal),
+      borderColor: item.borderColor,
+      fillColor: item.fillColor,
+      borderWidth: item.borderWidth,
+      radius: item.radius,
+    };
+  }
+  if (item.type === "quote") {
+    const products = current ? current.items.filter((one) => one.type === "product") : [];
+    return {
+      ...base,
+      title: item.title,
+      count: products.length,
+      total: products.reduce((sum, one) => sum + one.price * one.qty, 0),
+      internal: Boolean(item.internal),
+      borderColor: item.borderColor,
+      fillColor: item.fillColor,
+      borderWidth: item.borderWidth,
+      radius: item.radius,
+    };
+  }
+  if (item.type === "plan") {
+    return {
+      ...base,
+      imageW: item.imageW,
+      imageH: item.imageH,
+      calibration: item.calibration,
+      footprints: item.footprints,
+      cameras: item.cameras,
+      areas: item.areas,
+      borderColor: item.borderColor,
+      fillColor: item.fillColor,
+      borderWidth: item.borderWidth,
+      radius: item.radius,
+    };
+  }
+  if (item.type === "page") {
+    return {
+      ...base,
+      title: item.title,
+      ratio: item.ratio,
+      order: item.order,
+      internal: Boolean(item.internal),
     };
   }
   if (item.type === "gen") {
@@ -7845,6 +8549,1108 @@ function agentPlacePoint(w, h, spec) {
   return insertPoint(w, h);
 }
 
+/* 产品卡字段的统一下发口：建块和改块共用同一套取值规矩 */
+function applyProductFields(item, spec = {}) {
+  if (spec.name !== undefined) {
+    const name = String(spec.name || "").trim();
+    if (name) item.name = name;
+  }
+  if (spec.brand !== undefined) item.brand = String(spec.brand || "").trim();
+  if (spec.sku !== undefined) item.sku = String(spec.sku || "").trim();
+  if (spec.spec !== undefined) item.spec = String(spec.spec || "").trim();
+  if (spec.price !== undefined) item.price = Math.max(0, numOr(spec.price, item.price));
+  if (spec.qty !== undefined) item.qty = Math.max(1, Math.trunc(numOr(spec.qty, item.qty)));
+  if (spec.source !== undefined) item.source = String(spec.source || "").trim();
+  if (spec.note !== undefined) item.note = String(spec.note || "").trim();
+  if (spec.model !== undefined) item.model = String(spec.model || "").trim();
+  if (spec.internal !== undefined) item.internal = spec.internal === true;
+  if (spec.dims !== undefined) {
+    const dims = spec.dims && typeof spec.dims === "object" ? spec.dims : {};
+    item.dims = {
+      w: Math.max(0, numOr(dims.w, item.dims.w)),
+      d: Math.max(0, numOr(dims.d, item.dims.d)),
+      h: Math.max(0, numOr(dims.h, item.dims.h)),
+    };
+  }
+}
+
+/* ---------- 3D 房间壳 / 灯光 / 机位 ---------- */
+
+const SCENE_LIGHT_PRESETS = {
+  /* 白天：太阳高、天光足，颜色尽量保持固有色 */
+  day: { angle: 35, elev: 52, k: 0.55, lit: "#fff4e2", dark: "#dbe7f2" },
+  /* 傍晚：低角度暖光，影子里带一点蓝 */
+  warm: { angle: 210, elev: 22, k: 0.42, lit: "#ffc07a", dark: "#71809a" },
+  /* 夜里开着暖灯：太阳从屋子前方打进来，天光留得多一点，别让一面墙黑成一块 */
+  night: { angle: 150, elev: 48, k: 0.6, lit: "#ffd9b0", dark: "#5b6781" },
+};
+
+/* 房间壳的单位是厘米：客厅 6.2m × 5.2m、墙高 2.8m。
+   墙只做背面和左侧，前面敞开给相机；窗是贴在墙上的一块亮面。 */
+function roomShellParts(preset, options = {}) {
+  const specs = {
+    living: { w: 620, d: 520, rug: true, console: true },
+    bedroom: { w: 500, d: 460, rug: true, console: false },
+    dining: { w: 560, d: 470, rug: false, console: true },
+  };
+  const spec = specs[preset] || specs.living;
+  const wall = options.wallColor || "#ece7de";
+  const floor = options.floorColor || "#b98a5e";
+  const { w, d } = spec;
+  const wallH = 280;
+  const t = 12;
+  const winX = w * 0.22;
+  const winY = d / 2 - t - 1;
+  const winW = Math.min(240, w * 0.38);
+  const winH = 140;
+  const winZ = 90;
+  const frame = "#d8d2c8";
+  const parts = [
+    { op: "box", x: 0, y: 0, z: 0, w, d, h: 2, color: floor, name: "地板" },
+    { op: "box", x: 0, y: d / 2 - t / 2, z: 0, w, d: t, h: wallH, color: wall, name: "背景墙" },
+    { op: "box", x: -w / 2 + t / 2, y: 0, z: 0, w: t, d, h: wallH, color: wall, name: "侧墙" },
+    { op: "box", x: winX, y: winY, z: winZ, w: winW, d: 2, h: winH, color: "#cfe2ef", name: "窗" },
+    { op: "box", x: winX, y: winY + 1, z: winZ - 8, w: winW + 12, d: 4, h: 8, color: frame, name: "窗框" },
+    { op: "box", x: winX, y: winY + 1, z: winZ + winH, w: winW + 12, d: 4, h: 8, color: frame, name: "窗框" },
+    { op: "box", x: winX - winW / 2 - 6, y: winY + 1, z: winZ, w: 12, d: 4, h: winH, color: frame, name: "窗框" },
+    { op: "box", x: winX + winW / 2 + 6, y: winY + 1, z: winZ, w: 12, d: 4, h: winH, color: frame, name: "窗框" },
+  ];
+  if (spec.rug) {
+    parts.push({ op: "box", x: 0, y: -d * 0.06, z: 1, w: w * 0.56, d: d * 0.48, h: 1.4, color: "#c9b9a6", name: "地毯" });
+  }
+  if (spec.console) {
+    parts.push({ op: "box", x: w * 0.22, y: d / 2 - t - 22, z: 0, w: 180, d: 38, h: 46, color: "#8a6f55", name: "边柜" });
+  }
+  return parts;
+}
+
+function sceneLightOf(preset) {
+  const got = normalizeLight(SCENE_LIGHT_PRESETS[preset]);
+  if (got.why) throw new Error(got.why);
+  return got.light;
+}
+
+function agentSceneRoomShell(spec = {}) {
+  agentRequireSpace();
+  const item = agentRequireItem(spec.id);
+  if (item.type !== "scene") throw new Error("id 要传场景块");
+  const preset = ["living", "bedroom", "dining"].includes(spec.preset) ? spec.preset : "living";
+  const got = normalizeSceneParts(roomShellParts(preset, { wallColor: spec.wallColor, floorColor: spec.floorColor }));
+  if (got.dropped.length) throw new Error(got.dropped[0].why);
+  item.parts = got.parts;
+  item.light = sceneLightOf("day");
+  item.camera = null;
+  persistScene(item);
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  scheduleItemsSave();
+  return { ...agentSummary(item), preset };
+}
+
+function agentSceneLightPreset(spec = {}) {
+  const item = agentRequireItem(spec.id);
+  if (item.type !== "scene") throw new Error("id 要传场景块");
+  const preset = String(spec.preset || "");
+  if (preset === "off") item.light = null;
+  else if (SCENE_LIGHT_PRESETS[preset]) item.light = sceneLightOf(preset);
+  else throw new Error("灯光预设只有 day / warm / night / off");
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  scheduleItemsSave();
+  return agentSummary(item);
+}
+
+function setSceneCameraPreset(item, preset) {
+  if (item.type !== "scene") throw new Error("id 要传场景块");
+  if (preset === "auto") {
+    item.camera = null;
+  } else {
+    const box = contentBox(item.parts, item.light);
+    const span = Math.max(box.dx, box.dy, 1);
+    const angles = { front: [180, 16, 1.02], left: [212, 24, 0.95], right: [148, 24, 0.95], top: [180, 66, 1] };
+    const p = angles[preset];
+    if (!p) throw new Error("机位预设只有 auto / front / left / right / top");
+    item.camera = normalizeSceneCamera({
+      azim: p[0],
+      elev: p[1],
+      dist: Math.max(280, span * p[2]),
+      tx: box.cx,
+      ty: box.cy,
+      tz: Math.max(60, box.dz * 0.35),
+      fov: 45,
+    });
+  }
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  scheduleItemsSave();
+  return agentSummary(item);
+}
+
+function agentSceneCameraPreset(spec = {}) {
+  const item = agentRequireItem(spec.id);
+  return setSceneCameraPreset(item, String(spec.preset || ""));
+}
+
+/* 一张产品卡落进场景：读卡上的 model 和真实尺寸，模型自带单位由渲染器按尺寸等比缩。
+   卡片上没有模型就不放——空一块假家具比报错更难查。 */
+async function placeProductInScene(product, scene, options = {}) {
+  if (!product || product.type !== "product") throw new Error("要放进去的是一张产品卡");
+  if (!scene || scene.type !== "scene") throw new Error("要放进的是场景块");
+  if (!product.model) {
+    throw new Error("这张产品卡还没设 3D 模型：右键「设置 3D 模型…」或 block_update 写 model");
+  }
+  const models = await invoke("model_library_list").catch(() => []);
+  if (!models.some((one) => one.name === product.model)) {
+    throw new Error(`模型库里没有 ${product.model}，去设置页「3D 模型库」导入`);
+  }
+  const dims = product.dims || {};
+  const part = {
+    op: "model",
+    src: product.model,
+    x: Number.isFinite(Number(options.x)) ? Number(options.x) : 0,
+    y: Number.isFinite(Number(options.y)) ? Number(options.y) : 0,
+    z: 0,
+    rotate: Number.isFinite(Number(options.rotate)) ? Number(options.rotate) : 0,
+    w: dims.w > 0 ? dims.w / 10 : 0,
+    d: dims.d > 0 ? dims.d / 10 : 0,
+    h: dims.h > 0 ? dims.h / 10 : 0,
+    name: product.name,
+    color: "",
+  };
+  if (!part.h) part.h = 80;
+  const got = normalizeSceneParts([part]);
+  if (got.dropped.length) throw new Error(got.dropped[0].why);
+  scene.parts = [...scene.parts, got.parts[0]];
+  persistScene(scene);
+  const el = itemEls.get(scene.id);
+  if (el) syncItemElement(el, scene);
+  scheduleItemsSave();
+  return { ...agentSummary(scene), placed: product.model, partIndex: scene.parts.length - 1 };
+}
+
+async function agentScenePlaceProduct(spec = {}) {
+  agentRequireSpace();
+  const scene = agentRequireItem(spec.scene);
+  const product = agentRequireItem(spec.product);
+  return placeProductInScene(product, scene, spec);
+}
+
+/* 把产品卡的图当材质贴到场景的某个实体面上：地板、墙、柜子都行，模型件不接 */
+function agentSceneApplyMaterial(spec = {}) {
+  const item = agentRequireItem(spec.scene);
+  if (item.type !== "scene") throw new Error("scene 要传场景块");
+  const target = spec.target;
+  let part = null;
+  if (target !== undefined && target !== "" && /^\d+$/.test(String(target))) {
+    part = item.parts[Number(target)] || null;
+  } else {
+    const needle = String(target || "").trim();
+    if (needle) part = item.parts.find((one) => (one.name || "").includes(needle)) || null;
+  }
+  if (!part) {
+    throw new Error("找不到要贴的面：target 给 parts 序号或件名（地板 / 背景墙 / 侧墙 / 边柜 / 地毯）");
+  }
+  if (part.op === "model") throw new Error("模型件不能贴材质图；要换材质请直接改模型");
+  if (spec.clear === true) {
+    delete part.tex;
+    delete part.texRepeat;
+  } else {
+    const product = agentRequireItem(spec.product);
+    if (product.type !== "product") throw new Error("product 要传产品卡");
+    if (!product.src) throw new Error("这张产品卡还没有图：先给它换一张材质图");
+    part.tex = product.src;
+    const repeat = Number(spec.repeat);
+    part.texRepeat = Number.isFinite(repeat) && repeat >= 10 ? repeat : 100;
+  }
+  persistScene(item);
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  scheduleItemsSave();
+  return { ...agentSummary(item), target: part.name || String(target), tex: part.tex || "" };
+}
+
+async function placeProductInSceneFlow(product, scene) {
+  try {
+    await placeProductInScene(product, scene);
+    showToast("已放进场景");
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function newSceneForProduct(product) {
+  const scene = makeScene(product.x + product.w + 40, product.y, 720, 480);
+  placeBlock(scene);
+  persistScene(scene);
+  void placeProductInSceneFlow(product, scene);
+}
+
+/* 产品卡选模型：菜单里列模型库里的 .glb，选完只改卡上的 model 字段 */
+async function pickProductModel(item) {
+  const models = await invoke("model_library_list").catch(() => []);
+  const el = itemEls.get(item.id);
+  const r = el ? el.getBoundingClientRect() : { left: 200, top: 200 };
+  const entries = models.length
+    ? models.map((model) => ({
+        label: `${model.name}${model.name === item.model ? " ✓" : ""}`,
+        onClick: () => {
+          item.model = model.name;
+          scheduleItemsSave();
+          showToast(`模型：${model.name}`);
+        },
+      }))
+    : [{ label: "模型库还没有 .glb（去设置页导入）", disabled: true }];
+  openMenu(r.left + 24, r.top + 24, entries, { label: "3D 模型" });
+}
+
+/* ---------- 户型块 ---------- */
+
+let planCalibration = null; // { itemId, points: [{ fx, fy }] }
+
+function planCardOf(itemId) {
+  return itemEls.get(itemId)?.querySelector(".canvas-plan-card") || null;
+}
+
+function startPlanCalibration(item) {
+  const card = planCardOf(item.id);
+  if (!card) return;
+  planCalibration = { itemId: item.id, points: [] };
+  card.classList.add("is-calibrating");
+  showToast("在户型图上点这条已知长度的两个端点");
+}
+
+function cancelPlanCalibration() {
+  if (!planCalibration) return;
+  const { itemId } = planCalibration;
+  planCalibration = null;
+  planCardOf(itemId)?.classList.remove("is-calibrating");
+  const el = itemEls.get(itemId);
+  const item = findItem(itemId);
+  if (el && item) syncItemElement(el, item);
+}
+
+async function finishPlanCalibration(item, a, b) {
+  const canvasId = current?.meta.id;
+  planCardOf(item.id)?.classList.remove("is-calibrating");
+  const pixelDist = Math.hypot((b.fx - a.fx) * item.imageW, (b.fy - a.fy) * item.imageH);
+  if (!(pixelDist > 0)) {
+    const el = itemEls.get(item.id);
+    if (el) syncItemElement(el, item);
+    showToast("两个点重合了，再来一次");
+    return;
+  }
+  const answer = await promptDialog({
+    title: "标定比例",
+    label: "这两点实际多少毫米？（例如 4200）",
+    value: "",
+    okText: "定标",
+  });
+  if (!current || current.meta.id !== canvasId) return;
+  const mm = Number(String(answer || "").replace(/[,\s]/g, ""));
+  if (!(mm > 0)) {
+    const el = itemEls.get(item.id);
+    if (el) syncItemElement(el, item);
+    return;
+  }
+  item.calibration = { x1: a.fx, y1: a.fy, x2: b.fx, y2: b.fy, mm };
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  scheduleItemsSave();
+  showToast("已定标，现在可以放家具和机位了");
+}
+
+function attachPlanBlock(el, item) {
+  const card = el.querySelector(".canvas-plan-card");
+  if (!card) return;
+
+  /* 定标模式：按下两下各取一个点，再问这条线的实际长度 */
+  card.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (planCalibration?.itemId !== item.id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = card.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const fx = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+      const fy = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      planCalibration.points.push({ fx, fy });
+      const svg = card.querySelector(".canvas-plan-svg");
+      if (svg && item.imageW > 0 && item.imageH > 0) {
+        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        dot.setAttribute("class", "canvas-plan-cal-dot");
+        dot.setAttribute("cx", String(fx * item.imageW));
+        dot.setAttribute("cy", String(fy * item.imageH));
+        dot.setAttribute("r", String(Math.max(12, Math.min(item.imageW, item.imageH) / 45)));
+        svg.append(dot);
+      }
+      if (planCalibration.points.length === 1) {
+        showToast("再点另一头");
+        return;
+      }
+      const [a, b] = planCalibration.points;
+      planCalibration = null;
+      void finishPlanCalibration(item, a, b);
+    },
+    true,
+  );
+
+  /* 脚印：按住拖动位置；松手没怎么动就选中对应产品卡 */
+  card.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (planCalibration) return;
+      const footprint = event.target.closest?.(".canvas-plan-footprint");
+      if (!footprint) {
+        if (event.target.closest?.(".canvas-plan-camera")) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (item.locked) return;
+      const scale = planPixelsPerMm(item);
+      if (!(scale > 0)) return;
+      const fp = item.footprints.find((one) => one.id === footprint.getAttribute("data-footprint"));
+      if (!fp) return;
+      const rect = card.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const origin = { x: fp.x, y: fp.y };
+      let moved = false;
+      const move = (e) => {
+        const dxPx = (e.clientX - startX) * (item.imageW / rect.width);
+        const dyPx = (e.clientY - startY) * (item.imageH / rect.height);
+        fp.x = origin.x + dxPx / scale;
+        fp.y = origin.y + dyPx / scale;
+        if (Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) > 2) moved = true;
+        footprint.setAttribute(
+          "transform",
+          `translate(${(fp.x * scale).toFixed(1)} ${(fp.y * scale).toFixed(1)}) rotate(${fp.rotate.toFixed(1)})`,
+        );
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        if (moved) {
+          const target = itemEls.get(item.id);
+          if (target) syncItemElement(target, item);
+          scheduleItemsSave();
+        } else {
+          select(fp.product);
+        }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    },
+    true,
+  );
+
+  /* 点机位：把链接的场景切到对应机位并跟过去 */
+  card.addEventListener("click", (event) => {
+    if (planCalibration) return;
+    const camera = event.target.closest?.(".canvas-plan-camera");
+    if (!camera) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const marker = item.cameras.find((one) => one.id === camera.getAttribute("data-camera"));
+    if (!marker) return;
+    const scene = findItem(marker.scene);
+    if (!scene || scene.type !== "scene") {
+      showError("这个机位链接的场景块不在了");
+      return;
+    }
+    setSceneCameraPreset(scene, marker.preset);
+    select(scene.id);
+    revealItem(scene);
+  });
+}
+
+function planDefaultPoint(plan) {
+  const scale = planPixelsPerMm(plan);
+  if (!(scale > 0)) return { x: 0, y: 0 };
+  return { x: plan.imageW / scale / 2, y: plan.imageH / scale / 2 };
+}
+
+function planAreaOf(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2 / 1_000_000;
+}
+
+function planPlaceProduct(product, plan, options = {}) {
+  if (!plan || plan.type !== "plan") throw new Error("要放进的是一块户型图");
+  if (!plan.calibration) {
+    throw new Error("这张户型图还没定标：右键「标定比例…」，或先 plan_calibrate");
+  }
+  const dims = product.dims || {};
+  const w = dims.w > 0 ? dims.w : 600;
+  const d = dims.d > 0 ? dims.d : 600;
+  const center = planDefaultPoint(plan);
+  const footprint = {
+    id: newId(),
+    product: product.id,
+    name: product.name || "产品",
+    x: Number.isFinite(Number(options.x)) ? Number(options.x) : center.x,
+    y: Number.isFinite(Number(options.y)) ? Number(options.y) : center.y,
+    w,
+    d,
+    rotate: Number.isFinite(Number(options.rotate)) ? ((Number(options.rotate) % 360) + 360) % 360 : 0,
+  };
+  plan.footprints.push(footprint);
+  const el = itemEls.get(plan.id);
+  if (el) syncItemElement(el, plan);
+  scheduleItemsSave();
+  return { ...agentSummary(plan), footprint };
+}
+
+function planPlaceCamera(plan, scene, options = {}) {
+  if (!plan || plan.type !== "plan") throw new Error("要放机位的是一块户型图");
+  if (!plan.calibration) throw new Error("这张户型图还没定标，放不了机位");
+  const center = planDefaultPoint(plan);
+  const marker = {
+    id: newId(),
+    scene: scene.id,
+    x: Number.isFinite(Number(options.x)) ? Number(options.x) : center.x,
+    y: Number.isFinite(Number(options.y)) ? Number(options.y) : center.y,
+    rotate: Number.isFinite(Number(options.rotate)) ? ((Number(options.rotate) % 360) + 360) % 360 : 0,
+    preset: ["front", "left", "right", "top", "auto"].includes(options.preset) ? options.preset : "front",
+  };
+  plan.cameras.push(marker);
+  const el = itemEls.get(plan.id);
+  if (el) syncItemElement(el, plan);
+  scheduleItemsSave();
+  return { ...agentSummary(plan), camera: marker };
+}
+
+function planAddArea(plan, points) {
+  if (!plan || plan.type !== "plan") throw new Error("要量面积的是一块户型图");
+  if (!plan.calibration) throw new Error("这张户型图还没定标，量不了面积");
+  const pts = [];
+  for (const one of Array.isArray(points) ? points : []) {
+    const x = Number(one?.x);
+    const y = Number(one?.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y });
+  }
+  if (pts.length < 3) throw new Error("面积至少给 3 个点（毫米坐标）");
+  const area = { id: newId(), points: pts };
+  plan.areas.push(area);
+  const el = itemEls.get(plan.id);
+  if (el) syncItemElement(el, plan);
+  scheduleItemsSave();
+  return { ...agentSummary(plan), area, squareMeters: planAreaOf(pts) };
+}
+
+function planRemove(plan, kind, itemId) {
+  const list = kind === "footprint" ? plan.footprints : kind === "camera" ? plan.cameras : kind === "area" ? plan.areas : null;
+  if (!list) throw new Error("kind 只有 footprint / camera / area");
+  const index = list.findIndex((one) => one.id === itemId);
+  if (index < 0) throw new Error("没找到这一项");
+  const [removed] = list.splice(index, 1);
+  const el = itemEls.get(plan.id);
+  if (el) syncItemElement(el, plan);
+  scheduleItemsSave();
+  return { ...agentSummary(plan), removed };
+}
+
+async function placeProductOnPlanFlow(product, plan) {
+  try {
+    if (!active || !current) return;
+    planPlaceProduct(product, plan);
+    showToast("已放到户型图中央，拖动脚印调整位置");
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function agentPlanCalibrate(spec = {}) {
+  const item = agentRequireItem(spec.id);
+  if (item.type !== "plan") throw new Error("id 要传户型块");
+  const nums = ["x1", "y1", "x2", "y2", "mm"].map((key) => Number(spec[key]));
+  if (!nums.every(Number.isFinite) || !(nums[4] > 0)) {
+    throw new Error("要给 x1 / y1 / x2 / y2（0~1 的图片比例）和 mm（这段实际毫米数）");
+  }
+  const [x1, y1, x2, y2, mm] = nums;
+  if (Math.hypot(x2 - x1, y2 - y1) < 1e-4) throw new Error("两个点重合了");
+  const clamp01 = (v) => Math.min(1, Math.max(0, v));
+  item.calibration = { x1: clamp01(x1), y1: clamp01(y1), x2: clamp01(x2), y2: clamp01(y2), mm };
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  scheduleItemsSave();
+  return agentSummary(item);
+}
+
+function agentPlanPlaceProduct(spec = {}) {
+  const plan = agentRequireItem(spec.plan);
+  const product = agentRequireItem(spec.product);
+  if (product.type !== "product") throw new Error("product 要传产品卡");
+  return planPlaceProduct(product, plan, { x: spec.x, y: spec.y, rotate: spec.rotate });
+}
+
+function agentPlanPlaceCamera(spec = {}) {
+  const plan = agentRequireItem(spec.plan);
+  const scene = agentRequireItem(spec.scene);
+  if (scene.type !== "scene") throw new Error("scene 要传场景块");
+  return planPlaceCamera(plan, scene, { x: spec.x, y: spec.y, rotate: spec.rotate, preset: spec.preset });
+}
+
+function agentPlanArea(spec = {}) {
+  const plan = agentRequireItem(spec.plan);
+  return planAddArea(plan, spec.points);
+}
+
+function agentPlanRemove(spec = {}) {
+  const plan = agentRequireItem(spec.plan);
+  return planRemove(plan, String(spec.kind || ""), String(spec.item || ""));
+}
+
+/* ---------- 提案页与客户版交付 ---------- */
+
+function pageItems() {
+  if (!current) return [];
+  return current.items
+    .filter((item) => item.type === "page")
+    .sort((a, b) => (a.order || a.seq) - (b.order || b.seq) || a.y - b.y || a.x - b.x);
+}
+
+function renamePageFlow(item) {
+  void (async () => {
+    const name = await promptDialog({ title: "重命名页", label: "页名", value: item.title, okText: "重命名" });
+    if (!name || name === item.title) return;
+    item.title = name;
+    const el = itemEls.get(item.id);
+    if (el) syncItemElement(el, item);
+    scheduleItemsSave();
+  })();
+}
+
+function setPageRatio(item, ratio) {
+  if (!PAGE_RATIOS[ratio] || item.ratio === ratio) return;
+  item.ratio = ratio;
+  item.w = PAGE_RATIOS[ratio].w;
+  item.h = PAGE_RATIOS[ratio].h;
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  updateSelection();
+  scheduleItemsSave();
+}
+
+function setPageOrderFlow(item) {
+  void (async () => {
+    const answer = await promptDialog({
+      title: "页序",
+      label: "这是第几页？",
+      value: String(item.order || 1),
+      okText: "好",
+    });
+    const order = Math.trunc(Number(String(answer || "").replace(/[^\d]/g, "")));
+    if (!(order >= 1) || order === item.order) return;
+    item.order = order;
+    const el = itemEls.get(item.id);
+    if (el) syncItemElement(el, item);
+    scheduleItemsSave();
+  })();
+}
+
+function toggleClientVisibility(item) {
+  item.internal = !item.internal;
+  scheduleItemsSave();
+  showToast(item.internal ? "这块不会出现在客户版里" : "这块会出现在客户版里");
+}
+
+/* 客户版要藏的东西：内部块，以及挂在内部块上的连线 */
+function clientHiddenIds() {
+  if (!current) return { ids: [], connectors: [] };
+  const ids = current.items
+    .filter((item) => item.internal && item.type !== "connector" && item.type !== "page")
+    .map((item) => item.id);
+  const set = new Set(ids);
+  const connectors = current.items
+    .filter((item) => item.type === "connector")
+    .filter((item) => set.has(item.from?.item) || set.has(item.to?.item))
+    .map((item) => item.id);
+  return { ids, connectors };
+}
+
+function hideConnectorsTemporarily(ids) {
+  const touched = ids.map((id) => itemEls.get(id)).filter(Boolean);
+  const previous = touched.map((el) => el.style.display);
+  for (const el of touched) el.style.display = "none";
+  return () => {
+    touched.forEach((el, index) => {
+      el.style.display = previous[index];
+    });
+  };
+}
+
+/* 按页导出客户版 PDF：每页一张高清图，内部块和别的页都摘掉 */
+async function runClientPdf() {
+  if (!current || exporting) return;
+  const allPages = pageItems();
+  const pages = allPages.filter((page) => !page.internal);
+  if (!pages.length) {
+    showToast("还没有提案页：先建几块 page（agent 可以 block_create type:\"page\"）");
+    return;
+  }
+  exporting = true;
+  ui.exportBtn?.classList.add("is-busy");
+  if (ui.exportBtn) ui.exportBtn.disabled = true;
+  showToast("正在按页生成客户版 PDF…");
+  const canvasId = current.meta.id;
+  const name = current.meta.name;
+  const hidden = clientHiddenIds();
+  const pageIds = allPages.map((page) => page.id);
+  try {
+    const payload = pages.map((page) => ({
+      box: { x: page.x, y: page.y, w: page.w, h: page.h },
+      pageId: page.id,
+      hideIds: [...hidden.ids, ...pageIds.filter((id) => id !== page.id)],
+    }));
+    const restoreConnectors = hideConnectorsTemporarily(hidden.connectors);
+    let result;
+    try {
+      result = await exporter.exportPagesPdf(payload, { quality: "high" });
+    } finally {
+      restoreConnectors();
+    }
+    if (!current || current.meta.id !== canvasId) return;
+    const saved = await store.exportSave(`${name} 客户版`, "pdf", result.data);
+    if (saved) showToast(`已导出 ${result.pages} 页 PDF`);
+  } catch (error) {
+    showError(error);
+  } finally {
+    exporting = false;
+    ui.exportBtn?.classList.remove("is-busy");
+    if (ui.exportBtn) ui.exportBtn.disabled = false;
+  }
+}
+
+async function fetchTextAsset(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`读不到 ${url}（${res.status}）`);
+  return res.text();
+}
+
+async function fetchDataUrl(url, mime = "") {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`读不到素材（${res.status}）`);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      if (!mime) {
+        resolve(text);
+        return;
+      }
+      const comma = text.indexOf(",");
+      resolve(`data:${mime};base64,${comma >= 0 ? text.slice(comma + 1) : ""}`);
+    };
+    reader.onerror = () => reject(reader.error || new Error("素材读取失败"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function exportHtmlEscape(text) {
+  return String(text).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+}
+
+function exportJsonForHtml(value) {
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+
+function exportRootName(name) {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}`;
+  const safe = String(name || "提案").replace(/[\\/:*?"<>|]/g, " ").trim() || "提案";
+  return `${safe} 客户版 ${stamp}`;
+}
+
+function imageMimeOf(src) {
+  const ext = String(src).split(".").pop().toLowerCase();
+  return (
+    {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      webp: "image/webp",
+      gif: "image/gif",
+      svg: "image/svg+xml",
+    }[ext] || "image/png"
+  );
+}
+
+/* 页面上的场景块：位置换算成页内百分比，模型和材质图都塞成 data URL，
+   客户拿到的文件夹不依赖模型库、不依赖网络 */
+async function buildClientScenes(pages, canvasId) {
+  const scenes = [];
+  const modelCache = new Map();
+  const texCache = new Map();
+  for (const [pageIndex, page] of pages.entries()) {
+    for (const item of current.items) {
+      if (item.type !== "scene" || item.internal) continue;
+      const bounds = boundsOfItem(item.id) || itemBounds(item, null);
+      if (!bounds) continue;
+      const cx = bounds.x + bounds.w / 2;
+      const cy = bounds.y + bounds.h / 2;
+      if (cx < page.x || cx > page.x + page.w || cy < page.y || cy > page.y + page.h) continue;
+      const models = {};
+      for (const part of item.parts || []) {
+        if (part.op !== "model" || !part.src || models[part.src] !== undefined) continue;
+        try {
+          if (!modelCache.has(part.src)) {
+            modelCache.set(part.src, await fetchDataUrl(await store.modelLibraryUrl(part.src), "model/gltf-binary"));
+          }
+          models[part.src] = await modelCache.get(part.src);
+        } catch {
+          models[part.src] = "";
+        }
+      }
+      const textures = {};
+      for (const part of item.parts || []) {
+        if (!part.tex || textures[part.tex] !== undefined) continue;
+        try {
+          if (!texCache.has(part.tex)) {
+            texCache.set(
+              part.tex,
+              await fetchDataUrl(await store.imageUrl(canvasId, part.tex, false), imageMimeOf(part.tex)),
+            );
+          }
+          textures[part.tex] = await texCache.get(part.tex);
+        } catch {
+          textures[part.tex] = "";
+        }
+      }
+      scenes.push({
+        page: pageIndex,
+        rect: {
+          x: (item.x - page.x) / page.w,
+          y: (item.y - page.y) / page.h,
+          w: item.w / page.w,
+          h: item.h / page.h,
+        },
+        w: item.w,
+        h: item.h,
+        parts: (item.parts || []).map((part) => ({ ...part })),
+        camera: item.camera || null,
+        light: item.light || null,
+        groundColor: item.groundColor || "",
+        models,
+        textures,
+      });
+    }
+  }
+  return scenes;
+}
+
+function clientPageHtml(title, pages, scenes, pageImages) {
+  const figures = pages
+    .map(
+      (page, index) => `  <section class="page" aria-label="${exportHtmlEscape(page.title)}">
+    <span class="page-title">P${page.order || index + 1} · ${exportHtmlEscape(page.title)}</span>
+    <img src="${pageImages[index]}" alt="${exportHtmlEscape(page.title)}">
+    <div class="hotspots"></div>
+  </section>`,
+    )
+    .join("\n");
+  const css = `:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f2efe9; color: #23262b; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+header { max-width: 1000px; margin: 56px auto 26px; padding: 0 24px; }
+h1 { margin: 0 0 8px; font-size: 30px; font-weight: 650; letter-spacing: 0.02em; }
+.meta { margin: 0; color: #837b6f; font-size: 13px; }
+.pages { max-width: 1000px; margin: 0 auto 72px; padding: 0 24px; display: flex; flex-direction: column; gap: 40px; }
+.page { position: relative; background: #fff; box-shadow: 0 20px 56px rgba(30, 26, 20, 0.14); }
+.page img { display: block; width: 100%; height: auto; }
+.page-title { position: absolute; left: 0; bottom: 100%; margin-bottom: 9px; color: #8a8378; font-size: 12px; letter-spacing: 0.03em; }
+.hotspots { position: absolute; inset: 0; }
+.scene-hotspot { position: absolute; padding: 0; border: 1.5px dashed rgba(66, 108, 178, 0.6); border-radius: 8px; background: transparent; cursor: pointer; }
+.scene-hotspot:hover { border-color: rgba(48, 92, 168, 0.95); background: rgba(66, 108, 178, 0.06); }
+.scene-hotspot-label { position: absolute; right: 8px; bottom: 8px; padding: 4px 11px; border-radius: 999px; background: rgba(38, 57, 86, 0.88); color: #fff; font-size: 12px; letter-spacing: 0.04em; }
+body.viewer-open { overflow: hidden; }
+.viewer-mask { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(12, 16, 22, 0.74); }
+.viewer-stage { position: relative; width: min(1240px, 92vw); height: min(780px, 84vh); overflow: hidden; border-radius: 12px; background: #111; box-shadow: 0 32px 90px rgba(0, 0, 0, 0.55); }
+.viewer-stage canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.viewer-close { position: fixed; top: 22px; right: 26px; width: 40px; height: 40px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 22px; line-height: 1; cursor: pointer; }
+.viewer-close:hover { background: rgba(255, 255, 255, 0.28); }
+.viewer-hint { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); margin: 0; color: rgba(255, 255, 255, 0.72); font-size: 12px; letter-spacing: 0.04em; }
+@media print {
+  body { background: #fff; }
+  header, .hotspots { display: none !important; }
+  .pages { max-width: none; margin: 0; padding: 0; gap: 0; }
+  .page { box-shadow: none; break-after: page; }
+  .page-title { display: none; }
+}`;
+  return `<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${exportHtmlEscape(title)}</title>
+<style>
+${css}
+</style>
+</head>
+<body>
+<header>
+  <h1>${exportHtmlEscape(title)}</h1>
+  <p class="meta">共 ${pages.length} 页 · 虚线框住的场景可以点开，用鼠标拖着看 3D</p>
+</header>
+<main class="pages">
+${figures}
+</main>
+<script type="application/json" id="scene-data">${exportJsonForHtml({ scenes })}</script>
+<script src="./scene-viewer.js" defer></script>
+</body>
+</html>
+`;
+}
+
+/* 客户版网页：一个文件夹，双击 index.html 就能看；3D 场景是真能转的，
+   模型和材质图都内嵌成 data URL，不依赖模型库和网络。 */
+/* 把客户版网页写进指定文件夹（不弹选择框，agent 也走这条路） */
+async function exportClientWebTo(dir, root) {
+  if (!current) throw new Error("先打开一个画布");
+  const allPages = pageItems();
+  const pages = allPages.filter((page) => !page.internal);
+  if (!pages.length) throw new Error("还没有提案页：先建几块 page");
+  const canvasId = current.meta.id;
+  const hidden = clientHiddenIds();
+  const pageIds = allPages.map((page) => page.id);
+  const writeText = (rel, text) =>
+    store.exportWritePath(dir, `${root}/${rel}`, bytesToBase64(new TextEncoder().encode(text)));
+  const writeBase64 = (rel, data) => store.exportWritePath(dir, `${root}/${rel}`, data);
+
+  const restore = hideConnectorsTemporarily(hidden.connectors);
+  const pageImages = [];
+  let scenes = [];
+  try {
+    for (let index = 0; index < pages.length; index += 1) {
+      const page = pages[index];
+      const shot = await exporter.exportPage({
+        box: { x: page.x, y: page.y, w: page.w, h: page.h },
+        pageId: page.id,
+        hideIds: [...hidden.ids, ...pageIds.filter((id) => id !== page.id)],
+        quality: "high",
+        format: "png",
+      });
+      const rel = `pages/page-${String(index + 1).padStart(2, "0")}.png`;
+      await writeBase64(rel, shot.data);
+      pageImages.push(rel);
+    }
+    if (!current || current.meta.id !== canvasId) throw new Error("导出时画布被切走了");
+    scenes = await buildClientScenes(pages, canvasId);
+  } finally {
+    restore();
+  }
+  if (!current || current.meta.id !== canvasId) throw new Error("导出时画布被切走了");
+
+  const viewer = await fetchTextAsset("/vendor/web-viewer/scene-viewer.bundle.js");
+  const html = clientPageHtml(current.meta.name, pages, scenes, pageImages);
+  await writeText("scene-viewer.js", viewer);
+  await writeText("index.html", html);
+  return { root, pages: pages.length, scenes: scenes.length };
+}
+
+async function runClientWeb() {
+  if (!current || exporting) return;
+  if (!pageItems().some((page) => !page.internal)) {
+    showToast("还没有提案页：先建几块 page（agent 可以 block_create type:\"page\"）");
+    return;
+  }
+  exporting = true;
+  ui.exportBtn?.classList.add("is-busy");
+  if (ui.exportBtn) ui.exportBtn.disabled = true;
+  showToast("正在导出客户版网页…");
+  const canvasId = current.meta.id;
+  try {
+    const dir = await store.exportPickDir();
+    if (!dir || !current || current.meta.id !== canvasId) return;
+    const root = exportRootName(current.meta.name);
+    const result = await exportClientWebTo(dir, root);
+    if (!current || current.meta.id !== canvasId) return;
+    showToast(`客户版网页已导出：${result.root}（双击 index.html 就能看）`);
+  } catch (error) {
+    showError(error);
+  } finally {
+    exporting = false;
+    ui.exportBtn?.classList.remove("is-busy");
+    if (ui.exportBtn) ui.exportBtn.disabled = false;
+  }
+}
+
+/* 按页 PDF 写进指定文件夹（agent 用；界面那条走保存框） */
+async function exportClientPdfTo(dir, fileName) {
+  if (!current) throw new Error("先打开一个画布");
+  const allPages = pageItems();
+  const pages = allPages.filter((page) => !page.internal);
+  if (!pages.length) throw new Error("还没有提案页");
+  const hidden = clientHiddenIds();
+  const pageIds = allPages.map((page) => page.id);
+  const payload = pages.map((page) => ({
+    box: { x: page.x, y: page.y, w: page.w, h: page.h },
+    pageId: page.id,
+    hideIds: [...hidden.ids, ...pageIds.filter((id) => id !== page.id)],
+  }));
+  const restore = hideConnectorsTemporarily(hidden.connectors);
+  let result;
+  try {
+    result = await exporter.exportPagesPdf(payload, { quality: "high" });
+  } finally {
+    restore();
+  }
+  const safe = String(fileName || "客户版").replace(/[\\/:*?"<>|]/g, " ").trim() || "客户版";
+  const path = await store.exportWritePath(dir, `${safe}.pdf`, result.data);
+  return { path, pages: result.pages };
+}
+
+/* 给 agent 看这一页真正导出的样子（含页框底色、去掉客户版隐藏的块） */
+async function agentPageSnapshot({ id, maxSide = 1400 } = {}) {
+  const page = agentRequireItem(id);
+  if (page.type !== "page") throw new Error("这不是提案页");
+  const hidden = clientHiddenIds();
+  const pageIds = pageItems().map((one) => one.id);
+  const quality = Number(maxSide) > 2400 ? "ultra" : Number(maxSide) > 1800 ? "high" : "normal";
+  const restore = hideConnectorsTemporarily(hidden.connectors);
+  try {
+    const shot = await exporter.exportPage({
+      box: { x: page.x, y: page.y, w: page.w, h: page.h },
+      pageId: page.id,
+      hideIds: [...hidden.ids, ...pageIds.filter((pageId) => pageId !== page.id)],
+      quality,
+      format: "png",
+    });
+    return {
+      data: shot.data,
+      width: shot.width,
+      height: shot.height,
+      region: { x: page.x, y: page.y, w: page.w, h: page.h },
+    };
+  } finally {
+    restore();
+  }
+}
+
+function blockCenterInsidePage(item, page) {
+  if (item.type === "page" || item.type === "connector") return false;
+  const bounds = boundsOfItem(item.id) || itemBounds(item, null);
+  if (!bounds) return false;
+  const cx = bounds.x + bounds.w / 2;
+  const cy = bounds.y + bounds.h / 2;
+  return cx >= page.x && cx <= page.x + page.w && cy >= page.y && cy <= page.y + page.h;
+}
+
+function addTemplateText(page, x, y, w, text, { size = 14, color = "" } = {}) {
+  const item = makeText(page.x + x, page.y + y, w, 0);
+  item.text = text;
+  item.fontSize = size;
+  item.bordered = false;
+  item.borderColor = "";
+  item.fillColor = "";
+  item.color = color;
+  return placeBlock(item);
+}
+
+/* 一键搭软装提案的骨架：7 页，空间页里已经铺好房间壳，最后页带清单 */
+function agentProposalTemplate(spec = {}) {
+  agentRequireSpace();
+  const title = String(spec.title || "软装提案");
+  const pageW = PAGE_RATIOS.a4.w;
+  const pageH = PAGE_RATIOS.a4.h;
+  const gap = 160;
+  const topics = [
+    { key: "cover", title: "封面" },
+    { key: "brief", title: "客户需求" },
+    { key: "style", title: "风格板" },
+    { key: "living", title: "客厅方案", scene: "living" },
+    { key: "bedroom", title: "主卧方案", scene: "bedroom" },
+    { key: "dining", title: "餐厅方案", scene: "dining" },
+    { key: "quote", title: "材料与报价" },
+  ];
+  const totalW = topics.length * pageW + (topics.length - 1) * gap;
+  const center = stageCenterWorld();
+  const startX = Number.isFinite(Number(spec.x)) ? Number(spec.x) : center.x - totalW / 2;
+  const startY = Number.isFinite(Number(spec.y)) ? Number(spec.y) : center.y - pageH / 2;
+  const created = { pages: [], scenes: [], quote: null };
+  topics.forEach((topic, index) => {
+    const page = makePage(startX + index * (pageW + gap), startY, "a4", topic.title, index + 1);
+    placeBlock(page);
+    created.pages.push({ id: page.id, title: topic.title, order: index + 1 });
+    const left = 80;
+    const contentW = pageW - left * 2;
+    if (topic.key === "cover") {
+      addTemplateText(page, left, 140, contentW, `${title}\n客户提案`, { size: 34 });
+      addTemplateText(page, left, 270, contentW, "客户名称 / 日期 / 设计师", { size: 14, color: "#8a8378" });
+    } else if (topic.key === "brief") {
+      addTemplateText(page, left, 90, contentW, "客户需求", { size: 26 });
+      addTemplateText(page, left, 170, contentW, "• 风格偏好：…\n• 预算：…\n• 常住人口：…\n• 重点空间：…\n• 喜欢与不喜欢的参考：…", { size: 15 });
+    } else if (topic.key === "style") {
+      addTemplateText(page, left, 90, contentW, "风格板", { size: 26 });
+      addTemplateText(page, left, 170, contentW, "把参考图、配色和材质拖到这里；也可以让 agent 按 brief 先出 2–3 套方向。", { size: 15, color: "#8a8378" });
+    } else if (topic.scene) {
+      addTemplateText(page, left, 90, contentW, topic.title, { size: 26 });
+      const scene = makeScene(page.x + left, page.y + 170, contentW, 470);
+      const got = normalizeSceneParts(roomShellParts(topic.scene));
+      if (got.dropped.length) throw new Error(got.dropped[0].why);
+      scene.parts = got.parts;
+      scene.light = sceneLightOf("day");
+      placeBlock(scene);
+      persistScene(scene);
+      created.scenes.push({ id: scene.id, page: page.id, preset: topic.scene });
+      addTemplateText(page, left, 680, contentW, "把产品卡放进场景：右键产品卡 →「放进 3D 场景」；也可以右键产品卡 →「放到户型图」。", { size: 13, color: "#8a8378" });
+    } else if (topic.key === "quote") {
+      addTemplateText(page, left, 90, contentW, "材料与报价", { size: 26 });
+      const quote = makeQuote(page.x + left, page.y + 170, "软装清单");
+      quote.w = contentW;
+      quote.h = 520;
+      placeBlock(quote);
+      created.quote = quote.id;
+      addTemplateText(page, left, 730, contentW, "右键清单「从 CSV 导入产品…」；也可以把产品卡放到这一页，金额自动汇总。", { size: 13, color: "#8a8378" });
+    }
+  });
+  scheduleItemsSave();
+  return { title, pages: created.pages, scenes: created.scenes, quote: created.quote };
+}
+
+/* 复制整页做风格变体：新页在右边，页里的块各拷一份独立媒体 */
+async function agentPageDuplicate(spec = {}) {
+  if (!spec.id) throw new Error(`page_duplicate 没收到页 id（${JSON.stringify(spec)}）`);
+  const page = agentRequireItem(spec.id);
+  if (page.type !== "page") throw new Error("id 要传提案页");
+  const pages = pageItems();
+  const nextOrder = Math.max(0, pages.length, ...pages.map((one) => one.order || 0)) + 1;
+  /* 副本排到整排页的最右边，别正好压在下一张页上 */
+  const rightmost = Math.max(...pages.map((one) => one.x + one.w), page.x + page.w);
+  const copyX = rightmost + 160;
+  const dx = copyX - page.x;
+  const copy = makePage(copyX, page.y, page.ratio, `${page.title} 副本`, nextOrder);
+  copy.w = page.w;
+  copy.h = page.h;
+  placeBlock(copy);
+  const contained = current.items.filter((item) => blockCenterInsidePage(item, page));
+  const created = [];
+  const failed = [];
+  for (const item of contained) {
+    try {
+      const placed = await agentDuplicateBlock(item.id, { dx, dy: 0 });
+      created.push(placed.id);
+    } catch (error) {
+      /* 单块拷不动就跳过，别让整页复制失败 */
+      failed.push({ id: item.id, type: item.type, why: String(error?.message || error) });
+    }
+  }
+  scheduleItemsSave();
+  return { page: copy.id, copies: created.length, skipped: contained.length - created.length, failed };
+}
+
 async function agentCreateBlock(spec = {}) {
   agentRequireSpace();
   if (editingId || edgeLabelEditor) commitEditing();
@@ -7985,6 +9791,98 @@ async function agentCreateBlock(spec = {}) {
     item.w = w;
     item.h = h;
     if (!current || current.meta.id !== canvasId) throw new Error("插笔记块时画布被切走了");
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
+    if (spec.borderWidth !== undefined) {
+      item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
+    }
+    if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
+    const placed = placeBlock(item);
+    return agentSummary(placed);
+  }
+
+  if (type === "page") {
+    const ratio = PAGE_RATIOS[spec.ratio] ? spec.ratio : "a4";
+    const preset = PAGE_RATIOS[ratio];
+    const pages = pageItems();
+    const order =
+      Number.isFinite(Number(spec.order)) && Number(spec.order) >= 1
+        ? Math.trunc(Number(spec.order))
+        : pages.length + 1;
+    const w = Math.max(200, numOr(spec.w, preset.w));
+    const h = Math.max(200, numOr(spec.h, preset.h));
+    const at = agentPlacePoint(w, h, spec);
+    const item = withLock(makePage(at.x, at.y, ratio, spec.title ? String(spec.title) : "未命名页", order));
+    item.w = w;
+    item.h = h;
+    if (spec.internal !== undefined) item.internal = spec.internal === true;
+    const placed = placeBlock(item);
+    return agentSummary(placed);
+  }
+
+  if (type === "plan") {
+    if (!spec.path) throw new Error("plan 块需要户型图的本机路径 path");
+    const rel = await store.importCanvasImage(canvasId, String(spec.path));
+    if (!current || current.meta.id !== canvasId) throw new Error("导入户型图时画布被切走了");
+    const url = await store.imageUrl(canvasId, rel, false).catch(() => "");
+    imageCache.set(rel, url || null);
+    const size = url ? await imageSize(url) : { width: 0, height: 0 };
+    const sourceW = size.width || PLAN_DEFAULT_WIDTH;
+    const sourceH = size.height || PLAN_DEFAULT_HEIGHT;
+    const ratio = Math.min(1, 900 / Math.max(sourceW, sourceH, 1));
+    const w = Math.max(PLAN_MIN_WIDTH, Math.round(numOr(spec.w, sourceW * ratio)));
+    const h = Math.max(PLAN_MIN_HEIGHT, Math.round(numOr(spec.h, sourceH * ratio)));
+    const at = agentPlacePoint(w, h, spec);
+    const item = withLock(makePlan(at.x, at.y, rel, size.width, size.height));
+    item.w = w;
+    item.h = h;
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
+    if (spec.borderWidth !== undefined) {
+      item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
+    }
+    if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
+    const placed = placeBlock(item);
+    return agentSummary(placed);
+  }
+
+  if (type === "product") {
+    const w = Math.max(PRODUCT_MIN_WIDTH, numOr(spec.w, PRODUCT_DEFAULT_WIDTH));
+    const h = Math.max(PRODUCT_MIN_HEIGHT, numOr(spec.h, PRODUCT_DEFAULT_HEIGHT));
+    const at = agentPlacePoint(w, h, spec);
+    const item = withLock(makeProduct(at.x, at.y));
+    item.w = w;
+    item.h = h;
+    applyProductFields(item, spec);
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
+    if (spec.borderWidth !== undefined) {
+      item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
+    }
+    if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
+    if (spec.path) {
+      const rel = await store.importCanvasImage(canvasId, String(spec.path));
+      if (!current || current.meta.id !== canvasId) throw new Error("导入产品图时画布被切走了");
+      item.src = rel;
+      try {
+        imageCache.set(rel, await store.imageUrl(canvasId, rel, false));
+      } catch {
+        imageCache.set(rel, null);
+      }
+    }
+    const placed = placeBlock(item);
+    refreshQuotes();
+    return agentSummary(placed);
+  }
+
+  if (type === "quote") {
+    const w = Math.max(QUOTE_MIN_WIDTH, numOr(spec.w, QUOTE_DEFAULT_WIDTH));
+    const h = Math.max(QUOTE_MIN_HEIGHT, numOr(spec.h, QUOTE_DEFAULT_HEIGHT));
+    const at = agentPlacePoint(w, h, spec);
+    const item = withLock(makeQuote(at.x, at.y, spec.title ? String(spec.title) : "家具清单"));
+    item.w = w;
+    item.h = h;
+    if (spec.internal !== undefined) item.internal = spec.internal === true;
     if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
     if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
     if (spec.borderWidth !== undefined) {
@@ -8190,7 +10088,7 @@ function agentSetLayer(id, direction) {
 }
 
 /* 边框宽度/圆角按块类型认：连线和不带边框外观的音视频、电子书不接 */
-const BORDER_WIDTH_KINDS = new Set(["text", "rect", "ellipse", "image", "note", "file", "picture", "scene", "gen"]);
+const BORDER_WIDTH_KINDS = new Set(["text", "rect", "ellipse", "image", "note", "file", "picture", "scene", "gen", "product", "quote", "plan"]);
 
 async function agentUpdateBlock(id, patch = {}) {
   const item = agentRequireItem(id);
@@ -8208,6 +10106,8 @@ async function agentUpdateBlock(id, patch = {}) {
     throw new Error("这块已锁定，先解锁再改");
   }
   if (patch.locked !== undefined) item.locked = patch.locked === true;
+  /* 客户版隐藏是所有块都有的开关，连线没有内容，不参与 */
+  if (patch.internal !== undefined && item.type !== "connector") item.internal = patch.internal === true;
   const el = itemEls.get(item.id);
   let geometry = false;
 
@@ -8254,6 +10154,8 @@ async function agentUpdateBlock(id, patch = {}) {
   }
   if (patch.borderColor !== undefined) {
     applyColor(item, "borderColor", String(patch.borderColor || ""));
+    /* 文字块的边框跟「有没有边框色」同一个开关，和创建时的规矩一致 */
+    if (item.type === "text") item.bordered = Boolean(patch.borderColor);
   }
   if (patch.fillColor !== undefined) {
     applyColor(item, "fillColor", String(patch.fillColor || ""));
@@ -8338,7 +10240,29 @@ async function agentUpdateBlock(id, patch = {}) {
     /* 提示词/尺寸被 agent 改过，面板上的字和框高都要重新算 */
     refreshGenPanel(item.id);
   }
+  if (item.type === "product") applyProductFields(item, patch);
+  if (item.type === "quote") {
+    if (patch.title !== undefined) {
+      const title = String(patch.title || "").trim();
+      if (title) item.title = title;
+    }
+    if (patch.internal !== undefined) item.internal = patch.internal === true;
+  }
+  if (item.type === "page") {
+    if (patch.title !== undefined) {
+      const title = String(patch.title || "").trim();
+      if (title) item.title = title;
+    }
+    if (patch.order !== undefined) item.order = Math.max(0, Math.trunc(numOr(patch.order, item.order)));
+    if (patch.ratio !== undefined && PAGE_RATIOS[patch.ratio]) {
+      item.ratio = patch.ratio;
+      item.w = PAGE_RATIOS[patch.ratio].w;
+      item.h = PAGE_RATIOS[patch.ratio].h;
+      geometry = true;
+    }
+  }
   if (el) syncItemElement(el, item);
+  if (item.type === "product") refreshQuotes();
   if (geometry) {
     updateSelection();
     refreshConnectors();
@@ -9263,8 +11187,12 @@ export const canvasAgent = {
     }
     if (focus) el.focus({ preventScroll: true });
     /* detail > 0 模拟真实鼠标点击，走和鼠标一样的 click 事件路径（含全局的“点完摘焦点”） */
-    if (detail > 0) el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail }));
-    else el.click();
+    /* SVG 元素没有 click()，统一派发 MouseEvent；detail>0 也走这里 */
+    if (detail > 0 || typeof el.click !== "function") {
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: detail || 1 }));
+    } else {
+      el.click();
+    }
     return {
       clicked: true,
       focused: focus && document.activeElement === el,
@@ -9334,9 +11262,25 @@ export const canvasAgent = {
     el.scrollIntoView({ block: align, inline: "nearest" });
     return { scrolled: true, className: typeof el.className === "string" ? el.className : "" };
   },
+  /* 调试用：向视口某个点派发一次滚轮，不模拟鼠标；验证块内滚动/推拉 */
+  debugWheel: ({ x = 0, y = 0, deltaY = 120 } = {}) => {
+    const target = document.elementFromPoint(Number(x) || 0, Number(y) || 0) || document.body;
+    target.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        clientX: Number(x) || 0,
+        clientY: Number(y) || 0,
+        deltaY: Number(deltaY) || 0,
+      }),
+    );
+    return {
+      wheeled: true,
+      target: typeof target.className === "string" ? target.className : "",
+    };
+  },
   /* 调试用：从视口坐标 (x,y) 拖 (dx,dy)，走 DOM 的 pointer 事件、不模拟鼠标 */
-  debugDrag: ({ x = 0, y = 0, dx = 0, dy = 0 } = {}) => {
-    const fire = (type, cx, cy) => {
+  debugDrag: ({ x = 0, y = 0, dx = 0, dy = 0 } = {}) => {    const fire = (type, cx, cy) => {
       const target = document.elementFromPoint(cx, cy) || document.body;
       target.dispatchEvent(
         new PointerEvent(type, {
@@ -9400,8 +11344,21 @@ export const canvasAgent = {
     await new Promise((resolve) => setTimeout(resolve, 150));
     return { input: true, value: el.value };
   },
-  debugInspect: ({ selector, pseudo = "" } = {}) => {
-    const nodes = [...document.querySelectorAll(String(selector || ""))].slice(0, 40);
+  /* 调试用：给屏幕坐标，列出这一点的元素栈，查「谁把谁盖住了」 */
+  debugHit: ({ x = 0, y = 0 } = {}) =>
+    document.elementsFromPoint(Number(x) || 0, Number(y) || 0).slice(0, 14).map((node) => {
+      const style = getComputedStyle(node);
+      const r = node.getBoundingClientRect();
+      return {
+        tag: node.tagName.toLowerCase(),
+        className: typeof node.className === "string" ? node.className : "",
+        zIndex: style.zIndex,
+        background: style.backgroundColor,
+        opacity: style.opacity,
+        rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+      };
+    }),
+  debugInspect: ({ selector, pseudo = "" } = {}) => {    const nodes = [...document.querySelectorAll(String(selector || ""))].slice(0, 40);
     const active = document.activeElement;
     return {
       count: nodes.length,
@@ -9423,7 +11380,22 @@ export const canvasAgent = {
             el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
               ? el.value
               : undefined,
+          ...(el instanceof HTMLImageElement
+            ? {
+                src: el.getAttribute("src") || "",
+                natural: [el.naturalWidth, el.naturalHeight],
+                complete: el.complete,
+              }
+            : {}),
           ...(pseudo ? { content: style.content } : {}),
+          parent: el.parentElement
+            ? `${el.parentElement.tagName.toLowerCase()}.${
+                typeof el.parentElement.className === "string" ? el.parentElement.className : ""
+              }`
+            : "",
+          visibility: style.visibility,
+          position: style.position,
+          zIndex: style.zIndex,
           scrollHeight: el.scrollHeight || undefined,
           clientHeight: el.clientHeight || undefined,
           rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
@@ -9475,6 +11447,29 @@ export const canvasAgent = {
   cameraResetZoom: agentResetZoom,
   cameraSet: agentSetCamera,
   scene: agentScene,
+  sceneRoomShell: agentSceneRoomShell,
+  sceneLightPreset: agentSceneLightPreset,
+  sceneCameraPreset: agentSceneCameraPreset,
+  scenePlaceProduct: agentScenePlaceProduct,
+  sceneApplyMaterial: agentSceneApplyMaterial,
+  planCalibrate: agentPlanCalibrate,
+  planPlaceProduct: agentPlanPlaceProduct,
+  planPlaceCamera: agentPlanPlaceCamera,
+  planArea: agentPlanArea,
+  planRemove: agentPlanRemove,
+  pageSnapshot: agentPageSnapshot,
+  proposalTemplate: agentProposalTemplate,
+  pageDuplicate: agentPageDuplicate,
+  clientWebExport: (dir, name) => {
+    const target = String(dir || "").trim();
+    if (!target) throw new Error("要给一个已经存在的导出文件夹 dir");
+    return exportClientWebTo(target, String(name || exportRootName(current?.meta.name || "提案")));
+  },
+  clientPdfExport: (dir, name) => {
+    const target = String(dir || "").trim();
+    if (!target) throw new Error("要给一个已经存在的导出文件夹 dir");
+    return exportClientPdfTo(target, String(name || `${current?.meta.name || "提案"} 客户版`));
+  },
   spaceList: agentSpaceList,
   spaceTree: agentSpaceTree,
   spaceOpen: agentOpenSpace,
@@ -9491,6 +11486,17 @@ export const canvasAgent = {
     agentRevealBlock(placed.id);
     agentHighlight([placed.id], 1200);
     return placed;
+  },
+  /* 一次把一份 CSV 变成一排产品卡；图片列按 CSV 所在目录找 */
+  productImportCsv: async ({ path, x, y } = {}) => {
+    agentRequireSpace();
+    const file = String(path || "").trim();
+    if (!file) throw new Error("需要 CSV 文件的绝对路径 path");
+    const origin =
+      Number.isFinite(Number(x)) && Number.isFinite(Number(y))
+        ? { x: Number(x), y: Number(y) }
+        : null;
+    return importProductsFromCsv(file, origin);
   },
   blockUpdate: async (id, patch) => {
     const result = await agentUpdateBlock(id, patch);

@@ -7,6 +7,8 @@
  * three.js 有两兆，绝不挂在应用启动的静态 import 链上：第一块场景块进屏幕才 import() 一次。
  */
 
+import * as store from "./canvas-store.js";
+
 /* 场景坐标 → three 世界坐标：x 左右、y 往画面里去（越大越远）、z 立起来多高。
    世界系是 X 右、Y 上、Z 朝观者，所以场景的 y（远）落在 -Z 上。 */
 export const toWorld = (x, y, z) => [x, z, -y];
@@ -17,10 +19,66 @@ const loadThree = () => {
   return threePromise;
 };
 
+/* GLTFLoader 和房间环境光也是进第一块带模型的场景才拉，不和场景块本身互相拖累 */
+let gltfPromise = null;
+const loadGltf = () => {
+  if (!gltfPromise) {
+    gltfPromise = Promise.all([
+      import("/vendor/three/addons/loaders/GLTFLoader.js"),
+      import("/vendor/three/addons/utils/SkeletonUtils.js"),
+      import("/vendor/three/addons/environments/RoomEnvironment.js"),
+    ]).then(([loader, skeleton, env]) => ({
+      GLTFLoader: loader.GLTFLoader,
+      cloneModel: skeleton.clone,
+      RoomEnvironment: env.RoomEnvironment,
+    }));
+  }
+  return gltfPromise;
+};
+
+/* 模型缓存：同一个 .glb 只下载、解析一次，多个场景块各自 clone 一份实例。
+   gltf / box / error 三态，promise 用完了也不清——下次还要 clone。 */
+const modelCache = new Map();
+function modelEntry(THREE, GLTFLoader, src) {
+  let entry = modelCache.get(src);
+  if (!entry) {
+    entry = { gltf: null, box: null, size: null, error: "", promise: null };
+    modelCache.set(src, entry);
+  }
+  if (entry.gltf || entry.promise || entry.error) return entry;
+  entry.promise = store
+    .modelLibraryUrl(src)
+    .then((url) => new GLTFLoader().loadAsync(url))
+    .then((gltf) => {
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      if (!(size.x > 1e-4 || size.y > 1e-4 || size.z > 1e-4)) throw new Error("模型里没有可见几何");
+      entry.gltf = gltf;
+      entry.box = box;
+      entry.size = size;
+      return entry;
+    })
+    .catch((error) => {
+      entry.error = String(error?.message || error);
+      throw error;
+    });
+  entry.promise.catch(() => {});
+  return entry;
+}
+
 /* 画布缩放是 CSS transform 乘出来的，WebGL 的位图分辨率不会跟着变——
    所以相机缩放一变就要按新的倍率重画，否则放大到 4 倍就是一坨糊的。 */
 let cameraScale = 1;
 const owners = new Set();
+
+/* 场景里贴材质图要按「当前画布」取地址；canvas.js 启动时把解析函数塞进来，
+   和画面块的 setPictureMedia 同一个套路，避免这儿反过来 import 画布状态。 */
+let sceneAsset = null;
+export function setSceneAssetProvider(fn) {
+  sceneAsset = fn;
+}
+const sceneTextures = new Map();
 
 const dpr = () => Math.min(window.devicePixelRatio || 1, 2);
 
@@ -109,6 +167,22 @@ function fitCamera(item, box) {
   };
 }
 
+/* 当前有效机位：块上没定过机位时，返回的是渲染器自动框出来的那一份。
+   画布内拖动转视角要在这个基础上接着转，不能从零开始。 */
+export function sceneCameraState(item) {
+  const box = contentBox(item.parts || [], item.light);
+  const cam = fitCamera(item, box);
+  return {
+    azim: item.camera?.azim ?? 180,
+    elev: item.camera?.elev ?? 30,
+    dist: item.camera?.dist ?? cam.dist,
+    tx: item.camera?.tx ?? box.cx,
+    ty: item.camera?.ty ?? box.cy,
+    tz: item.camera?.tz ?? box.dz * 0.35,
+    fov: item.camera?.fov ?? 45,
+  };
+}
+
 /* 底面那一圈（相对落点）：box 和矩形屋顶是 w×d 那四角，poly 和多边形屋顶用自己写的点 */
 function footprintOf(p) {
   if (p.points) return p.points;
@@ -189,6 +263,25 @@ export function contentBox(parts, light) {
   const dx = Math.max(1, x1 - x0);
   const dy = Math.max(1, y1 - y0);
   return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, dz: z1, dx, dy, span: Math.max(dx, dy, z1) };
+}
+
+/* 模型件的真实包围盒覆盖掉归一化时给的估算尺寸，再按普通件算一遍总框 */
+function contentBoxWithModels(item, rects) {
+  if (!rects.size) return contentBox(item.parts, item.light);
+  const parts = item.parts.map((part, k) => {
+    const rect = rects.get(k);
+    if (!rect) return part;
+    return {
+      ...part,
+      x: (rect.x0 + rect.x1) / 2,
+      y: (rect.y0 + rect.y1) / 2,
+      w: Math.max(1, rect.x1 - rect.x0),
+      d: Math.max(1, rect.y1 - rect.y0),
+      h: Math.max(1, rect.top - part.z),
+      rotate: 0,
+    };
+  });
+  return contentBox(parts, item.light);
 }
 
 /* 几何只由「体型 + 那圈点 + 立起来多高」决定：挪位置、转角度、换颜色都不必重挤一次 */
@@ -322,19 +415,78 @@ function build(view, item, THREE) {
      poly 的几何是各挤各的，所以删东西时要认得出哪份是公用的。 */
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
   scene.add(hemi, ambient, sun, sun.target, ground, root);
-  const state = { THREE, renderer, scene, camera, sun, hemi, ambient, sky, ground, root, unitBox, meshMap: new Map(), item: null };
+  const state = {
+    THREE,
+    renderer,
+    scene,
+    camera,
+    sun,
+    hemi,
+    ambient,
+    sky,
+    ground,
+    root,
+    unitBox,
+    meshMap: new Map(),
+    /* 模型件加载后的真实包围盒（场景坐标），相机框和影子盒子按它算 */
+    modelRects: new Map(),
+    env: null,
+    envTarget: null,
+    envPending: false,
+    view,
+    item: null,
+  };
   view.__scene = state;
   view.append(canvas);
   hint(view, "");
+  ensureEnv(state);
   return state;
 }
 
 function rebuildParts(state, item) {
   const { THREE, root, meshMap } = state;
   const seen = new Set();
+  state.modelRects.clear();
   item.parts.forEach((part, k) => {
     const id = `${k}`;
     seen.add(id);
+    /* GLB 家具：一个模型一份 Group，异步加载；加载完按真实包围盒重新框相机 */
+    if (part.op === "model") {
+      let group = meshMap.get(id);
+      const sig = `model:${part.src}`;
+      if (group && group.__sig !== sig) {
+        freeMesh(state, group);
+        meshMap.delete(id);
+        group = null;
+      }
+      if (!group) {
+        group = new THREE.Group();
+        group.__sig = sig;
+        group.__model = true;
+        group.__src = part.src;
+        group.__loaded = false;
+        group.__materials = [];
+        root.add(group);
+        meshMap.set(id, group);
+        startModelLoad(state, group, part);
+      }
+      applyModelTransform(group, part);
+      if (group.__loaded && group.__size) {
+        state.modelRects.set(
+          k,
+          partRect({
+            x: part.x,
+            y: part.y,
+            z: part.z,
+            w: group.__size.w,
+            d: group.__size.d,
+            h: group.__size.h,
+            rotate: part.rotate,
+          }),
+        );
+      }
+      return;
+    }
     /* box 是单位立方体撑出来的，不用挤；poly / roof 各挤一份真几何 */
     const baked = part.op !== "box";
     const sig = baked ? geometrySig(part) : "";
@@ -364,7 +516,9 @@ function rebuildParts(state, item) {
     if (baked) mesh.scale.set(1, 1, 1);
     else mesh.scale.set(part.w, part.h, part.d);
     mesh.rotation.y = (part.rotate * Math.PI) / 180;
-    mesh.material.color.set(part.color || "#b9a887");
+    /* 有贴图就把固有色收成白，免得把材质图染色 */
+    mesh.material.color.set(part.tex ? "#ffffff" : part.color || "#b9a887");
+    applyPartTexture(state, part, mesh);
   });
   for (const [id, mesh] of meshMap) {
     if (seen.has(id)) continue;
@@ -373,10 +527,175 @@ function rebuildParts(state, item) {
   }
 }
 
+function applyModelTransform(group, part) {
+  const [wx, wy, wz] = toWorld(part.x, part.y, part.z);
+  group.position.set(wx, wy, wz);
+  group.rotation.y = (part.rotate * Math.PI) / 180;
+}
+
+/* 材质贴图：按「最大两面」估一遍纹理重复——地板取宽×深、墙取宽×高，盒子其余薄面
+   本来也看不见。纹理按解析出来的地址缓存，换画布不会串图；每个 mesh 自己克隆一份，
+   两张面用同一张材质也能各自设重复。 */
+function applyPartTexture(state, part, mesh) {
+  const { THREE } = state;
+  if (!part.tex) {
+    if (mesh.material.map) {
+      mesh.material.map.dispose();
+      mesh.material.map = null;
+      mesh.material.needsUpdate = true;
+    }
+    mesh.__tex = "";
+    return;
+  }
+  const dims = [part.w || 0, part.d || 0, part.h || 0].sort((a, b) => b - a);
+  const rep = Math.max(10, part.texRepeat || 100);
+  const rx = Math.max(0.05, dims[0] / rep);
+  const ry = Math.max(0.05, dims[1] / rep);
+  if (mesh.__tex === part.tex && mesh.material.map) {
+    mesh.material.map.repeat.set(rx, ry);
+    return;
+  }
+  if (mesh.__tex === part.tex) return;
+  mesh.__tex = part.tex;
+  if (!sceneAsset) return;
+  sceneAsset(part.tex)
+    .then((url) => {
+      let entry = sceneTextures.get(url);
+      if (!entry) {
+        entry = { texture: null, promise: null };
+        entry.promise = new THREE.TextureLoader()
+          .loadAsync(url)
+          .then((tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.anisotropy = 4;
+            entry.texture = tex;
+            return tex;
+          });
+        entry.promise.catch(() => {});
+        sceneTextures.set(url, entry);
+      }
+      return entry.texture || entry.promise;
+    })
+    .then((tex) => {
+      if (!tex || !mesh.parent || mesh.__tex !== part.tex) return;
+      const map = tex.clone();
+      map.needsUpdate = true;
+      map.wrapS = THREE.RepeatWrapping;
+      map.wrapT = THREE.RepeatWrapping;
+      map.repeat.set(rx, ry);
+      if (mesh.material.map) mesh.material.map.dispose();
+      mesh.material.map = map;
+      mesh.material.needsUpdate = true;
+      if (state.item) render(state.view, state, state.item);
+    })
+    .catch(() => {
+      mesh.__tex = "";
+    });
+}
+
+function startModelLoad(state, group, part) {
+  loadGltf()
+    .then(({ GLTFLoader, cloneModel }) => {
+      const entry = modelEntry(state.THREE, GLTFLoader, part.src);
+      const ready = () => {
+        if (!group.parent || group.__src !== part.src || group.__loaded) return;
+        fillModelGroup(state, group, part, entry, cloneModel);
+      };
+      if (entry.gltf) ready();
+      else entry.promise.then(ready, () => modelFailed(state, part, entry.error));
+    })
+    .catch((error) => modelFailed(state, part, String(error?.message || error)));
+}
+
+function modelFailed(state, part, why) {
+  hint(state.view, `模型 ${part.src} 没加载起来：${why}`);
+}
+
+/* 把模型摆进 Group：水平居中、底面对齐落点、按期望宽度（或高度）等比缩放。
+   模型自带单位五花八门，所以不猜，只按产品卡给的真实尺寸去对。 */
+function fillModelGroup(state, group, part, entry, cloneModel) {
+  const { THREE } = state;
+  const clone = cloneModel(entry.gltf.scene);
+  const size = entry.size;
+  const axis = part.w > 0 ? "x" : "y";
+  const desired = part.w > 0 ? part.w : part.h > 0 ? part.h : 80;
+  const native = size[axis];
+  const scale = (native > 1e-4 ? desired / native : 1) * (part.scale || 1);
+  const center = new THREE.Vector3();
+  entry.box.getCenter(center);
+  const offset = new THREE.Group();
+  offset.position.set(-center.x, -entry.box.min.y, -center.z);
+  offset.add(clone);
+  const holder = new THREE.Group();
+  holder.scale.setScalar(scale);
+  holder.add(offset);
+  group.add(holder);
+
+  const materials = [];
+  clone.traverse((node) => {
+    if (!node.isMesh) return;
+    node.castShadow = true;
+    node.receiveShadow = true;
+    const list = Array.isArray(node.material) ? node.material : [node.material];
+    const cloned = list.map((mat) => {
+      const next = mat.clone();
+      if ("envMap" in next) {
+        next.envMap = state.env || null;
+        next.envMapIntensity = 0.55;
+      }
+      materials.push(next);
+      return next;
+    });
+    node.material = Array.isArray(node.material) ? cloned : cloned[0];
+  });
+  group.__materials = materials;
+  group.__loaded = true;
+  group.__size = { w: size.x * scale, d: size.z * scale, h: size.y * scale };
+  /* 真实大小出来了：按它重框一次相机、重算地面和阴影 */
+  if (group.parent && state.item) render(state.view, state, state.item);
+}
+
+function ensureEnv(state) {
+  if (state.env || state.envPending) return;
+  state.envPending = true;
+  loadGltf()
+    .then(({ RoomEnvironment }) => {
+      if (!state.renderer) return;
+      const pmrem = new state.THREE.PMREMGenerator(state.renderer);
+      const target = pmrem.fromScene(new RoomEnvironment(), 0.04);
+      state.env = target.texture;
+      state.envTarget = target;
+      pmrem.dispose();
+      applyEnvToModels(state);
+    })
+    .catch(() => {});
+}
+
+function applyEnvToModels(state) {
+  for (const group of state.meshMap.values()) {
+    if (!group.__model || !group.__materials) continue;
+    for (const mat of group.__materials) {
+      if (!("envMap" in mat)) continue;
+      mat.envMap = state.env;
+      mat.envMapIntensity = 0.55;
+      mat.needsUpdate = true;
+    }
+  }
+}
+
 /* 收一件东西：材质各一份要还，几何只有挤出来的那些（poly / roof）要还——
-   单位立方体是全块共用的，删一栋长方体就 dispose 它，等于把还在场上那些的几何一起拆了。 */
+   单位立方体是全块共用的，删一栋长方体就 dispose 它，等于把还在场上那些的几何一起拆了。
+   模型 Group 里是 clone 出来的实例，只还各自克隆的材质；几何和贴图归全局模型缓存。 */
 function freeMesh(state, mesh) {
+  if (mesh.__model) {
+    for (const mat of mesh.__materials || []) mat.dispose();
+    state.root.remove(mesh);
+    return;
+  }
   if (mesh.geometry !== state.unitBox) mesh.geometry.dispose();
+  if (mesh.material.map) mesh.material.map.dispose();
   mesh.material.dispose();
   state.root.remove(mesh);
 }
@@ -452,8 +771,9 @@ function render(view, state, item) {
   const { renderer, camera, ground } = state;
   state.item = item;
   owners.add(view);
-  const box = contentBox(item.parts, item.light);
+  /* 先重建：模型件加载完的真实包围盒会写进 modelRects，相机要按它框 */
   rebuildParts(state, item);
+  const box = contentBoxWithModels(item, state.modelRects);
   const cam = fitCamera(item, box);
   camera.fov = cam.fov;
   camera.aspect = cam.aspect;
@@ -485,6 +805,7 @@ export function disposeScene(view) {
   state.ground.geometry.dispose();
   state.ground.material.dispose();
   state.sky.dispose();
+  state.envTarget?.dispose();
   state.renderer.dispose();
   /* 浏览器只给十几个 WebGL 上下文，dispose() 不一定真收回：整块重绘一次就少一条命，
      攒到上限后新场景块一律黑屏。显式让上下文丢失，把这一块的配额还回去。 */

@@ -28,6 +28,10 @@ const TYPE_COLORS = {
   picture: "#f0a08c",
   scene: "#8fb8d8",
   gen: "#d8a8cf",
+  product: "#c9a87c",
+  quote: "#a8bf9a",
+  plan: "#b7c4b2",
+  page: "#e6ddc8",
 };
 
 let hooks = null;

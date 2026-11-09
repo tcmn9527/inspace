@@ -56,6 +56,9 @@ export const importCanvasFile = (id, path) => invoke("canvas_import_file", { id,
 export const copyCanvasFile = (id, path) => invoke("canvas_copy_file", { id, path });
 /* .md 抄正文进笔记块，或引用态每次现读 */
 export const readFileText = (path) => invoke("canvas_file_text", { path });
+/* 清单导入：选一份 CSV、按 UTF-8/GB18030 自动解码读回原文 */
+export const pickCsv = () => invoke("canvas_pick_csv");
+export const readTextFile = (path) => invoke("canvas_read_text_file", { path });
 export const previewCanvasFile = (id, rel, linked) =>
   invoke("canvas_file_preview", { id, rel, linked: Boolean(linked) });
 /* PDF 块：整份不进内存，后端开一次 asset 读权限给出地址，pdf.js 按 Range 一段段要 */
@@ -150,3 +153,14 @@ export const exportWrite = (dir, name, ext, data) =>
   invoke("canvas_export_write", { dir, name, ext, data });
 /* 跨画布搜索：后端把所有画布的 items.json 扫一遍，只认块里的文字 */
 export const searchSpace = (query) => invoke("canvas_search", { query });
+/* 3D 模型库：library/models/ 下的 .glb；产品卡只记文件名，场景块按名字取地址 */
+export const modelLibraryDir = () => invoke("model_library_dir");
+export const modelLibraryList = () => invoke("model_library_list");
+export const modelLibraryReveal = () => invoke("model_library_reveal");
+export const modelLibraryUrl = async (name) =>
+  convertFileSrc(await invoke("model_library_url", { name }));
+export const modelLibraryImport = (path) => invoke("model_library_import", { path: path || null });
+/* 客户版网页是一整个目录：按相对路径写文件（父目录自动建），写完可以打开那个文件夹 */
+export const exportWritePath = (dir, rel, data) =>
+  invoke("canvas_export_write_path", { dir, rel, data });
+export const exportReveal = (path) => invoke("canvas_export_reveal", { path });

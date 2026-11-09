@@ -3,12 +3,20 @@
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 
 export const listCanvases = () => invoke("canvas_list");
-export const createCanvas = (name) => invoke("canvas_create", { name });
+/* 画布树：分组（真文件夹，可嵌套）+ 画布叶子；画布 id 是相对 spaces/ 的路径 */
+export const canvasTree = () => invoke("canvas_tree");
+export const createCanvas = (name, parent) => invoke("canvas_create", { name, parent: parent || null });
 export const openCanvas = (id) => invoke("canvas_open", { id });
 export const saveCanvasItems = (id, items) => invoke("canvas_save_items", { id, items });
 export const saveCanvasCamera = (id, camera) => invoke("canvas_save_camera", { id, camera });
 export const renameCanvas = (id, name) => invoke("canvas_rename", { id, name });
+/* 复制整个画布到别的分组：独立副本新 id；不支持移动，打开中的画布路径不变 */
+export const copyCanvas = (id, parent) => invoke("canvas_copy", { id, parent: parent || "" });
 export const deleteCanvas = (id) => invoke("canvas_delete", { id });
+export const createGroup = (parent, name) => invoke("canvas_group_create", { parent: parent || null, name });
+export const renameGroup = (id, name) => invoke("canvas_group_rename", { id, name });
+export const deleteGroup = (id) => invoke("canvas_group_delete", { id });
+export const revealGroup = (id) => invoke("canvas_group_reveal", { id });
 export const saveCanvasImage = (id, data, ext) => invoke("canvas_save_image", { id, data, ext });
 /* 图片和音频都不走 base64：后端确认文件还在、开一次 asset 读权限，这里换成地址。
    拷贝态 src 是画布目录里的相对路径，引用态是原文件绝对路径。 */

@@ -258,6 +258,12 @@ function fill(container, items, closeAll, level) {
     }
     const button = document.createElement("button");
     button.type = "button";
+    if (item.disabled) {
+      button.disabled = true;
+      container.append(button);
+      button.append(item.label);
+      continue;
+    }
     if (item.danger) button.classList.add("menu-danger");
     if (item.swatch) {
       const swatch = document.createElement("span");

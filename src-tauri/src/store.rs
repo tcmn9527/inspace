@@ -345,22 +345,23 @@ impl DataCounts {
     }
 }
 
-/// 画布 = 一个装着画布元数据文件的子文件夹（文件名和 canvas.rs 的 META_FILE 一致）。
-/// 旧版叫 canvas.json，统计时两种都认，换目录前才看得见旧文件夹里还有没有东西。
+/// 画布 = 一个装着画布元数据文件的子文件夹（canvas.rs 的 is_canvas_dir，旧文件名也认）。
+/// 分组是真目录，递归进去数；画布目录里面是素材，不再往下。
 fn count_canvases(dir: &Path) -> usize {
-    fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|entry| {
-                    let path = entry.path();
-                    path.is_dir()
-                        && (path.join(crate::canvas::META_FILE).is_file()
-                            || path.join(crate::canvas::LEGACY_META_FILE).is_file())
-                })
-                .count()
-        })
-        .unwrap_or(0)
+    let Ok(entries) = fs::read_dir(dir) else { return 0 };
+    let mut count = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if crate::canvas::is_canvas_dir(&path) {
+            count += 1;
+        } else {
+            count += count_canvases(&path);
+        }
+    }
+    count
 }
 
 fn count_data(root: &Path) -> DataCounts {

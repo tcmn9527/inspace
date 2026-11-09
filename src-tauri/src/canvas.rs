@@ -15,7 +15,9 @@
 //!
 //! 删除画布时整个文件夹进系统回收站。
 //!
-//! 前端只传画布 id（就是文件夹名），路径一律在这里算，不接受路径片段。
+//! 画布可以住在分组里：分组是 spaces/ 下的真文件夹，可以嵌套；装着 space.json
+//! 的目录是画布，没装的是分组。画布 id 是相对 spaces/ 的路径（如「手绘/神仙卡」），
+//! 路径一律在这里算，前端只传 id，不接受绝对路径。
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -146,12 +148,18 @@ fn meta_path(dir: &Path) -> PathBuf {
 }
 
 /// 启动时把每个画布里的旧元数据文件名改过来；改不动的留给 meta_path 兜底。
+/// 分组是真目录，要递归进去才找得齐；画布目录里面是它自己的素材，不再往下。
 fn align_meta_names(root: &Path) {
     let Ok(entries) = fs::read_dir(root) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() && !entry.file_name().to_string_lossy().starts_with('.') {
+        if !path.is_dir() || entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if is_canvas_dir(&path) {
             let _ = meta_path(&path);
+        } else {
+            align_meta_names(&path);
         }
     }
 }
@@ -160,9 +168,17 @@ fn align_meta_names(root: &Path) {
 fn recycle_legacy_history(root: &Path) {
     let Ok(entries) = fs::read_dir(root) else { return };
     for entry in entries.flatten() {
-        let hist = entry.path().join(LEGACY_HISTORY_DIR);
-        if hist.is_dir() {
-            let _ = recycle_path(&hist);
+        let path = entry.path();
+        if !path.is_dir() || entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if is_canvas_dir(&path) {
+            let hist = path.join(LEGACY_HISTORY_DIR);
+            if hist.is_dir() {
+                let _ = recycle_path(&hist);
+            }
+        } else {
+            recycle_legacy_history(&path);
         }
     }
 }
@@ -277,23 +293,108 @@ fn unique_dir(root: &Path, name: &str) -> PathBuf {
     root.join(format!("{name} 1000"))
 }
 
-/// 画布 id 只允许单层文件夹名；同时要求目录确实存在。
+/// 装着元数据文件的目录是画布；没装的是分组。旧元数据文件名也算。
+pub(crate) fn is_canvas_dir(dir: &Path) -> bool {
+    dir.join(META_FILE).is_file() || dir.join(LEGACY_META_FILE).is_file()
+}
+
+/// id（相对 spaces/ 的路径）-> 目录。每一段都必须是正常文件夹名：
+/// 不许绝对路径、不许 ..、不许点开头的隐藏段，免得借 id 摸到画布目录外面去。
+fn rel_dir(root: &Path, id: &str) -> Result<PathBuf, String> {
+    let rel = id.replace('\\', "/");
+    let path = Path::new(&rel);
+    let mut any = false;
+    for component in path.components() {
+        match component {
+            Component::Normal(name) => {
+                any = true;
+                if name.to_string_lossy().starts_with('.') {
+                    return Err("画布路径不合法".to_string());
+                }
+            }
+            _ => return Err("画布路径不合法".to_string()),
+        }
+    }
+    if !any {
+        return Err("画布路径不合法".to_string());
+    }
+    Ok(root.join(path))
+}
+
+/// 目录 -> 画布/分组 id（相对 spaces/，正斜杠分隔）。
+fn rel_id(root: &Path, dir: &Path) -> String {
+    dir.strip_prefix(root)
+        .unwrap_or(dir)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// 画布 id -> 目录，要求目录确实存在。
 fn canvas_dir(root: &Path, id: &str) -> Result<PathBuf, String> {
     if id.trim().is_empty() {
         return Err("画布不存在".to_string());
     }
-    let rel = id.replace('\\', "/");
-    let path = Path::new(&rel);
-    let mut components = path.components();
-    let valid = matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
-    if !valid {
-        return Err("画布路径不合法".to_string());
-    }
-    let dir = root.join(path);
+    let dir = rel_dir(root, id)?;
     if !dir.is_dir() {
         return Err("画布不存在或已被移除".to_string());
     }
     Ok(dir)
+}
+
+/// 分组 id -> 目录。空 id 是 spaces 根；其余要求存在且不是画布
+/// （装着 space.json 的目录归画布命令管，分组命令不许碰）。
+fn group_dir(root: &Path, id: &str) -> Result<PathBuf, String> {
+    if id.trim().is_empty() {
+        return Ok(root.to_path_buf());
+    }
+    let dir = rel_dir(root, id)?;
+    if !dir.is_dir() {
+        return Err("分组不存在或已被移除".to_string());
+    }
+    if is_canvas_dir(&dir) {
+        return Err("这是一个画布，不是分组".to_string());
+    }
+    Ok(dir)
+}
+
+/// 递归扫 spaces：画布收进 canvases（不再往里走，里面是它自己的素材目录），
+/// 其余目录是分组，收进 groups 并继续往下。隐藏目录和符号链接一律不进。
+fn walk_spaces(root: &Path) -> (Vec<(String, PathBuf)>, Vec<(String, PathBuf)>) {
+    let mut canvases = Vec::new();
+    let mut groups = Vec::new();
+    visit(&mut canvases, &mut groups, root, root, 0);
+    (canvases, groups)
+}
+
+fn visit(
+    canvases: &mut Vec<(String, PathBuf)>,
+    groups: &mut Vec<(String, PathBuf)>,
+    root: &Path,
+    dir: &Path,
+    depth: usize,
+) {
+    /* 分组嵌套没有硬限制，但符号链接都不跟，再加个深度兜底，防手工造出来的深坑 */
+    if depth > 16 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else { continue };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if is_canvas_dir(&path) {
+            canvases.push((rel_id(root, &path), path));
+        } else {
+            groups.push((rel_id(root, &path), path.clone()));
+            visit(canvases, groups, root, &path, depth + 1);
+        }
+    }
 }
 
 fn file_mtime(path: &Path) -> i64 {
@@ -404,18 +505,11 @@ pub fn canvas_search(
         return Ok(Vec::new());
     }
     let mut hits = Vec::new();
-    let Ok(entries) = fs::read_dir(state.root()) else {
-        return Ok(hits);
-    };
-    for entry in entries.flatten() {
+    let (canvases, _) = walk_spaces(&state.root());
+    for (id, dir) in canvases {
         if hits.len() >= SEARCH_LIMIT {
             break;
         }
-        let id = entry.file_name().to_string_lossy().to_string();
-        if id.starts_with('.') || !entry.path().is_dir() {
-            continue;
-        }
-        let dir = entry.path();
         let Ok(items) = read_items(&dir) else {
             continue;
         };
@@ -439,7 +533,15 @@ pub fn canvas_search(
                 let Some(text) = match_snippet(value, &needle) else {
                     continue;
                 };
-                let name = space_name.get_or_insert_with(|| read_meta(&dir, &id).0).clone();
+                let name = space_name
+                    .get_or_insert_with(|| {
+                        let fallback = dir
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| id.clone());
+                        read_meta(&dir, &fallback).0
+                    })
+                    .clone();
                 hits.push(SearchHit {
                     space: id.clone(),
                     space_name: name,
@@ -658,15 +760,15 @@ fn prune_empty(dir: &Path) {
 
 /// 复制笔记块要连它自己的图片目录一起搬；目标已存在就整体覆盖（新块的新目录，不可能有人用）。
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
-    fs::create_dir_all(dst).map_err(|e| format!("创建笔记图片目录失败：{e}"))?;
-    let entries = fs::read_dir(src).map_err(|e| format!("读取笔记图片目录失败：{e}"))?;
+    fs::create_dir_all(dst).map_err(|e| format!("创建目录失败：{e}"))?;
+    let entries = fs::read_dir(src).map_err(|e| format!("读取目录失败：{e}"))?;
     for entry in entries.flatten() {
         let from = entry.path();
         let to = dst.join(entry.file_name());
         if from.is_dir() {
             copy_dir_all(&from, &to)?;
         } else {
-            fs::copy(&from, &to).map_err(|e| format!("复制笔记图片失败：{e}"))?;
+            fs::copy(&from, &to).map_err(|e| format!("复制文件失败：{e}"))?;
         }
     }
     Ok(())
@@ -742,9 +844,13 @@ fn read_items(dir: &Path) -> Result<Value, String> {
     Ok(items)
 }
 
-/// space.json 没写名字时退回文件夹名；画布 id 就是文件夹名，所以直接用 id。
+/// space.json 没写名字时退回文件夹名（不是 id——id 可能是带分组前缀的路径）。
 fn meta_of(dir: &Path, id: &str) -> CanvasMeta {
-    let (name, _) = read_meta(dir, id);
+    let fallback = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| id.to_string());
+    let (name, _) = read_meta(dir, &fallback);
     let items_path = dir.join(ITEMS_FILE);
     let item_count = read_items(dir)
         .map(|items| items.as_array().map(|a| a.len()).unwrap_or(0))
@@ -760,7 +866,11 @@ fn meta_of(dir: &Path, id: &str) -> CanvasMeta {
 
 fn open_dir(dir: &Path, id: &str) -> Result<CanvasData, String> {
     let items = read_items(dir)?;
-    let (name, camera) = read_meta(dir, id);
+    let fallback = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| id.to_string());
+    let (name, camera) = read_meta(dir, &fallback);
     let item_count = items.as_array().map(|a| a.len()).unwrap_or(0);
     Ok(CanvasData {
         meta: CanvasMeta {
@@ -811,36 +921,79 @@ fn reveal_path(path: &Path) {
 #[tauri::command]
 pub fn canvas_list(state: tauri::State<'_, CanvasState>) -> Result<Vec<CanvasMeta>, String> {
     let root = state.root();
-    let entries = fs::read_dir(&root).map_err(|e| format!("读取画布目录失败：{e}"))?;
-    let mut list = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue;
-        }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_dir() {
-            list.push(meta_of(&entry.path(), &name));
-        }
-    }
+    let (canvases, _) = walk_spaces(&root);
+    let mut list: Vec<CanvasMeta> = canvases
+        .into_iter()
+        .map(|(id, dir)| meta_of(&dir, &id))
+        .collect();
     list.sort_by(|a, b| b.modified.cmp(&a.modified));
     Ok(list)
 }
 
-/// 新建画布：一律落在数据文件夹的 spaces 下，文件夹名就是画布名。
+/// 画布树：分组嵌套 + 画布叶子。同一层里分组按名字排在前，画布按名字排在后。
+#[tauri::command]
+pub fn canvas_tree(state: tauri::State<'_, CanvasState>) -> Result<Value, String> {
+    let root = state.root();
+    let (canvases, groups) = walk_spaces(&root);
+    let mut group_rows: Vec<(String, String)> = groups
+        .into_iter()
+        .map(|(id, dir)| {
+            let name = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| id.clone());
+            (id, name)
+        })
+        .collect();
+    group_rows.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut canvas_rows: Vec<CanvasMeta> = canvases
+        .into_iter()
+        .map(|(id, dir)| meta_of(&dir, &id))
+        .collect();
+    canvas_rows.sort_by(|a, b| a.name.cmp(&b.name));
+    /* 先按父 id 分桶（"" 是根），再从根递归取桶装 children */
+    let mut buckets: HashMap<String, Vec<Value>> = HashMap::new();
+    let parent_of = |id: &str| id.rsplit_once('/').map(|(head, _)| head.to_string()).unwrap_or_default();
+    for (id, name) in group_rows {
+        buckets.entry(parent_of(&id)).or_default().push(json!({
+            "type": "group", "id": id, "name": name, "children": [],
+        }));
+    }
+    for meta in canvas_rows {
+        buckets.entry(parent_of(&meta.id)).or_default().push(json!({
+            "type": "canvas",
+            "id": meta.id,
+            "name": meta.name,
+            "itemCount": meta.item_count,
+            "modified": meta.modified,
+            "path": meta.path,
+        }));
+    }
+    fn build(id: &str, buckets: &mut HashMap<String, Vec<Value>>) -> Vec<Value> {
+        let mut kids = buckets.remove(id).unwrap_or_default();
+        for kid in &mut kids {
+            if kid["type"] == "group" {
+                let kid_id = kid["id"].as_str().unwrap_or_default().to_string();
+                kid["children"] = Value::Array(build(&kid_id, buckets));
+            }
+        }
+        kids
+    }
+    Ok(Value::Array(build("", &mut buckets)))
+}
+
+/// 新建画布：落在指定分组（parent 为空就是 spaces 根）下，文件夹名就是画布名。
 #[tauri::command]
 pub fn canvas_create(
     name: String,
+    parent: Option<String>,
     state: tauri::State<'_, CanvasState>,
 ) -> Result<CanvasData, String> {
     let name = check_name(&name)?;
-    let folder = unique_dir(&state.root(), &name);
-    let id = folder
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .ok_or_else(|| "无法创建画布目录".to_string())?;
+    let root = state.root();
+    let parent_dir = group_dir(&root, parent.as_deref().unwrap_or(""))?;
+    let folder = unique_dir(&parent_dir, &name);
+    let id = rel_id(&root, &folder);
     fs::create_dir_all(folder.join(IMAGE_DIR)).map_err(|e| format!("创建画布失败：{e}"))?;
     write_json(
         &meta_path(&folder),
@@ -900,7 +1053,11 @@ pub fn canvas_save_camera(
     }
     let dir = resolve_dir(&state, &id)?;
     let mut meta = read_json(&meta_path(&dir))?.unwrap_or_else(|| json!({}));
-    let (name, _) = read_meta(&dir, &id);
+    let fallback = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| id.clone());
+    let (name, _) = read_meta(&dir, &fallback);
     meta["name"] = json!(name);
     meta["camera"] = camera;
     if meta.get("createdAt").is_none() {
@@ -918,12 +1075,11 @@ pub fn canvas_rename(
     let dir = resolve_dir(&state, &id)?;
     let name = check_name(&name)?;
     let root = state.root();
-    let same = root.join(&name) == dir;
-    let new_dir = if same { dir.clone() } else { unique_dir(&root, &name) };
-    let new_id = new_dir
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .ok_or_else(|| "无法重命名画布".to_string())?;
+    /* 改名只动最后一段：画布留在原分组里，不挪窝 */
+    let parent = dir.parent().unwrap_or(&root);
+    let same = parent.join(&name) == dir;
+    let new_dir = if same { dir.clone() } else { unique_dir(parent, &name) };
+    let new_id = rel_id(&root, &new_dir);
     if new_dir != dir {
         fs::rename(&dir, &new_dir).map_err(|e| format!("重命名失败：{e}"))?;
     }
@@ -931,6 +1087,99 @@ pub fn canvas_rename(
     meta["name"] = json!(name);
     write_json(&meta_path(&new_dir), &meta)?;
     Ok(meta_of(&new_dir, &new_id))
+}
+
+/// 复制整个画布到别的分组：素材、内容文件整棵拷一份，新画布新 id，从此各不相干。
+/// 不支持移动——正打开着的画布路径不能变。
+#[tauri::command]
+pub fn canvas_copy(
+    id: String,
+    parent: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<CanvasMeta, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let root = state.root();
+    let parent_dir = group_dir(&root, &parent)?;
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "无法复制画布".to_string())?;
+    let new_dir = unique_dir(&parent_dir, &name);
+    copy_dir_all(&dir, &new_dir).map_err(|e| format!("复制画布失败：{e}"))?;
+    /* 副本是个新画布：名字跟文件夹走，创建时间算现在；相机和块原样保留 */
+    let mut meta = read_json(&meta_path(&new_dir))?.unwrap_or_else(|| json!({}));
+    let new_name = new_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or(name);
+    meta["name"] = json!(new_name);
+    meta["createdAt"] = json!(now_ms());
+    write_json(&meta_path(&new_dir), &meta)?;
+    let new_id = rel_id(&root, &new_dir);
+    Ok(meta_of(&new_dir, &new_id))
+}
+
+// ---------- 分组 ----------
+
+/// 新建分组：parent 为空就在 spaces 根下。返回新分组的 id（相对路径）。
+#[tauri::command]
+pub fn canvas_group_create(
+    parent: Option<String>,
+    name: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<String, String> {
+    let name = check_name(&name)?;
+    let root = state.root();
+    let parent_dir = group_dir(&root, parent.as_deref().unwrap_or(""))?;
+    let folder = unique_dir(&parent_dir, &name);
+    fs::create_dir_all(&folder).map_err(|e| format!("创建分组失败：{e}"))?;
+    Ok(rel_id(&root, &folder))
+}
+
+/// 分组改名：真文件夹跟着改，里面所有画布的 id 前缀都会变，返回新 id 让前端换算。
+#[tauri::command]
+pub fn canvas_group_rename(
+    id: String,
+    name: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<String, String> {
+    let root = state.root();
+    let dir = group_dir(&root, &id)?;
+    if dir == root {
+        return Err("根目录不能改名".to_string());
+    }
+    let name = check_name(&name)?;
+    let parent = dir.parent().unwrap_or(&root);
+    let new_dir = if parent.join(&name) == dir { dir.clone() } else { unique_dir(parent, &name) };
+    if new_dir != dir {
+        fs::rename(&dir, &new_dir).map_err(|e| format!("重命名失败：{e}"))?;
+    }
+    Ok(rel_id(&root, &new_dir))
+}
+
+/// 删分组：只许删空的，里面有画布或子分组就拒绝——画布不能被分组连坐。
+#[tauri::command]
+pub fn canvas_group_delete(id: String, state: tauri::State<'_, CanvasState>) -> Result<(), String> {
+    let root = state.root();
+    let dir = group_dir(&root, &id)?;
+    if dir == root {
+        return Err("根目录不能删除".to_string());
+    }
+    let occupied = fs::read_dir(&dir)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(true);
+    if occupied {
+        return Err("分组里还有画布或子分组，请先清空再删".to_string());
+    }
+    recycle_path(&dir)
+}
+
+#[tauri::command]
+pub fn canvas_group_reveal(id: String, state: tauri::State<'_, CanvasState>) -> Result<(), String> {
+    let root = state.root();
+    let dir = group_dir(&root, &id)?;
+    reveal_path(&dir);
+    Ok(())
 }
 
 #[tauri::command]

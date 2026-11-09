@@ -38,7 +38,7 @@ const SECTIONS = [
   {
     id: "space",
     title: "应用与画布",
-    body: `## 应用与画布（11 个工具）
+    body: `## 应用与画布（16 个工具）
 
 ### app_state
 一眼看全局，不切页。返回 route（canvas/settings）、dataRoot、theme、mcp 状态、当前画布（id/名字/块数/相机/选中）。新接手先调它。
@@ -56,7 +56,10 @@ const SECTIONS = [
 id 从 theme_list 拿。调 "cosmos" 会给画布页打开一条自动飞行的深空航线：镜头一直往前飞，好几分钟才遇到一颗——远处先是一枚会眨的亮星，越飞越大才显出球体，追上一颗就贴着它慢飞两三圈看表面，看完顺切线方向接着走；镜头里同时只画一颗星体。星野钉在天球方向上，镜头一转就换一片星空。飞行层的细节看「宇宙飞行」那一章。主题是应用级设置，不影响任何画布数据，也不会自动切页。
 
 ### space_list
-列出全部画布：[{id,name,path}]，current 标出当前画布。
+列出全部画布：[{id,name,path}]，current 标出当前画布。画布住在分组里时 id 是相对 spaces/ 的路径（如「手绘/神仙卡」），根级画布的 id 就是文件夹名。
+
+### space_tree
+看画布树：分组是磁盘上的真文件夹，可以嵌套；返回 {current, tree}，节点 {type: group|canvas, id, name, children}。整理画布（建分组、复制、改名）前先调它看清结构。
 
 ### space_open
 切到某个画布，space 传 id 或名字都行；会等画布读完才返回 {space, blocks}。
@@ -66,14 +69,21 @@ id 从 theme_list 拿。调 "cosmos" 会给画布页打开一条自动飞行的�
 ~~~
 
 ### space_create
-新建画布并切过去，返回 {id, name, opened}。
+新建画布并切过去，返回 {id, name, opened}。parent 给分组 id 或名字就落在那个分组里，不给落在根级。
 
 ~~~json
-{ "name": "登录流程" }
+{ "name": "登录流程", "parent": "工作" }
+~~~
+
+### space_copy
+复制整个画布到别的分组：素材和内容整棵拷一份，独立副本新 id，并切过去。不支持移动画布——正打开着的画布路径不能变，想「挪」就复制一份再删旧的。parent 为空复制到根级。
+
+~~~json
+{ "space": "登录流程", "parent": "工作/评审" }
 ~~~
 
 ### space_rename
-改名，磁盘文件夹跟着改；改的是当前画布时界面会重新加载。
+改名，磁盘文件夹跟着改，画布留在原分组；改的是当前画布时界面会重新加载。
 
 ~~~json
 { "space": "登录流程", "name": "登录流程 v2" }
@@ -81,6 +91,23 @@ id 从 theme_list 拿。调 "cosmos" 会给画布页打开一条自动飞行的�
 
 ### space_delete
 删除整个画布，文件夹进系统回收站。删的是当前画布时，会自动切到列表里的下一个。
+
+### group_create
+新建分组（真文件夹），返回 {id}。parent 给分组 id 或名字就建在它里面，不给建在根级。
+
+~~~json
+{ "name": "评审", "parent": "工作" }
+~~~
+
+### group_rename
+分组改名：真文件夹跟着改，里面所有画布的 id 前缀都变，返回新 id；之后要按新 id 引用那些画布。
+
+~~~json
+{ "group": "工作", "name": "工作 2026" }
+~~~
+
+### group_delete
+删除空分组，文件夹进系统回收站。里面还有画布或子分组会报错——画布不能被分组连坐，先把它们删掉或复制走。group 传 id 或名字；同名分组必须给 id。
 
 ### space_scene
 当前画布的全景：space、camera、selected、blocks[]（每块的 id、type、x、y、w、h、z 和类型专属字段）。可选 type 过滤：

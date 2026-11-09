@@ -309,20 +309,37 @@ const TOOL_DEFS = [
     },
     ["action"],
   ),
-  def("space_list", "列出所有画布（id、名字、文件夹路径），并标出当前打开的是哪个。"),
+  def("space_list", "列出所有画布（id、名字、文件夹路径），并标出当前打开的是哪个。画布住在分组里时 id 是相对 spaces/ 的路径（如 手绘/神仙卡）。"),
+  def("space_tree", "看画布树：分组（磁盘上的真文件夹，可嵌套）套画布，返回 {current, tree}。节点 {type: group|canvas, id, name, children}，分组和画布的 id 都是相对 spaces/ 的路径。整理画布前先看它。"),
   def("space_open", "切换到指定画布，等它读完再返回。space 传画布 id 或画布名。", {
     space: { type: "string", description: "画布 id 或名字" },
   }, ["space"]),
-  def("space_create", "新建一个画布并切过去。", {
+  def("space_create", "新建一个画布并切过去。parent 给分组 id 或名字就落在那个分组里，不给落在根级。", {
     name: { type: "string", description: "画布名" },
+    parent: { type: "string", description: "分组 id 或名字，可省" },
   }, ["name"]),
-  def("space_rename", "给画布改名（磁盘文件夹跟着改）。", {
+  def("space_copy", "复制整个画布到别的分组：素材和内容整棵拷一份，独立副本新 id，并切过去。不支持移动画布。parent 为空复制到根级。", {
+    space: { type: "string", description: "源画布 id 或名字" },
+    parent: { type: "string", description: "目标分组 id 或名字，空为根级" },
+  }, ["space"]),
+  def("space_rename", "给画布改名（磁盘文件夹跟着改，留在原分组）。", {
     space: { type: "string", description: "画布 id 或名字" },
     name: { type: "string", description: "新名字" },
   }, ["space", "name"]),
   def("space_delete", "删除画布：整个画布文件夹进系统回收站。", {
     space: { type: "string", description: "画布 id 或名字" },
   }, ["space"]),
+  def("group_create", "新建分组（spaces/ 下的真文件夹）。parent 给分组 id 或名字就建在它里面，不给建在根级。返回 {id}。", {
+    name: { type: "string", description: "分组名" },
+    parent: { type: "string", description: "父分组 id 或名字，可省" },
+  }, ["name"]),
+  def("group_rename", "给分组改名：真文件夹跟着改，里面所有画布的 id 前缀都变，返回新 id。", {
+    group: { type: "string", description: "分组 id 或名字（同名分组必须给 id）" },
+    name: { type: "string", description: "新名字" },
+  }, ["group", "name"]),
+  def("group_delete", "删除空分组，文件夹进系统回收站。里面还有画布或子分组会报错——先把它们删掉或复制走，画布不能被分组连坐。", {
+    group: { type: "string", description: "分组 id 或名字（同名分组必须给 id）" },
+  }, ["group"]),
   def("space_scene", "看当前画布里所有块的摘要：id、类型、位置尺寸、层级、各类型的关键字段。做任何块操作前先调这个拿 id。", {
     type: { type: "string", description: "只看某一类块（text/rect/ellipse/line/arrow/note/picture/scene/file/image/audio/video/ebook/connector），不传就全部" },
   }),
@@ -396,14 +413,15 @@ const TOOL_DEFS = [
         type: "number",
         description: "点击事件的 detail；真实鼠标点击一般是 1，默认 0（DOM click）",
       },
+      right: { type: "boolean", description: "true 时派发 contextmenu（右键菜单），坐标取元素左上角内侧" },
     },
     ["selector"],
   ),
   def(
     "ui_key",
-    "调试用：向页面派发一次按键（不模拟鼠标、不抢系统焦点）。key 如 f、Escape、F9；ctrl 为 true 就是 Ctrl+组合键，例如 key:f + ctrl:true 开搜索。",
+    "调试用：向页面派发一次按键（不模拟鼠标、不抢系统焦点）。key 如 f、Escape、Enter；ctrl 为 true 就是 Ctrl+组合键，例如 key:f + ctrl:true 开搜索。",
     {
-      key: { type: "string", description: "按键名，如 f、Escape、F9" },
+      key: { type: "string", description: "按键名，如 f、Escape、Enter" },
       action: {
         type: "string",
         enum: ["press", "down", "up"],
@@ -1126,14 +1144,24 @@ async function dispatch(name, args) {
 
     case "space_list":
       return onCanvas(args, () => canvasAgent.spaceList());
+    case "space_tree":
+      return onCanvas(args, () => canvasAgent.spaceTree());
     case "space_open":
       return onCanvas(args, () => canvasAgent.spaceOpen(args.space));
     case "space_create":
-      return onCanvas(args, () => canvasAgent.spaceCreate(args.name));
+      return onCanvas(args, () => canvasAgent.spaceCreate(args.name, args.parent));
+    case "space_copy":
+      return onCanvas(args, () => canvasAgent.spaceCopy(args.space, args.parent));
     case "space_rename":
       return onCanvas(args, () => canvasAgent.spaceRename(args.space, args.name));
     case "space_delete":
       return onCanvas(args, () => canvasAgent.spaceDelete(args.space));
+    case "group_create":
+      return onCanvas(args, () => canvasAgent.groupCreate(args.parent, args.name));
+    case "group_rename":
+      return onCanvas(args, () => canvasAgent.groupRename(args.group, args.name));
+    case "group_delete":
+      return onCanvas(args, () => canvasAgent.groupDelete(args.group));
     case "space_scene":
       return onCanvas(args, () => canvasAgent.scene(pick(args, ["type"])));
     case "space_snapshot":
@@ -1156,6 +1184,7 @@ async function dispatch(name, args) {
         text: args.text,
         focus: args.focus,
         detail: args.detail,
+        right: args.right,
       });
     case "ui_key":
       return canvasAgent.debugKey({

@@ -63,23 +63,15 @@ button {
 }
 
 /* ---------- 自绘标题栏 ---------- */
+/* 标题栏只属于画布这一列：左边整列让给画布树，树从窗口上沿开始 */
 .titlebar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   height: var(--titlebar-h);
   flex: 0 0 var(--titlebar-h);
-  padding-left: 16px;
   border-bottom: 1px solid var(--line);
   -webkit-app-region: no-drag;
-}
-
-.titlebar-text {
-  font-size: 13px;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* F10 收起软件头部：标题栏不占位，画布/设置直接顶到窗口上沿 */
@@ -91,6 +83,36 @@ body.is-titlebar-hidden .titlebar {
   display: flex;
   align-items: stretch;
   height: 100%;
+}
+
+/* 画布栏收起按钮：住在标题栏最左端，和窗口按钮同一套扁平样式 */
+.titlebar-side-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  margin-right: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.titlebar-side-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+/* 收起后侧栏那块实心条淡掉，再点一下展开 */
+.titlebar-side-bar {
+  transition: opacity 0.15s ease;
+}
+
+.titlebar-side-toggle.is-collapsed .titlebar-side-bar {
+  opacity: 0.15;
 }
 
 .caption {
@@ -648,6 +670,15 @@ body.is-titlebar-hidden .titlebar {
 .ctx-menu button:hover,
 .ctx-menu button.is-open {
   background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.ctx-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ctx-menu button:disabled:hover {
+  background: transparent;
 }
 
 .ctx-menu button.danger {
@@ -1705,6 +1736,193 @@ body.is-titlebar-hidden .titlebar {
   min-width: 0;
   overflow: hidden;
   background: var(--bg);
+  display: flex;
+}
+
+/* 画布内容整列：顶栏、舞台、空态都相对它定位，左侧树栏占多少宽度它就让多少 */
+.canvas-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 标题栏下面那块：顶栏、搜索、舞台、空态、错误各自的绝对定位都以它为界 */
+.canvas-content {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---------- 左侧画布树 ---------- */
+.space-tree {
+  position: relative;
+  flex: 0 0 auto;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid color-mix(in srgb, var(--line) 25%, transparent);
+  background: color-mix(in srgb, var(--surface) 55%, var(--bg));
+  z-index: 6;
+}
+
+.space-tree[hidden] {
+  display: none;
+}
+
+.space-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px 8px;
+}
+
+.space-tree-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 30%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+
+.space-tree-filter:focus {
+  border-color: var(--accent);
+}
+
+.space-tree-filter::placeholder {
+  color: var(--muted);
+}
+
+.space-tree-btn {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.space-tree-btn:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.space-tree-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px 0 10px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
+}
+
+.space-tree-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.space-tree-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.space-tree-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 3px;
+}
+
+.space-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+  margin: 0 6px;
+  padding-right: 8px;
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.space-tree-row:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.space-tree-row.is-current {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.space-tree-row.is-group {
+  color: color-mix(in srgb, var(--fg) 82%, var(--muted));
+}
+
+.space-tree-chevron {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+
+.space-tree-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.space-tree-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.space-tree-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+
+.space-tree-hint {
+  padding: 14px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.space-tree-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 7;
+}
+
+.space-tree-resize:hover,
+.space-tree-resize.is-active {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .canvas-stage {
@@ -4326,99 +4544,63 @@ body.is-screen-capturing .canvas-port-box {
   inset: -4px;
 }
 
-/* 顶部栏 */
-.canvas-topbar {
-  position: absolute;
-  z-index: 5;
-  inset: 10px 12px auto;
+/* 工具条、缩放、导出都住在标题栏里，排在窗口按钮左边。
+   不放描边、底色和投影，和右边的主题/设置按钮同一种扁平按钮：
+   按钮占满标题栏高度，悬停/选中是整块淡灰底。 */
+.titlebar-tools {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  pointer-events: none;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 8px;
+  margin-right: 12px;
 }
 
-.canvas-topbar > * {
-  pointer-events: auto;
+/* 组与组之间一条短竖线：工具条 | 缩放 | 导出 | 窗口按钮 */
+.canvas-zoom::before,
+.canvas-actions::before,
+.titlebar-right::before {
+  content: "";
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1px;
+  height: 18px;
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
 }
 
-/* 顶栏里只有名字和右侧那一组是「排进去」的：左上角名字、右上角缩放 + 导出。
-   工具条自己绝对居中，不参与这条流。 */
-.canvas-topbar .canvas-zoom {
-  margin-left: auto;
+.canvas-zoom::before,
+.canvas-actions::before {
+  margin-right: 7px;
 }
 
-/* F9 收起顶栏三组浮层：画布名、工具条、缩放 + 导出 */
-.canvas-page.is-chrome-hidden .canvas-name,
-.canvas-page.is-chrome-hidden .canvas-tools,
-.canvas-page.is-chrome-hidden .canvas-zoom,
-.canvas-page.is-chrome-hidden .canvas-actions {
-  display: none;
-}
-
-.canvas-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 240px;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  color: var(--fg);
-  font-size: 13px;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
-}
-
-.canvas-name span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.canvas-name:hover {
-  border-color: color-mix(in srgb, var(--fg) 45%, transparent);
+.titlebar-right::before {
+  margin-right: 10px;
 }
 
 .canvas-tools {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  align-items: stretch;
 }
 
 .canvas-tool {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 46px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
 }
 
 .canvas-tool:hover {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
 }
 
 .canvas-tool.is-active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
 }
 
 /* 带下拉的工具栏按钮：「AI出图」三个字后面跟一颗小三角，点开是一列文字 */
@@ -4440,22 +4622,14 @@ body.is-screen-capturing .canvas-port-box {
 
 .canvas-zoom {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  align-items: stretch;
 }
 
 .canvas-zoom-btn {
-  min-width: 26px;
-  height: 26px;
+  min-width: 46px;
   padding: 0 6px;
   border: none;
-  border-radius: 5px;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   font-size: 13px;
@@ -4463,15 +4637,14 @@ body.is-screen-capturing .canvas-port-box {
 }
 
 .canvas-zoom-btn:hover {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
 }
 
 .canvas-zoom-value {
-  width: 48px;
-  height: 26px;
+  width: 46px;
   padding: 0 2px;
   border: none;
-  border-radius: 5px;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
@@ -4482,7 +4655,7 @@ body.is-screen-capturing .canvas-port-box {
 }
 
 .canvas-zoom-value:hover {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
 }
 
 .canvas-zoom-value:focus {
@@ -4491,7 +4664,6 @@ body.is-screen-capturing .canvas-port-box {
   color: var(--fg);
 }
 
-.canvas-page.no-canvas .canvas-name,
 .canvas-page.no-canvas .canvas-tools,
 .canvas-page.no-canvas .canvas-zoom,
 .canvas-page.no-canvas .canvas-actions {
@@ -4499,35 +4671,27 @@ body.is-screen-capturing .canvas-port-box {
   pointer-events: none;
 }
 
-/* 导出：和缩放条同一套浮层质感，紧挨在它右边 */
+/* 导出：紧挨在缩放右边，同样是扁平按钮 */
 .canvas-actions {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  align-items: stretch;
 }
 
 .canvas-act {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 46px;
   padding: 0;
   border: none;
-  border-radius: 5px;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
 }
 
 .canvas-act:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
 }
 
 .canvas-act:active:not(:disabled) {

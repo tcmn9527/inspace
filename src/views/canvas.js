@@ -517,8 +517,6 @@ export function initCanvas() {
     lockLayer: document.querySelector("#canvas-lock-layer"),
     handleVisualLayer: document.querySelector("#canvas-handle-visual-layer"),
     metrics: document.querySelector("#canvas-metrics"),
-    name: document.querySelector("#canvas-name"),
-    nameText: document.querySelector("#canvas-name-text"),
     tools: document.querySelector("#canvas-tools"),
     toolButtons: [...document.querySelectorAll(".canvas-tool[data-tool]")],
     insertFile: document.querySelector("#canvas-insert-file"),
@@ -559,16 +557,11 @@ export function initCanvas() {
     store.cancelVideoCopy(job).catch(() => {});
   });
 
-  /* 菜单在 document 上挂了「点外部就收起」（见 menu.js），点击冒泡到那里会把刚弹出的
-     切换器当成外部点击立刻关掉，所以这里要挡住 */
-  ui.name.addEventListener("click", (e) => {
-    e.stopPropagation();
-    openSwitcher();
-  });
   ui.create.addEventListener("click", createFlow);
+  initSpaceTree();
   bindZoomHold(ui.zoomIn, ZOOM_STEP);
   bindZoomHold(ui.zoomOut, -ZOOM_STEP);
-  /* 和画布名一样：菜单在 document 上挂着「点外部就收起」，这一下点击冒泡到那里，
+  /* 菜单在 document 上挂着「点外部就收起」：这一下点击冒泡到那里，
      会把刚弹出的菜单当成外部点击立刻收掉，看起来就是「点了没反应」 */
   ui.exportBtn.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -788,6 +781,7 @@ async function loadList() {
     canvases = [];
     showError(error);
   }
+  await refreshTree();
 }
 
 async function switchTo(id) {
@@ -999,8 +993,8 @@ function pauseMedia() {
 function updateChrome() {
   const hasCanvas = Boolean(current);
   ui.page.classList.toggle("no-canvas", !hasCanvas);
-  ui.nameText.textContent = current?.meta.name || "画布";
   ui.empty.hidden = hasCanvas;
+  renderTree();
   if (!hasCanvas) {
     ui.world.textContent = "";
     ui.edgeTransform.textContent = "";
@@ -1037,20 +1031,7 @@ function showEmpty() {
 }
 
 async function createFlow() {
-  const name = await promptDialog({
-    title: "新建画布",
-    label: "画布名字",
-    value: "新画布",
-    okText: "创建",
-  });
-  if (!name) return;
-  try {
-    const data = await store.createCanvas(name);
-    await loadList();
-    await switchTo(data.meta.id);
-  } catch (error) {
-    showError(error);
-  }
+  await createFlowIn(null);
 }
 
 async function renameFlow() {
@@ -1077,47 +1058,6 @@ async function renameFlow() {
   }
 }
 
-async function deleteFlow() {
-  if (!current) return;
-  const ok = await confirmDialog({
-    title: "删除画布",
-    message: `「${current.meta.name}」的整个文件夹会被移到系统回收站，之后仍可找回。`,
-    okText: "删除",
-    danger: true,
-  });
-  if (!ok) return;
-  if (editingId || edgeLabelEditor) commitEditing();
-  await flushBlockContents();
-  await flushItems();
-  await flushCamera();
-  try {
-    await store.deleteCanvas(current.meta.id);
-    localStorage.removeItem(STORAGE_KEY);
-    current = null;
-    await loadList();
-    if (canvases[0]) await switchTo(canvases[0].id);
-    else showEmpty();
-  } catch (error) {
-    showError(error);
-  }
-}
-
-function openSwitcher() {
-  const rect = ui.name.getBoundingClientRect();
-  const entries = canvases.map((canvas) => ({
-    label: `${current?.meta.id === canvas.id ? "✓ " : ""}${canvas.name}`,
-    onClick: () => switchTo(canvas.id),
-  }));
-  if (entries.length) entries.push("-");
-  entries.push({ label: "新建画布", onClick: createFlow });
-  if (current) {
-    entries.push({ label: "重命名画布", onClick: renameFlow });
-    entries.push({ label: "在资源管理器中显示", onClick: revealFlow });
-    entries.push({ label: "删除画布", danger: true, onClick: deleteFlow });
-  }
-  openMenu(rect.left, rect.bottom + 6, entries, { label: "画布" });
-}
-
 async function revealFlow() {
   if (!current) return;
   try {
@@ -1125,6 +1065,391 @@ async function revealFlow() {
   } catch (error) {
     showError(error);
   }
+}
+
+/* ---------- 左侧画布树 ---------- */
+
+const TREE_KEY = "workbench.spaceTree";
+let treeUi = null;
+let treeData = [];
+let treeCollapsed = new Set();
+let treeFilter = "";
+let treeRenaming = null;
+let treeWidth = 220;
+
+function treeSavePrefs() {
+  localStorage.setItem(TREE_KEY, JSON.stringify({
+    width: treeWidth,
+    hidden: treeUi ? treeUi.aside.hidden : false,
+    collapsed: [...treeCollapsed],
+  }));
+}
+
+function initSpaceTree() {
+  treeUi = {
+    aside: document.querySelector("#space-tree"),
+    body: document.querySelector("#space-tree-body"),
+    filter: document.querySelector("#space-tree-filter"),
+    add: document.querySelector("#space-tree-add"),
+    hide: document.querySelector("#space-tree-hide"),
+    resize: document.querySelector("#space-tree-resize"),
+  };
+  let prefs = {};
+  try {
+    prefs = JSON.parse(localStorage.getItem(TREE_KEY) || "{}");
+  } catch { /* 坏掉的偏好按默认来 */ }
+  const width = Math.min(420, Math.max(160, Number(prefs.width) || 220));
+  treeWidth = width;
+  treeUi.aside.style.width = `${width}px`;
+  treeCollapsed = new Set(Array.isArray(prefs.collapsed) ? prefs.collapsed : []);
+  treeSetHidden(Boolean(prefs.hidden));
+
+  treeUi.filter.addEventListener("input", () => {
+    treeFilter = treeUi.filter.value;
+    renderTree();
+  });
+  treeUi.add.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const rect = treeUi.add.getBoundingClientRect();
+    openMenu(rect.left, rect.bottom + 4, treeRootEntries(), { label: "新建" });
+  });
+  treeUi.hide.addEventListener("click", () => treeSetHidden(!treeUi.aside.hidden));
+  treeUi.body.addEventListener("contextmenu", (event) => {
+    if (event.target.closest(".space-tree-row")) return;
+    event.preventDefault();
+    openMenu(event.clientX, event.clientY, treeRootEntries(), { label: "画布" });
+  });
+
+  treeUi.resize.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const handle = treeUi.resize;
+    handle.classList.add("is-active");
+    handle.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = treeUi.aside.offsetWidth;
+    const move = (e) => {
+      const w = Math.min(420, Math.max(160, startWidth + e.clientX - startX));
+      treeWidth = w;
+      treeUi.aside.style.width = `${w}px`;
+      scheduleCulling();
+    };
+    const up = () => {
+      handle.classList.remove("is-active");
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      treeSavePrefs();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  });
+}
+
+function treeSetHidden(hidden) {
+  if (!treeUi) return;
+  treeUi.aside.hidden = hidden;
+  /* 收起后整列树都消失，标题栏那颗箭头翻成向右，原地点一下再展开 */
+  treeUi.hide.classList.toggle("is-collapsed", hidden);
+  treeUi.hide.title = hidden ? "展开画布栏" : "收起画布栏";
+  treeUi.hide.setAttribute("aria-label", treeUi.hide.title);
+  treeSavePrefs();
+  scheduleCulling();
+}
+
+function treeRootEntries() {
+  return [
+    { label: "新建画布", onClick: () => createFlowIn(null) },
+    { label: "新建分组", onClick: () => createGroupFlow(null) },
+  ];
+}
+
+async function refreshTree() {
+  try {
+    treeData = await store.canvasTree();
+  } catch {
+    treeData = [];
+  }
+  renderTree();
+}
+
+function treeMatches(node, needle) {
+  if (node.name.toLowerCase().includes(needle)) return true;
+  return (node.children || []).some((kid) => treeMatches(kid, needle));
+}
+
+/* 扁平的分组清单：复制画布时当目标列表，标签带上父路径才分得清同名分组 */
+function treeGroupList() {
+  const out = [];
+  const walk = (nodes, prefix) => {
+    for (const node of nodes) {
+      if (node.type !== "group") continue;
+      const label = prefix ? `${prefix} / ${node.name}` : node.name;
+      out.push({ id: node.id, label });
+      walk(node.children || [], label);
+    }
+  };
+  walk(treeData, "");
+  return out;
+}
+
+const TREE_CHEVRON = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function renderTree() {
+  if (!treeUi) return;
+  /* 正在就地改名就别重排：输入框会被排掉，blur 还会误提交一次 */
+  if (treeRenaming) return;
+  const body = treeUi.body;
+  body.textContent = "";
+  const needle = treeFilter.trim().toLowerCase();
+  let shown = 0;
+
+  const renderRow = (node, depth, forceShow) => {
+    const isGroup = node.type === "group";
+    if (needle && !forceShow && !treeMatches(node, needle)) return;
+    const row = document.createElement("div");
+    row.className = `space-tree-row${isGroup ? " is-group" : ""}`;
+    row.dataset.kind = node.type;
+    row.dataset.id = node.id;
+    row.style.paddingLeft = `${6 + depth * 14 + (isGroup ? 0 : 17)}px`;
+    const expanded = needle ? true : !treeCollapsed.has(node.id);
+    if (isGroup) {
+      const chevron = document.createElement("span");
+      chevron.className = `space-tree-chevron${expanded ? " is-open" : ""}`;
+      chevron.innerHTML = TREE_CHEVRON;
+      row.append(chevron);
+    } else if (current?.meta.id === node.id) {
+      row.classList.add("is-current");
+    }
+    const label = document.createElement("span");
+    label.className = "space-tree-label";
+    label.textContent = node.name;
+    label.title = node.name;
+    row.append(label);
+    row.addEventListener("click", () => {
+      if (isGroup) {
+        if (treeCollapsed.has(node.id)) treeCollapsed.delete(node.id);
+        else treeCollapsed.add(node.id);
+        treeSavePrefs();
+        renderTree();
+      } else {
+        void switchTo(node.id);
+      }
+    });
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (isGroup) openTreeGroupMenu(node, event.clientX, event.clientY);
+      else openTreeCanvasMenu(node, event.clientX, event.clientY);
+    });
+    body.append(row);
+    shown += 1;
+    if (isGroup && expanded) {
+      /* 分组名自己命中筛选时，整棵子树都摆出来 */
+      const forceKids = forceShow || (needle && node.name.toLowerCase().includes(needle));
+      for (const kid of node.children || []) renderRow(kid, depth + 1, forceKids);
+    }
+  };
+  for (const node of treeData) renderRow(node, 0, false);
+  if (!shown) {
+    const hint = document.createElement("p");
+    hint.className = "space-tree-hint";
+    hint.textContent = needle ? "没有匹配的画布" : "还没有画布，右键新建";
+    body.append(hint);
+  }
+}
+
+function openTreeGroupMenu(node, x, y) {
+  const empty = !(node.children || []).length;
+  openMenu(x, y, [
+    { label: "新建画布", onClick: () => createFlowIn(node.id) },
+    { label: "新建子分组", onClick: () => createGroupFlow(node.id) },
+    "-",
+    { label: "重命名", onClick: () => startTreeRename("group", node.id, node.name) },
+    { label: "在资源管理器中显示", onClick: () => store.revealGroup(node.id).catch(showError) },
+    "-",
+    empty
+      ? { label: "删除分组", danger: true, onClick: () => deleteGroupFlow(node) }
+      : { label: "删除分组（请先清空）", disabled: true },
+  ], { label: node.name });
+}
+
+function openTreeCanvasMenu(node, x, y) {
+  const targets = [
+    { label: "（根目录）", onClick: () => copyCanvasFlow(node.id, "") },
+    ...treeGroupList().map((group) => ({
+      label: group.label,
+      onClick: () => copyCanvasFlow(node.id, group.id),
+    })),
+  ];
+  openMenu(x, y, [
+    { label: "重命名", onClick: () => startTreeRename("canvas", node.id, node.name) },
+    { label: "复制到分组", children: targets },
+    { label: "在资源管理器中显示", onClick: () => store.revealCanvas(node.id).catch(showError) },
+    "-",
+    { label: "删除画布", danger: true, onClick: () => deleteTreeCanvasFlow(node) },
+  ], { label: node.name });
+}
+
+async function createFlowIn(parent) {
+  const name = await promptDialog({
+    title: "新建画布",
+    label: "画布名字",
+    value: "新画布",
+    okText: "创建",
+  });
+  if (!name) return;
+  try {
+    const data = await store.createCanvas(name, parent);
+    await loadList();
+    await switchTo(data.meta.id);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function createGroupFlow(parent) {
+  const name = await promptDialog({
+    title: "新建分组",
+    label: "分组名字",
+    value: "新分组",
+    okText: "创建",
+  });
+  if (!name) return;
+  try {
+    const id = await store.createGroup(parent, name);
+    /* 新分组要当场看得见：它和它的长辈都展开 */
+    treeCollapsed.delete(id);
+    let prefix = id;
+    while (prefix.includes("/")) {
+      prefix = prefix.slice(0, prefix.lastIndexOf("/"));
+      treeCollapsed.delete(prefix);
+    }
+    await loadList();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function deleteGroupFlow(node) {
+  const ok = await confirmDialog({
+    title: "删除分组",
+    message: `「${node.name}」会被移到系统回收站。`,
+    okText: "删除",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await store.deleteGroup(node.id);
+    treeCollapsed.delete(node.id);
+    await loadList();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function deleteTreeCanvasFlow(node) {
+  const ok = await confirmDialog({
+    title: "删除画布",
+    message: `「${node.name}」的整个文件夹会被移到系统回收站，之后仍可找回。`,
+    okText: "删除",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await agentDeleteSpace(node.id);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function copyCanvasFlow(id, parent) {
+  try {
+    if (current?.meta.id === id) {
+      if (editingId || edgeLabelEditor) commitEditing();
+      await flushBlockContents();
+      await flushItems();
+      await flushCamera();
+    }
+    const meta = await store.copyCanvas(id, parent);
+    await loadList();
+    await switchTo(meta.id);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+/* 就地改名：行内换成输入框，Enter/失焦提交，Esc 放弃 */
+function startTreeRename(kind, id, name) {
+  treeRenaming = { kind, id };
+  renderTree();
+  const row = treeUi.body.querySelector(`.space-tree-row[data-id="${CSS.escape(id)}"]`);
+  if (!row) {
+    treeRenaming = null;
+    return;
+  }
+  const label = row.querySelector(".space-tree-label");
+  const input = document.createElement("input");
+  input.className = "space-tree-rename";
+  input.value = name;
+  input.spellcheck = false;
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const finish = async (commit) => {
+    if (settled) return;
+    settled = true;
+    const value = input.value.trim();
+    treeRenaming = null;
+    if (!commit || !value || value === name) {
+      renderTree();
+      return;
+    }
+    try {
+      if (kind === "canvas") {
+        await agentRenameSpace(id, value);
+      } else {
+        await renameTreeGroup(id, value);
+      }
+    } catch (error) {
+      showError(error);
+      renderTree();
+    }
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void finish(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      void finish(false);
+    }
+  });
+  input.addEventListener("blur", () => void finish(true));
+  input.addEventListener("click", (event) => event.stopPropagation());
+}
+
+async function renameTreeGroup(id, name) {
+  const newId = await store.renameGroup(id, name);
+  /* 折叠记忆里的前缀跟着换 */
+  const remap = (key) => (key === id || key.startsWith(`${id}/`) ? newId + key.slice(id.length) : key);
+  treeCollapsed = new Set([...treeCollapsed].map(remap));
+  if (current && (current.meta.id === id || current.meta.id.startsWith(`${id}/`))) {
+    /* 当前画布住在这个分组里：id 前缀变了，落盘后按新 id 重开 */
+    if (editingId || edgeLabelEditor) commitEditing();
+    await flushBlockContents();
+    await flushItems();
+    await flushCamera();
+    const next = remap(current.meta.id);
+    current = null;
+    await loadList();
+    await switchTo(next);
+  } else {
+    await loadList();
+  }
+  return newId;
 }
 
 /* ---------- 工具与相机 ---------- */
@@ -6897,13 +7222,6 @@ function onKeyDown(e) {
   if (!active || !current || modalOpen) return;
   /* 全屏播放时按键是给影片的：Esc 归浏览器退全屏，Delete 不能顺手把这块删了 */
   if (document.fullscreenElement) return;
-  /* F9 收起顶栏三组浮层（画布名、工具条、缩放 + 导出），再按一次放回来。
-     放在输入框判断之前：焦点在缩放框或正文里时也该能用 */
-  if (e.key === "F9" && !e.repeat) {
-    e.preventDefault();
-    ui.page.classList.toggle("is-chrome-hidden");
-    return;
-  }
   const focused = document.activeElement;
   if (
     focused &&
@@ -7381,12 +7699,72 @@ async function agentOpenSpace(ref) {
   return { space: { id: current.meta.id, name: current.meta.name }, blocks: current.items.length };
 }
 
-async function agentCreateSpace(name) {
+async function agentCreateSpace(name, parent) {
   const clean = String(name ?? "").trim();
   if (!clean) throw new Error("画布名不能为空");
-  const data = await store.createCanvas(clean);
+  const parentId = parent && String(parent).trim() ? (await agentFindGroup(parent)).id : null;
+  const data = await store.createCanvas(clean, parentId);
   const meta = data?.meta;
   if (!meta) throw new Error("画布建好了，但没拿到它的信息");
+  await loadList();
+  if (active) await switchTo(meta.id);
+  return { id: meta.id, name: meta.name, opened: Boolean(current && current.meta.id === meta.id) };
+}
+
+/* 分组引用：id（相对路径）优先；名字只在唯一时才认，同名分组必须给 id */
+async function agentFindGroup(ref) {
+  await loadList();
+  const key = String(ref ?? "").trim();
+  const groups = treeGroupList();
+  const byId = groups.find((group) => group.id === key);
+  if (byId) return byId;
+  const matches = groups.filter((group) => group.id.split("/").pop() === key);
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) throw new Error(`有多个分组叫「${key}」，请传 id（相对路径）`);
+  throw new Error(`找不到分组「${key}」`);
+}
+
+async function agentSpaceTree() {
+  await loadList();
+  return { current: current?.meta.id || null, tree: treeData };
+}
+
+async function agentGroupCreate(parent, name) {
+  const clean = String(name ?? "").trim();
+  if (!clean) throw new Error("分组名不能为空");
+  const parentId = parent && String(parent).trim() ? (await agentFindGroup(parent)).id : "";
+  const id = await store.createGroup(parentId, clean);
+  treeCollapsed.delete(id);
+  await loadList();
+  return { id };
+}
+
+async function agentGroupRename(ref, name) {
+  const target = await agentFindGroup(ref);
+  const clean = String(name ?? "").trim();
+  if (!clean) throw new Error("新名字不能为空");
+  const id = await renameTreeGroup(target.id, clean);
+  return { id };
+}
+
+async function agentGroupDelete(ref) {
+  const target = await agentFindGroup(ref);
+  await store.deleteGroup(target.id);
+  treeCollapsed.delete(target.id);
+  await loadList();
+  return { deleted: { id: target.id } };
+}
+
+async function agentSpaceCopy(ref, parent) {
+  const target = await agentFindSpace(ref);
+  const parentId = parent && String(parent).trim() ? (await agentFindGroup(parent)).id : "";
+  if (current?.meta.id === target.id) {
+    if (editingId || edgeLabelEditor) commitEditing();
+    await flushBlockContents();
+    await flushItems();
+    await flushCamera();
+  }
+  const meta = await store.copyCanvas(target.id, parentId);
   await loadList();
   if (active) await switchTo(meta.id);
   return { id: meta.id, name: meta.name, opened: Boolean(current && current.meta.id === meta.id) };
@@ -8864,7 +9242,7 @@ export const canvasAgent = {
     return { id, opened: true };
   },
   /* 调试用：按选择器点一下（可再按文字筛），走 DOM 的 click，不模拟鼠标 */
-  debugClick: ({ selector, text = "", focus = false, detail = 0 } = {}) => {
+  debugClick: ({ selector, text = "", focus = false, detail = 0, right = false } = {}) => {
     /* 隐藏的元素（别的面板上的同名按钮）不算候选，免得点错块 */
     const nodes = [...document.querySelectorAll(String(selector || ""))].filter(
       (node) => node.getBoundingClientRect().width > 0,
@@ -8873,6 +9251,16 @@ export const canvasAgent = {
       ? nodes.find((node) => (node.textContent || "").includes(String(text)))
       : nodes[0];
     if (!el) throw new Error("没找到要点的元素");
+    if (right) {
+      const rect = el.getBoundingClientRect();
+      el.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 10,
+        clientY: rect.top + 10,
+      }));
+      return { clicked: true, right: true, text: (el.textContent || "").trim().slice(0, 30) };
+    }
     if (focus) el.focus({ preventScroll: true });
     /* detail > 0 模拟真实鼠标点击，走和鼠标一样的 click 事件路径（含全局的“点完摘焦点”） */
     if (detail > 0) el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail }));
@@ -9088,10 +9476,15 @@ export const canvasAgent = {
   cameraSet: agentSetCamera,
   scene: agentScene,
   spaceList: agentSpaceList,
+  spaceTree: agentSpaceTree,
   spaceOpen: agentOpenSpace,
   spaceCreate: agentCreateSpace,
+  spaceCopy: agentSpaceCopy,
   spaceRename: agentRenameSpace,
   spaceDelete: agentDeleteSpace,
+  groupCreate: agentGroupCreate,
+  groupRename: agentGroupRename,
+  groupDelete: agentGroupDelete,
   blockGet: agentBlock,
   blockCreate: async (spec) => {
     const placed = await agentCreateBlock(spec);

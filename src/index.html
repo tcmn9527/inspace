@@ -17,294 +17,312 @@
   </head>
 
   <body>
-    <header class="titlebar" data-tauri-drag-region>
-      <span class="titlebar-text" data-tauri-drag-region>无限画布</span>
-
-      <div class="titlebar-right">
-        <button
-          id="theme-btn"
-          class="caption caption-theme"
-          type="button"
-          title="主题"
-          aria-label="主题"
-          aria-haspopup="true"
-          aria-expanded="false"
-        >
-          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-            <path
-              d="M8 1.7a6.3 6.3 0 1 0 0 12.6h.9a1.35 1.35 0 0 0 0-2.7h-.6a.85.85 0 0 1 0-1.7h3a2.6 2.6 0 0 0 2.6-2.6c0-3-2.8-5.6-6.9-5.6Z"
-              stroke="currentColor"
-              stroke-width="1.1"
-              fill="none"
-              stroke-linejoin="round"
-            />
-            <circle cx="5.5" cy="6.1" r="1" fill="currentColor" />
-            <circle cx="8.1" cy="4.5" r="1" fill="currentColor" />
-            <circle cx="10.6" cy="6.3" r="1" fill="currentColor" />
-          </svg>
-        </button>
-
-        <button
-          id="settings-btn"
-          class="caption"
-          type="button"
-          title="设置"
-          aria-label="设置"
-        >
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5" fill="none" />
-            <path
-              d="M10.18 5.86L10.48 2.93L13.52 2.93L13.82 5.86L15.05 6.38L17.34 4.51L19.49 6.66L17.62 8.95L18.14 10.18L21.07 10.48L21.07 13.52L18.14 13.82L17.62 15.05L19.49 17.34L17.34 19.49L15.05 17.62L13.82 18.14L13.52 21.07L10.48 21.07L10.18 18.14L8.95 17.62L6.66 19.49L4.51 17.34L6.38 15.05L5.86 13.82L2.93 13.52L2.93 10.48L5.86 10.18L6.38 8.95L4.51 6.66L6.66 4.51L8.95 6.38z"
-              stroke="currentColor"
-              stroke-width="1.5"
-              fill="none"
-              stroke-linejoin="round"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
-
-        <button
-          id="win-min"
-          class="caption"
-          type="button"
-          title="最小化"
-          aria-label="最小化"
-        >
-          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-            <path d="M2 6h8" stroke="currentColor" stroke-width="1" fill="none" />
-          </svg>
-        </button>
-
-        <button
-          id="win-max"
-          class="caption"
-          type="button"
-          title="最大化/还原"
-          aria-label="最大化"
-        >
-          <svg
-            class="icon-maximize"
-            viewBox="0 0 12 12"
-            width="12"
-            height="12"
-            aria-hidden="true"
-          >
-            <rect
-              x="2.5"
-              y="2.5"
-              width="7"
-              height="7"
-              rx="1"
-              stroke="currentColor"
-              stroke-width="1"
-              fill="none"
-            />
-          </svg>
-          <svg
-            class="icon-restore"
-            viewBox="0 0 12 12"
-            width="12"
-            height="12"
-            aria-hidden="true"
-          >
-            <path
-              d="M3.5 4.5h6v5h-6zM4.5 4.5v-1h5v5"
-              stroke="currentColor"
-              stroke-width="1"
-              fill="none"
-            />
-          </svg>
-        </button>
-
-        <button
-          id="win-close"
-          class="caption caption-close"
-          type="button"
-          title="关闭"
-          aria-label="关闭"
-        >
-          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-            <path
-              d="M2.5 2.5l7 7M9.5 2.5l-7 7"
-              stroke="currentColor"
-              stroke-width="1"
-              fill="none"
-            />
-          </svg>
-        </button>
-      </div>
-    </header>
 
     <div class="shell">
       <section class="canvas-page" id="canvas-view">
-        <div class="canvas-topbar">
-          <button
-            class="canvas-name"
-            id="canvas-name"
-            type="button"
-            title="切换画布"
-            aria-haspopup="true"
-          >
-            <span id="canvas-name-text">画布</span>
-            <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-              <path
-                d="M2.5 4.5 6 8l3.5-3.5"
-                stroke="currentColor"
-                stroke-width="1.2"
-                fill="none"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-
-          <div class="canvas-tools" id="canvas-tools" role="toolbar" aria-label="画图">
-            <button class="canvas-tool is-active" type="button" data-tool="select" title="选择 / 移动">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <path
-                  d="M4.6 2.8 15 10.6l-4.7.8-2.3 4.4z"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-            <button class="canvas-tool" type="button" data-tool="rect" title="矩形">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <rect
-                  x="3.5"
-                  y="4.5"
-                  width="13"
-                  height="11"
-                  rx="1"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                />
-              </svg>
-            </button>
-            <button class="canvas-tool" type="button" data-tool="ellipse" title="圆形">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <circle cx="10" cy="10" r="6.4" stroke="currentColor" stroke-width="1.3" fill="none" />
-              </svg>
-            </button>
-            <button class="canvas-tool" type="button" data-tool="line" title="直线">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <path d="M4 16 16 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-              </svg>
-            </button>
-            <button class="canvas-tool" type="button" data-tool="arrow" title="箭头">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <path
-                  d="M4 16 16 4M9.5 4H16v6.5"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-            <button class="canvas-tool" type="button" data-tool="text" title="文字">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <path
-                  d="M3.5 4.5h13M10 4.5v11M7.2 15.5h5.6"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </button>
-            <button class="canvas-tool" type="button" data-tool="picture" title="画图：拖一块画面出来，可以往里面涂画">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <rect x="3" y="4" width="14" height="12" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none" />
-                <path d="M5.2 13.4c1.6-3.4 3-1.2 4.3-3.1 1.2-1.8 2.5.9 4.2-1.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
-              </svg>
-            </button>
-            <!-- 场景块故意不给工具栏入口：里面的东西目前只能由 agent 摆（block_create type:"scene"），已落块的照常渲染 -->
-            <button class="canvas-tool" id="canvas-insert-file" type="button" title="插入本地文件（任何格式）">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <path
-                  d="M5.2 3.2h6l3.6 3.6v9.4h-9.6z"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M11.2 3.2v3.6h3.6"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-            <button
-              class="canvas-tool canvas-tool-menu"
-              id="canvas-insert-gen"
-              type="button"
-              title="AI 出图"
-              aria-label="AI 出图"
-              aria-haspopup="menu"
-            >
-              <span>AI出图</span>
-            </button>
-          </div>
-
-          <div class="canvas-zoom">
-            <button class="canvas-zoom-btn" id="canvas-zoom-out" type="button" title="缩小" aria-label="缩小">
-              −
-            </button>
+        <aside class="space-tree" id="space-tree" aria-label="画布管理">
+          <div class="space-tree-head">
             <input
-              class="canvas-zoom-value"
-              id="canvas-zoom-value"
+              class="space-tree-filter"
+              id="space-tree-filter"
               type="text"
-              value="100%"
-              inputmode="decimal"
+              placeholder="筛选画布…"
               spellcheck="false"
               autocomplete="off"
-              title="输入缩放比例后回车生效（25%–400%）· Ctrl+0 重置为 100%"
-              aria-label="缩放比例"
+              aria-label="筛选画布"
             />
-            <button class="canvas-zoom-btn" id="canvas-zoom-in" type="button" title="放大" aria-label="放大">
-              +
-            </button>
-          </div>
-
-          <div class="canvas-actions">
             <button
-              class="canvas-act"
-              id="canvas-export"
+              class="space-tree-btn"
+              id="space-tree-add"
               type="button"
-              title="导出：图片、PDF 或可拖动的网页"
-              aria-label="导出"
+              title="新建"
+              aria-label="新建"
               aria-haspopup="true"
             >
-              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-                <path
-                  d="M10 3.4v8.2M6.8 8.4 10 11.6l3.2-3.2"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M4 14.2v1.4a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1.4"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  fill="none"
-                  stroke-linecap="round"
-                />
+              <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                <path d="M6 2v8M2 6h8" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" />
               </svg>
             </button>
           </div>
-        </div>
+          <div class="space-tree-body" id="space-tree-body"></div>
+          <div class="space-tree-resize" id="space-tree-resize" aria-hidden="true"></div>
+        </aside>
+        <div class="canvas-main">
+          <header class="titlebar" data-tauri-drag-region>
+            <button
+              class="titlebar-side-toggle"
+              id="space-tree-hide"
+              type="button"
+              title="收起画布栏"
+              aria-label="收起画布栏"
+            >
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+                <rect x="2" y="3.2" width="12" height="9.6" rx="1.8" stroke="currentColor" stroke-width="1.4" fill="none" />
+                <rect class="titlebar-side-bar" x="3.9" y="5" width="3.2" height="6" rx="0.9" fill="currentColor" opacity="0.55" />
+              </svg>
+            </button>
+            <div class="titlebar-tools">
+              <div class="canvas-tools" id="canvas-tools" role="toolbar" aria-label="画图">
+                <button class="canvas-tool is-active" type="button" data-tool="select" title="选择 / 移动">
+                  <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                    <path
+                      d="M4.6 2.8 15 10.6l-4.7.8-2.3 4.4z"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      fill="none"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button class="canvas-tool" type="button" data-tool="rect" title="矩形">
+                  <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                    <rect
+                      x="3.5"
+                      y="4.5"
+                      width="13"
+                      height="11"
+                      rx="1"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      fill="none"
+                    />
+                  </svg>
+                </button>
+                <button class="canvas-tool" type="button" data-tool="ellipse" title="圆形">
+                  <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                    <circle cx="10" cy="10" r="6.4" stroke="currentColor" stroke-width="1.3" fill="none" />
+                  </svg>
+                </button>
+                <button class="canvas-tool" type="button" data-tool="line" title="直线">
+                  <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                    <path d="M4 16 16 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                  </svg>
+                </button>
+                <button class="canvas-tool" type="button" data-tool="arrow" title="箭头">
+                  <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                    <path
+                      d="M4 16 16 4M9.5 4H16v6.5"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button class="canvas-tool" type="button" data-tool="text" title="文字">
+                  <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                    <path
+                      d="M3.5 4.5h13M10 4.5v11M7.2 15.5h5.6"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      fill="none"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </button>
+                <button class="canvas-tool" type="button" data-tool="picture" title="画图：拖一块画面出来，可以往里面涂画">
+                  <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                    <rect x="3" y="4" width="14" height="12" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none" />
+                    <path d="M5.2 13.4c1.6-3.4 3-1.2 4.3-3.1 1.2-1.8 2.5.9 4.2-1.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" />
+                  </svg>
+                </button>
+                <!-- 场景块故意不给工具栏入口：里面的东西目前只能由 agent 摆（block_create type:"scene"），已落块的照常渲染 -->
+                <button class="canvas-tool" id="canvas-insert-file" type="button" title="插入本地文件（任何格式）">
+                  <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                    <path
+                      d="M5.2 3.2h6l3.6 3.6v9.4h-9.6z"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      fill="none"
+                      stroke-linejoin="round"
+                    />
+                    <path
+                      d="M11.2 3.2v3.6h3.6"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      fill="none"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button
+                  class="canvas-tool canvas-tool-menu"
+                  id="canvas-insert-gen"
+                  type="button"
+                  title="AI 出图"
+                  aria-label="AI 出图"
+                  aria-haspopup="menu"
+                >
+                  <span>AI出图</span>
+                </button>
+              </div>
 
+              <div class="canvas-zoom">
+                <button class="canvas-zoom-btn" id="canvas-zoom-out" type="button" title="缩小" aria-label="缩小">
+                  −
+                </button>
+                <input
+                  class="canvas-zoom-value"
+                  id="canvas-zoom-value"
+                  type="text"
+                  value="100%"
+                  inputmode="decimal"
+                  spellcheck="false"
+                  autocomplete="off"
+                  title="输入缩放比例后回车生效（25%–400%）· Ctrl+0 重置为 100%"
+                  aria-label="缩放比例"
+                />
+                <button class="canvas-zoom-btn" id="canvas-zoom-in" type="button" title="放大" aria-label="放大">
+                  +
+                </button>
+              </div>
+
+              <div class="canvas-actions">
+                <button
+                  class="canvas-act"
+                  id="canvas-export"
+                  type="button"
+                  title="导出：图片、PDF 或可拖动的网页"
+                  aria-label="导出"
+                  aria-haspopup="true"
+                >
+                  <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                    <path
+                      d="M10 3.4v8.2M6.8 8.4 10 11.6l3.2-3.2"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                    <path
+                      d="M4 14.2v1.4a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1.4"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      fill="none"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="titlebar-right">
+              <button
+                id="theme-btn"
+                class="caption caption-theme"
+                type="button"
+                title="主题"
+                aria-label="主题"
+                aria-haspopup="true"
+                aria-expanded="false"
+              >
+                <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                  <path
+                    d="M8 1.7a6.3 6.3 0 1 0 0 12.6h.9a1.35 1.35 0 0 0 0-2.7h-.6a.85.85 0 0 1 0-1.7h3a2.6 2.6 0 0 0 2.6-2.6c0-3-2.8-5.6-6.9-5.6Z"
+                    stroke="currentColor"
+                    stroke-width="1.1"
+                    fill="none"
+                    stroke-linejoin="round"
+                  />
+                  <circle cx="5.5" cy="6.1" r="1" fill="currentColor" />
+                  <circle cx="8.1" cy="4.5" r="1" fill="currentColor" />
+                  <circle cx="10.6" cy="6.3" r="1" fill="currentColor" />
+                </svg>
+              </button>
+
+              <button
+                id="settings-btn"
+                class="caption"
+                type="button"
+                title="设置"
+                aria-label="设置"
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5" fill="none" />
+                  <path
+                    d="M10.18 5.86L10.48 2.93L13.52 2.93L13.82 5.86L15.05 6.38L17.34 4.51L19.49 6.66L17.62 8.95L18.14 10.18L21.07 10.48L21.07 13.52L18.14 13.82L17.62 15.05L19.49 17.34L17.34 19.49L15.05 17.62L13.82 18.14L13.52 21.07L10.48 21.07L10.18 18.14L8.95 17.62L6.66 19.49L4.51 17.34L6.38 15.05L5.86 13.82L2.93 13.52L2.93 10.48L5.86 10.18L6.38 8.95L4.51 6.66L6.66 4.51L8.95 6.38z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    fill="none"
+                    stroke-linejoin="round"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+
+              <button
+                id="win-min"
+                class="caption"
+                type="button"
+                title="最小化"
+                aria-label="最小化"
+              >
+                <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                  <path d="M2 6h8" stroke="currentColor" stroke-width="1" fill="none" />
+                </svg>
+              </button>
+
+              <button
+                id="win-max"
+                class="caption"
+                type="button"
+                title="最大化/还原"
+                aria-label="最大化"
+              >
+                <svg
+                  class="icon-maximize"
+                  viewBox="0 0 12 12"
+                  width="12"
+                  height="12"
+                  aria-hidden="true"
+                >
+                  <rect
+                    x="2.5"
+                    y="2.5"
+                    width="7"
+                    height="7"
+                    rx="1"
+                    stroke="currentColor"
+                    stroke-width="1"
+                    fill="none"
+                  />
+                </svg>
+                <svg
+                  class="icon-restore"
+                  viewBox="0 0 12 12"
+                  width="12"
+                  height="12"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3.5 4.5h6v5h-6zM4.5 4.5v-1h5v5"
+                    stroke="currentColor"
+                    stroke-width="1"
+                    fill="none"
+                  />
+                </svg>
+              </button>
+
+              <button
+                id="win-close"
+                class="caption caption-close"
+                type="button"
+                title="关闭"
+                aria-label="关闭"
+              >
+                <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                  <path
+                    d="M2.5 2.5l7 7M9.5 2.5l-7 7"
+                    stroke="currentColor"
+                    stroke-width="1"
+                    fill="none"
+                  />
+                </svg>
+              </button>
+            </div>
+          </header>
+          <div class="canvas-content">
         <!-- 搜索：Ctrl+F 唤出，搜这个画布的块，也搜 Markdown 卡片里的正文 -->
         <div class="canvas-search" id="canvas-search" hidden>
           <div class="canvas-search-field">
@@ -389,6 +407,8 @@
         </div>
 
         <p class="canvas-error" id="canvas-error" hidden></p>
+          </div>
+        </div>
       </section>
 
       <section class="settings-page" id="settings-view" hidden>
@@ -617,10 +637,6 @@
             </div>
             <div class="settings-shortcut-group">
               <p class="settings-shortcut-heading">窗口</p>
-              <div class="settings-shortcut-row">
-                <span>收起 / 恢复画布顶栏（画布名、工具条、缩放和导出）</span>
-                <span class="settings-keys"><kbd>F9</kbd></span>
-              </div>
               <div class="settings-shortcut-row">
                 <span>收起 / 恢复软件标题栏</span>
                 <span class="settings-keys"><kbd>F10</kbd></span>

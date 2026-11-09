@@ -47,7 +47,10 @@ const PICTURE_DIR: &str = "pictures";
 const SCENE_DIR: &str = "scenes";
 /// 生图面板的内容，一块一个 <块id>.json。出的图本身落在 images/ 里，这儿只记提示词和参数。
 const GENPANEL_DIR: &str = "genpanels";
-const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+/* 图片单文件上限。普通文生图只有几 MB；高清放大是 4× 输出，
+   一张 1920 的图放大后经常超过 20MB，原来那道上限会把结果挡在保存前，
+   面板只能显示内存里的预览、盘上没有 src，双击就打不开。 */
+const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 const BAD_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
@@ -951,7 +954,10 @@ pub fn canvas_save_image(
         return Err("图片是空的".to_string());
     }
     if bytes.len() > MAX_IMAGE_BYTES {
-        return Err("图片太大了（超过 20MB）".to_string());
+        return Err(format!(
+            "图片太大了（超过 {}MB）",
+            MAX_IMAGE_BYTES / (1024 * 1024)
+        ));
     }
     store_image(&dir, &bytes, &ext)
 }
@@ -1176,7 +1182,10 @@ pub fn canvas_save_note_image(
         return Err("图片是空的".to_string());
     }
     if bytes.len() > MAX_IMAGE_BYTES {
-        return Err("图片太大了（超过 20MB）".to_string());
+        return Err(format!(
+            "图片太大了（超过 {}MB）",
+            MAX_IMAGE_BYTES / (1024 * 1024)
+        ));
     }
     let ext = safe_image_ext(&ext);
     fs::create_dir_all(&target).map_err(|e| format!("创建笔记图片目录失败：{e}"))?;
@@ -1456,17 +1465,6 @@ fn gen_of(raw: &Value) -> Value {
             .and_then(Value::as_f64)
             .map(|value| value.clamp(0.0, 1.0))
             .unwrap_or(0.75),
-        /* 风格存的是菜单里的名字（空串=无风格）；张数只认 1 / 2 / 4 */
-        "style": raw
-            .get("style")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        "shots": raw
-            .get("shots")
-            .and_then(Value::as_i64)
-            .filter(|n| matches!(*n, 1 | 2 | 4))
-            .unwrap_or(1),
         "updatedAt": now_ms(),
     })
 }

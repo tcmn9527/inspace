@@ -13,8 +13,21 @@ function showRoute(route) {
   const isCanvas = route === "canvas";
   const isSettings = route === "settings";
 
-  document.querySelector("#canvas-view").hidden = !isCanvas;
+  /* 设置是浮在画布上的弹层：画布留着当背景，交互已经由 leaveCanvas 停掉 */
+  document.querySelector("#canvas-view").hidden = !(isCanvas || isSettings);
   document.querySelector("#settings-view").hidden = !isSettings;
+  if (isSettings) {
+    document.querySelector("#settings-body")?.scrollTo({ top: 0 });
+    /* 焦点收进弹层：别让它留在右上角齿轮上，不然关掉后按钮上会挂一圈焦点框 */
+    requestAnimationFrame(() => {
+      document.querySelector("#settings-dialog")?.focus({ preventScroll: true });
+    });
+  } else {
+    const active = document.activeElement;
+    if (active && (active.id === "settings-btn" || document.querySelector("#settings-view")?.contains(active))) {
+      active.blur();
+    }
+  }
 
   /* 进出页面时刷新数据：设置页每次进页重读磁盘，画布进出要先把防抖里的改动落盘。
      agent 也靠 routeReady 等这一轮读完再动手，不然会在半空的画布上做操作。 */
@@ -64,6 +77,24 @@ window.addEventListener("DOMContentLoaded", () => {
   /* 屏蔽 WebView2 原生右键菜单（含文本选择/输入框的剪切粘贴菜单），
      应用内只保留自己的右键菜单（见 menu.js） */
   document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  /* 鼠标点完按钮就把焦点摘掉：之后按 Esc 收浮层时，按钮上不会留一圈焦点框。
+     用捕获阶段——画布上不少按钮为了不让菜单误收会 stopPropagation。
+     键盘激活的 click（detail 为 0）不清，键盘用户仍看得到焦点位置 */
+  document.addEventListener(
+    "click",
+    (event) => {
+      const button = event.target.closest?.("button");
+      if (button && event.detail > 0) button.blur();
+    },
+    true,
+  );
+
+  /* F10 是 WebView2 的保留加速键，页面收不到它的 keydown；按键由 Rust 侧的
+     控制器拦下后走这条事件过来（见 lib.rs listen_f10_toggle） */
+  window.__TAURI__.event.listen("inspace:toggle-titlebar", () => {
+    document.body.classList.toggle("is-titlebar-hidden");
+  });
 
   appWindow.onResized(syncMaximizeIcon);
   syncMaximizeIcon();

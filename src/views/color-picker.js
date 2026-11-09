@@ -104,21 +104,15 @@ export function closeColorPicker(commit = true) {
  * @param {string} opts.value 打开时的颜色；空字符串表示当前就是透明
  * @param {string} [opts.seed] value 为空时取色盘初始停靠的颜色（只影响显示，不改值）
  * @param {string[]} [opts.presets] 预设色块（点一下即用）
- * @param {boolean} [opts.allowNone] 显示透明项，点击后回调空字符串
- * @param {string} [opts.noneLabel] 透明项的文案（填充用「无填充」，边框用「透明」）
  * @param {boolean} [opts.allowAlpha] 显示透明度滑条，结果带 alpha（画布用）
  * @param {(color: string) => void} [opts.onChange] 每次变化实时回调
- * @param {() => void} [opts.onNone] 点了「透明」之后的附加动作（独立面板用来关掉自己）
  */
 export function createColorPanel({
   value,
   seed,
   presets = [],
-  allowNone = false,
-  noneLabel = "无填充",
   allowAlpha = false,
   onChange,
-  onNone,
 } = {}) {
   const initialColor = parseColor(value);
   const initial = allowAlpha
@@ -149,7 +143,6 @@ export function createColorPanel({
     <div class="color-pop-foot">
       <span class="color-pop-chip"></span>
       <input class="color-pop-hex" spellcheck="false" maxlength="9" aria-label="十六进制色值" />
-      <button class="color-pop-none" type="button" hidden>无填充</button>
     </div>
     <div class="color-pop-presets"></div>
   `;
@@ -164,7 +157,6 @@ export function createColorPanel({
   const alphaValue = panel.querySelector(".color-pop-alpha-value");
   const chip = panel.querySelector(".color-pop-chip");
   const hexInput = panel.querySelector(".color-pop-hex");
-  const noneBtn = panel.querySelector(".color-pop-none");
   const presetRow = panel.querySelector(".color-pop-presets");
 
   const paint = () => {
@@ -176,7 +168,8 @@ export function createColorPanel({
     cursor.style.top = `${(1 - hsv.v) * 100}%`;
     cursor.style.background = shown;
     hueCursor.style.left = `${clamp(hsv.h / 360, 0, 1) * 100}%`;
-    chip.style.backgroundColor = shown;
+    /* 颜色交给 --chip-color：棋盘格垫在下面，不透明色盖住格子，半透明才透出来 */
+    chip.style.setProperty("--chip-color", shown);
     alphaRow.hidden = !allowAlpha;
     if (allowAlpha) {
       alphaBar.classList.toggle("is-disabled", !baseHex);
@@ -308,15 +301,6 @@ export function createColorPanel({
     else hexInput.value = current;
   });
 
-  noneBtn.hidden = !allowNone;
-  noneBtn.textContent = noneLabel;
-  noneBtn.addEventListener("click", () => {
-    baseHex = "";
-    current = "";
-    onChange?.("");
-    onNone?.();
-  });
-
   for (const color of presets) {
     const dot = document.createElement("button");
     dot.type = "button";
@@ -354,8 +338,6 @@ export function openColorPicker({
   value,
   seed,
   presets = [],
-  allowNone = false,
-  noneLabel = "无填充",
   allowAlpha = false,
   onChange,
   onDone,
@@ -366,11 +348,8 @@ export function openColorPicker({
     value,
     seed,
     presets,
-    allowNone,
-    noneLabel,
     allowAlpha,
     onChange,
-    onNone: () => closeColorPicker(true),
   });
   document.body.append(panel.el);
   const rect = panel.el.getBoundingClientRect();

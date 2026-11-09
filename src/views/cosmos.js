@@ -60,6 +60,10 @@ const EARTH_NEAR_LAPS = 1.5;
 /* 上轨不是瞬移：离到 1.8 倍轨道半径就开始收，头几秒仍然带着「往里飞」的动量，
    切向速度慢慢加进来，走成螺旋，免得背景流动一帧之内从「往前」换成「横着绕」 */
 const ORBIT_ENTER_K = 1.8;
+/* 轨道平面不再固定走赤道：交替「接近横向」和「明显竖向」两种。
+   竖向最多 65°，再陡镜头就要从极点正上方往下看，世界 up 退化会翻屏。 */
+const ORBIT_TILT_FLAT = [0.05, 0.3]; // 约 3°~17°
+const ORBIT_TILT_STEEP = [0.7, 1.13]; // 约 40°~65°
 /* 星体一颗一颗沿航线摆，隔多远由用户在设置页定的「几分钟遇到一颗」换算成世界距离：
    按巡航 150 单位/秒算，三分钟就是两万七。名单和间隔都存在 localStorage，
    设置页和 MCP 走同一个写入口。 */
@@ -793,6 +797,9 @@ function resetFlight() {
     travelled: 0,
     /* 名单走到哪儿了：新画布从第一颗重新开始 */
     queue: 0,
+    /* 绕飞平面的花样：第 1 次偏竖向、第 2 次偏横向，方向逐次反转 */
+    orbitCount: 0,
+    orbitDir: 1,
     wanderPhase: rnd() * Math.PI * 2,
     bodies: [],
   };
@@ -985,10 +992,18 @@ function enterOrbit(f, b, orbitR) {
     f.pos = [b.pos[0] + offset[0], b.pos[1] + offset[1], b.pos[2] + offset[2]];
   }
   const o1 = normalize3(offset);
-  /* 绕飞走「赤道」那一圈：切向取水平东向，轨道法线就近似世界 up，
-     绕过去时北极一直在画面上方，不会翻过去 */
+  /* 基础切线取水平东向；再绕 o1 倾斜，让轨道竖起来。
+     交替「接近横向 / 明显竖向」，方向也每次反转，不再永远顺着同一方向横着绕。
+     竖向封顶 65°，再陡就会从极点正上方往下看，世界 up 退化会翻屏。 */
   let u2 = normalize3(cross3([0, 1, 0], o1));
   if (isZero(u2)) u2 = [0, 0, -1];
+  f.orbitCount = (f.orbitCount || 0) + 1;
+  const steep = f.orbitCount % 2 === 1;
+  const [tiltLo, tiltHi] = steep ? ORBIT_TILT_STEEP : ORBIT_TILT_FLAT;
+  const tilt = (tiltLo + b.rnd() * (tiltHi - tiltLo)) * (b.rnd() < 0.5 ? -1 : 1);
+  u2 = normalize3(rotateAxis(u2, o1, tilt));
+  f.orbitDir = -(f.orbitDir || 1);
+  if (f.orbitDir < 0) u2 = normalize3(vecScale(u2, -1));
   const axis = normalize3(cross3(o1, u2));
   /* 地球走两段：先 1.65 倍把整颗球看全，两圈到了换的点再把目标降到 1.3 倍 */
   const earth = b.type === "earth";
@@ -1448,6 +1463,9 @@ function describeFocus(f) {
       /* 当前那一段要收到的半径：地球先远后近，这个数会在两圈后掉一档 */
       target: Math.round(o.target),
       remaining: Math.max(0, Math.round(((o.total - o.theta) / (Math.PI * 2)) * LAP_TIME)),
+      /* 这一段轨道平面离赤道有多陡、往哪边绕；给 MCP 自测用 */
+      planeTilt: Math.round(Math.acos(clamp(Math.abs(o.axis[1]), 0, 1)) * (180 / Math.PI)),
+      direction: f.orbitDir < 0 ? "cw" : "ccw",
     };
   }
   return out;

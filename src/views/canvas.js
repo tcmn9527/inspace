@@ -51,13 +51,10 @@ import {
   GEN_MIN_WIDTH,
   GEN_MODES,
   GEN_MODE_LABELS,
-  GEN_SHOTS_CHOICES,
-  GEN_SIZE_CHOICES,
   GEN_STEPS_MAX,
   GEN_STEPS_MIN,
   GEN_STRENGTH_MAX,
   GEN_STRENGTH_MIN,
-  GEN_STYLE_CHOICES,
   GEN_TEXT_MAX,
   FILE_MIN_HEIGHT,
   FILE_MIN_WIDTH,
@@ -178,6 +175,8 @@ const CONNECTABLE = new Set([
   /* 生图面板也上名单：选中要看得见那四个圈的记号，
      而且它的输入图本来就靠连线进来（P2 才吃这条线） */
   "gen",
+  /* 画面块：手绘的图和矢量画都能连给生图面板当参考图 */
+  "picture",
 ]);
 /* 每类面板拖角缩放的地板，和 canvas-items 里 normalizeItem 的取值口径一致：
    播放器、附件条这类排版固定的块也能拉角，只是不许拉小到控件看不见 */
@@ -205,6 +204,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 let ui = null;
 let active = false;
+let searchApi = null;
 let canvases = [];
 let current = null; // { meta, camera, items }
 /* 选中的块：平时点选只会有一个，Ctrl 点选往里加/摘，Ctrl+A 全往里倒 */
@@ -246,6 +246,9 @@ let mediaMissing = new Set();
 let modalOpen = false;
 let lastPointer = { x: 0, y: 0, inside: false };
 let hoverId = null;
+/* Alt 测距：按住时给单选的块画四周最近面板的距离，松开就收 */
+let measureHeld = false;
+let measureFrame = 0;
 let previewPath = null;
 let itemsTimer = null;
 let cameraTimer = null;
@@ -258,7 +261,7 @@ let audioFix = null; // { job, canvasId, item }
 
 /* ---------- 导出 ---------- */
 
-const exporter = createExporter({
+const rawExporter = createExporter({
   getItems: () => (current ? current.items : []),
   getWorld: () => ui.world,
   getEdgeG: () => ui.edgeTransform,
@@ -284,6 +287,15 @@ const exporter = createExporter({
   loadImageData: (id, src, linked) => store.imageData(id, src, linked),
   onError: (error) => showError(error),
 });
+
+/* 导出/截图要看到整张画布，先把视口裁剪暂时松开，克隆完再按视口收回去 */
+const exporter = {
+  ...rawExporter,
+  exportAs: (...args) => withAllVisible(() => rawExporter.exportAs(...args)),
+  exportSlices: (...args) => withAllVisible(() => rawExporter.exportSlices(...args)),
+  exportRegion: (...args) => withAllVisible(() => rawExporter.exportRegion(...args)),
+  snapshot: (...args) => withAllVisible(() => rawExporter.snapshot(...args)),
+};
 
 let exporting = false;
 
@@ -500,14 +512,15 @@ export function initCanvas() {
     edgeTransform: document.querySelector("#canvas-edge-transform"),
     endpointLayer: document.querySelector("#canvas-endpoint-layer"),
     guideLayer: document.querySelector("#canvas-guide-layer"),
+    measureLayer: document.querySelector("#canvas-measure-layer"),
+    portVisualLayer: document.querySelector("#canvas-port-visual-layer"),
+    lockLayer: document.querySelector("#canvas-lock-layer"),
+    handleVisualLayer: document.querySelector("#canvas-handle-visual-layer"),
     metrics: document.querySelector("#canvas-metrics"),
     name: document.querySelector("#canvas-name"),
     nameText: document.querySelector("#canvas-name-text"),
     tools: document.querySelector("#canvas-tools"),
     toolButtons: [...document.querySelectorAll(".canvas-tool[data-tool]")],
-    insertImage: document.querySelector("#canvas-insert-image"),
-    insertAudio: document.querySelector("#canvas-insert-audio"),
-    insertVideo: document.querySelector("#canvas-insert-video"),
     insertFile: document.querySelector("#canvas-insert-file"),
     insertGen: document.querySelector("#canvas-insert-gen"),
     zoomValue: document.querySelector("#canvas-zoom-value"),
@@ -529,18 +542,9 @@ export function initCanvas() {
   });
   /* 插入类按钮不在 toolButtons 里（它们不是一种画图工具），点一下仍然要把
      武装着的工具交回第一个按钮，否则「文字」的蓝会一直留在原地 */
-  for (const button of [
-    ui.insertImage,
-    ui.insertAudio,
-    ui.insertVideo,
-    ui.insertFile,
-    ui.insertGen,
-  ]) {
+  for (const button of [ui.insertFile, ui.insertGen]) {
     button.addEventListener("click", dropTool);
   }
-  ui.insertImage.addEventListener("click", insertImageFromFile);
-  ui.insertAudio.addEventListener("click", insertAudioFromFile);
-  ui.insertVideo.addEventListener("click", insertVideoFromFile);
   ui.insertFile.addEventListener("click", insertFileFromPicker);
   ui.insertGen.addEventListener("click", (event) => {
     /* 菜单在 document 上挂着「点外部就收起」：不挡住这一下，刚开的菜单会被当成外部点击 */
@@ -610,17 +614,11 @@ export function initCanvas() {
     if (e.target.closest?.(".canvas-port")) return;
     const target = e.target.closest?.(".canvas-item");
     const id = target ? target.dataset.id : null;
-    if (id !== hoverId) {
-      hoverId = id;
-      updatePorts();
-    }
+    if (id !== hoverId) setHoverId(id);
   });
   ui.stage.addEventListener("pointerleave", () => {
     lastPointer.inside = false;
-    if (hoverId) {
-      hoverId = null;
-      updatePorts();
-    }
+    if (hoverId) setHoverId(null);
   });
 
   /* 端口和选中框都画在块自己身上（见 updatePorts / updateSelection），所以按下事件在 world 这层收 */
@@ -669,6 +667,10 @@ export function initCanvas() {
 
   document.addEventListener("paste", onPaste);
   document.addEventListener("keydown", onKeyDown);
+  document.addEventListener("keyup", (e) => {
+    if (e.key === "Alt") setMeasureHeld(false);
+  });
+  window.addEventListener("blur", () => setMeasureHeld(false));
   setupFileDrop();
   setupVideoCopyEvents();
   setupGenEvents();
@@ -689,7 +691,7 @@ export function initCanvas() {
   setTool("select");
   updateChrome();
 
-  initSearch({
+  searchApi = initSearch({
     getItems: () => (current ? current.items : []),
     getSpaceId: () => current?.meta?.id || "",
     focusBlock: focusBlockById,
@@ -702,7 +704,8 @@ export function initCanvas() {
   });
 }
 
-/* 搜索结果点进来：把这块摆在视野正中，缩放到看得清的大小，再闪一下告诉用户是这块 */
+/* 搜索定位：把这块摆在视野正中并闪一下告诉用户是这块。
+   缩放保持用户当前的比例不动——搜索只负责找，不替用户改视野大小 */
 function focusBlockById(id) {
   if (!current) return;
   const item = findItem(id);
@@ -711,13 +714,7 @@ function focusBlockById(id) {
   const bounds = itemBounds(item, el);
   const stageW = ui.stage.clientWidth;
   const stageH = ui.stage.clientHeight;
-  const margin = 160;
-  const scale = clamp(
-    Math.min(stageW / (bounds.w + margin), stageH / (bounds.h + margin)),
-    MIN_SCALE,
-    1.6,
-  );
-  current.camera.scale = scale;
+  const scale = current.camera.scale;
   current.camera.x = stageW / 2 - (bounds.x + bounds.w / 2) * scale;
   current.camera.y = stageH / 2 - (bounds.y + bounds.h / 2) * scale;
   applyCamera();
@@ -759,6 +756,10 @@ export function leaveCanvas() {
   drag = null;
   /* 面板已经不显示了还让方向键挪视野，到了别的页面会莫名其妙 */
   blurMinimapFocus();
+  setMeasureHeld(false);
+  if (ui?.portVisualLayer) ui.portVisualLayer.textContent = "";
+  if (ui?.lockLayer) ui.lockLayer.textContent = "";
+  if (ui?.handleVisualLayer) ui.handleVisualLayer.textContent = "";
   pauseMedia();
   /* 全屏壳躲在被隐藏的画布视图里时浏览器不会自己退，切走要手动收，
      不然下一页会被撑到整块屏幕的尺寸 */
@@ -862,7 +863,31 @@ function sanitizeItems(raw) {
         blockIds.has(item.to.item)),
   );
   normalizeLayers(kept);
+  normalizeSeqs(kept);
   return kept;
+}
+
+/* 块的固定编号：老数据按文件顺序补；重复或坏掉的号重排，保证画布内唯一。
+   删块后号不回收，新块接着最大的往下排，用户记过的号不会突然指到别的块上。 */
+function normalizeSeqs(items) {
+  const blocks = items.filter((item) => item.type !== "connector");
+  const seen = new Set();
+  let max = 0;
+  for (const item of blocks) {
+    if (item.seq > 0 && !seen.has(item.seq)) {
+      seen.add(item.seq);
+      max = Math.max(max, item.seq);
+    } else {
+      item.seq = 0;
+    }
+  }
+  for (const item of blocks) {
+    if (!item.seq) {
+      max += 1;
+      item.seq = max;
+      seen.add(max);
+    }
+  }
 }
 
 /* 老数据没有 z：按文件里的先后顺序补上，保持原来的压盖关系 */
@@ -982,6 +1007,7 @@ function updateChrome() {
     previewPath = null;
     itemEls.clear();
     ui.endpointLayer.textContent = "";
+    if (ui.handleVisualLayer) ui.handleVisualLayer.textContent = "";
     ui.zoomValue.value = "100%";
     refreshMinimap();
   }
@@ -1139,7 +1165,86 @@ function applyCamera() {
   /* 场景块的位图分辨率要跟着相机缩放重算：CSS 的 scale 只是把已有的画布放大，
      不重画的话放到 4 倍就是一坨马赛克 */
   setSceneCameraScale(camera.scale);
+  scheduleCulling();
 }
+
+/* 视口裁剪：只渲染视野附近的面板。上千块的参考画布如果全部挂在 DOM 里，
+   拖动和缩放每一帧都要把整棵树重新画一遍，卡得没法操作。
+   只裁普通块；场景/生图/音视频自带运行时，显示/隐藏可能把它们的上下文弄坏，不碰。 */
+const CULL_MARGIN_PX = 480;
+const CULL_TYPES = new Set(["text", "image", "rect", "ellipse", "line", "arrow", "note", "picture"]);
+let cullingSuspended = 0;
+let cullFrame = 0;
+
+function scheduleCulling() {
+  if (cullingSuspended || cullFrame) return;
+  cullFrame = requestAnimationFrame(() => {
+    cullFrame = 0;
+    refreshCulling();
+  });
+}
+
+function refreshCulling() {
+  if (!current || !ui?.world || cullingSuspended) return;
+  const rect = ui.stage.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const { x, y, scale } = current.camera;
+  const pad = CULL_MARGIN_PX / scale;
+  const left = -x / scale - pad;
+  const top = -y / scale - pad;
+  const right = (rect.width - x) / scale + pad;
+  const bottom = (rect.height - y) / scale + pad;
+  /* 正在编辑的块不能被藏掉，不然输入焦点和光标会一起没 */
+  const keep = editingId || noteEditor?.itemId || "";
+  const revealed = [];
+  for (const item of current.items) {
+    if (!CULL_TYPES.has(item.type)) continue;
+    const el = itemEls.get(item.id);
+    if (!el) continue;
+    let bx = item.x;
+    let by = item.y;
+    let bw = item.w;
+    let bh = item.h || 24;
+    if (item.type === "line" || item.type === "arrow") {
+      const x2 = Number.isFinite(item.x2) ? item.x2 : item.x;
+      const y2 = Number.isFinite(item.y2) ? item.y2 : item.y;
+      bx = Math.min(item.x, x2);
+      by = Math.min(item.y, y2);
+      bw = Math.abs(x2 - item.x);
+      bh = Math.abs(y2 - item.y);
+    }
+    const inside =
+      item.id === keep || (bx + bw >= left && bx <= right && by + bh >= top && by <= bottom);
+    const wasCulled = el.classList.contains("is-culled");
+    el.classList.toggle("is-culled", !inside);
+    if (wasCulled && inside && item.type === "text") revealed.push(item);
+  }
+  /* 藏起来时量不到字高，回到视野里再补一次，后面的吸附/连线用的是最新高度 */
+  if (revealed.length) {
+    requestAnimationFrame(() => {
+      for (const item of revealed) {
+        const el = itemEls.get(item.id);
+        if (!el || el.classList.contains("is-culled")) continue;
+        const measured = el.offsetHeight;
+        if (measured) item.h = measured;
+      }
+    });
+  }
+}
+
+async function withAllVisible(fn) {
+  cullingSuspended += 1;
+  const hidden = ui?.world ? [...ui.world.querySelectorAll(".canvas-item.is-culled")] : [];
+  for (const el of hidden) el.classList.remove("is-culled");
+  try {
+    return await fn();
+  } finally {
+    cullingSuspended -= 1;
+    if (!cullingSuspended) scheduleCulling();
+  }
+}
+
+window.addEventListener("resize", scheduleCulling);
 
 function zoomLabel() {
   return `${Math.round((current?.camera.scale ?? 1) * 100)}%`;
@@ -1284,6 +1389,14 @@ function refreshConnectors() {
   refreshGenFeeds();
 }
 
+function nextSeq() {
+  let max = 0;
+  for (const item of current.items) {
+    if (item.type !== "connector" && item.seq > max) max = item.seq;
+  }
+  return max + 1;
+}
+
 function addItemElement(item) {
   if (item.type === "connector") {
     const el = createConnectorElement(item);
@@ -1292,6 +1405,7 @@ function addItemElement(item) {
     syncConnector(item);
     return el;
   }
+  if (item.type !== "connector" && !item.seq) item.seq = nextSeq();
   if (!Number.isFinite(item.z)) item.z = nextLayerZ();
   const mediaSrc =
     item.type === "image"
@@ -1398,6 +1512,7 @@ function addItemElement(item) {
   if (item.type === "note") hydrateNoteImages(item, el);
   if (item.type === "picture") attachPictureTools(el, item);
   if (item.type === "gen") attachGenPanel(el, item);
+  scheduleCulling();
   return el;
 }
 
@@ -1431,6 +1546,7 @@ function renderAll() {
   if (pinned) refreshConnectors();
   updateSelection();
   refreshMinimap();
+  refreshCulling();
 }
 
 /* 选中：默认单选（换成只有它）；add=true 是 Ctrl 点选，往集合里加，再点已选中的就摘掉 */
@@ -1495,7 +1611,9 @@ function updateMetrics() {
   ui.metrics.hidden = !shown;
   if (!shown) return;
   const count = selectedIds.size > 1 ? ` · ${selectedIds.size} 块` : "";
-  ui.metrics.textContent = `X ${Math.round(left)} · Y ${Math.round(top)}${count}`;
+  const single = selectedIds.size === 1 ? findItem([...selectedIds][0]) : null;
+  const seq = single && single.type !== "connector" && single.seq ? `#${single.seq} · ` : "";
+  ui.metrics.textContent = `${seq}X ${Math.round(left)} · Y ${Math.round(top)}${count}`;
 }
 
 function updateSelection() {
@@ -1503,9 +1621,12 @@ function updateSelection() {
   refreshConnectors();
   for (const stale of ui.world.querySelectorAll(".canvas-sel-box")) stale.remove();
   ui.endpointLayer.textContent = "";
+  if (ui.handleVisualLayer) ui.handleVisualLayer.textContent = "";
   updatePorts();
   updateMetrics();
   refreshMinimap();
+  /* 锁点不属于选中态，必须每轮都刷新：没有选中块时上面会提前返回 */
+  refreshLockDots();
   if (!selectedIds.size) return;
   /* 四角缩放把手和线的端点拖拽只给「就选了一个」：一堆块同时缩放没意义，把手糊成一片也没法点 */
   const lone = selectedIds.size === 1;
@@ -1514,6 +1635,7 @@ function updateSelection() {
     const el = itemEls.get(id);
     if (item && el) drawSelectionFor(item, el, lone);
   }
+  scheduleMeasurements();
 }
 
 /* 选中的记号只剩「四边那几个圈」：描边、柔光全都不要了，单选多选一样。
@@ -1565,7 +1687,7 @@ function drawSelectionFor(item, el, lone) {
     for (const end of ["a", "b"]) {
       const point = end === "a" ? { x: item.x, y: item.y } : { x: item.x2, y: item.y2 };
       const handle = document.createElement("span");
-      handle.className = "canvas-handle canvas-handle-point";
+      handle.className = "canvas-handle canvas-handle-point canvas-handle-hit";
       handle.dataset.handle = "endpoint";
       handle.dataset.end = end;
       /* 端点相对包围盒是固定百分比，块怎么缩放挪动都跟得住（水平/竖直线的某条边是 0，落在 0% 正好） */
@@ -1574,6 +1696,14 @@ function drawSelectionFor(item, el, lone) {
       /* 一堆块同时拽两根端点没意义：只有单选那根线的圈能拖 */
       if (!lone) handle.dataset.inert = "1";
       box.append(handle);
+      /* 看得见的端点圈画在屏幕层，和锁点/端口一样不受缩放栅格化影响 */
+      const screen = worldToStage(point.x, point.y);
+      const dot = document.createElement("span");
+      dot.className = "canvas-handle-visual";
+      if (!lone) dot.dataset.inert = "1";
+      dot.style.left = `${screen.x}px`;
+      dot.style.top = `${screen.y}px`;
+      ui.handleVisualLayer.append(dot);
     }
     return;
   }
@@ -1599,18 +1729,19 @@ function drawSelectionFor(item, el, lone) {
 }
 
 /* 选中框、端口框都塞进块自己，跟着块的层级走：块被压在下面，这些记号也一起被压住，
-   不再永远浮在所有块之上。绝对定位按块的 padding box 算，所以把块自己的边框宽度补回去，才贴得住真实外沿。 */
-function addOverlayBox(el, className) {
+   不再永远浮在所有块之上。绝对定位按块的 padding box 算，默认把边框宽度补回去贴外沿；
+   端口传 0.5，让圆圈落在边框带的正中，不然高倍缩放下会贴着外沿、看起来偏心。 */
+function addOverlayBox(el, className, borderFactor = 1) {
   const box = document.createElement("div");
   box.className = className;
   const style = getComputedStyle(el);
   box.style.inset = [
-    -parseFloat(style.borderTopWidth),
-    -parseFloat(style.borderRightWidth),
-    -parseFloat(style.borderBottomWidth),
-    -parseFloat(style.borderLeftWidth),
+    parseFloat(style.borderTopWidth),
+    parseFloat(style.borderRightWidth),
+    parseFloat(style.borderBottomWidth),
+    parseFloat(style.borderLeftWidth),
   ]
-    .map((px) => `${px}px`)
+    .map((px) => `${-px * borderFactor}px`)
     .join(" ");
   el.append(box);
   return box;
@@ -1623,6 +1754,11 @@ function onStagePointerDown(e) {
   /* 右键/中键起不成画，武装着的工具也一并退回默认 */
   if (e.button !== 0) {
     dropTool();
+    return;
+  }
+  /* 锁点自己的双击热区：这一次按下不吃，免得锁住的块顺手起平移 */
+  if (e.target.closest?.(".canvas-lock-dot")) {
+    e.preventDefault();
     return;
   }
   /* 全屏时画面还挂在原来那个块上，事件会顺着 DOM 冒泡回画布：
@@ -2217,6 +2353,133 @@ function drawSnapGuides(guides) {
   }
 }
 
+/* ---------- Alt 测距 ---------- */
+
+function setMeasureHeld(on) {
+  if (measureHeld === on) return;
+  measureHeld = on;
+  if (on) scheduleMeasurements();
+  else clearMeasurements();
+}
+
+function clearMeasurements() {
+  if (measureFrame) {
+    cancelAnimationFrame(measureFrame);
+    measureFrame = 0;
+  }
+  if (ui?.measureLayer) ui.measureLayer.textContent = "";
+}
+
+function scheduleMeasurements() {
+  if (!measureHeld || measureFrame) return;
+  measureFrame = requestAnimationFrame(() => {
+    measureFrame = 0;
+    drawMeasurements();
+  });
+}
+
+/* 选中的块到四周最近面板的空隙：左右要求竖向有投影重叠，上下要求横向有重叠，
+   只量真正“挨着的那一排/那一列”，不给斜对角硬拉一条线 */
+function drawMeasurements() {
+  const layer = ui?.measureLayer;
+  if (!layer) return;
+  layer.textContent = "";
+  if (!measureHeld || !active || !current || editingId) return;
+  const id = loneSelected();
+  if (!id) return;
+  const item = findItem(id);
+  const el = itemEls.get(id);
+  if (!item || !el || item.type === "connector" || item.type === "line" || item.type === "arrow") return;
+  const sel = itemBounds(item, el);
+  const nearest = { left: null, right: null, top: null, bottom: null };
+  for (const other of current.items) {
+    if (other.id === id || other.type === "connector" || other.type === "line" || other.type === "arrow") continue;
+    const otherEl = itemEls.get(other.id);
+    if (!otherEl) continue;
+    const b = itemBounds(other, otherEl);
+    const overY = Math.min(sel.y + sel.h, b.y + b.h) - Math.max(sel.y, b.y);
+    const overX = Math.min(sel.x + sel.w, b.x + b.w) - Math.max(sel.x, b.x);
+    if (overY > 1) {
+      const at = (Math.max(sel.y, b.y) + Math.min(sel.y + sel.h, b.y + b.h)) / 2;
+      const leftGap = sel.x - (b.x + b.w);
+      if (leftGap >= 0 && (!nearest.left || leftGap < nearest.left.gap)) {
+        nearest.left = { gap: leftGap, b, at };
+      }
+      const rightGap = b.x - (sel.x + sel.w);
+      if (rightGap >= 0 && (!nearest.right || rightGap < nearest.right.gap)) {
+        nearest.right = { gap: rightGap, b, at };
+      }
+    }
+    if (overX > 1) {
+      const at = (Math.max(sel.x, b.x) + Math.min(sel.x + sel.w, b.x + b.w)) / 2;
+      const topGap = sel.y - (b.y + b.h);
+      if (topGap >= 0 && (!nearest.top || topGap < nearest.top.gap)) {
+        nearest.top = { gap: topGap, b, at };
+      }
+      const bottomGap = b.y - (sel.y + sel.h);
+      if (bottomGap >= 0 && (!nearest.bottom || bottomGap < nearest.bottom.gap)) {
+        nearest.bottom = { gap: bottomGap, b, at };
+      }
+    }
+  }
+
+  /* 世界坐标换成屏幕坐标再画；两头的刻度由 CSS 伪元素补 */
+  const ruler = (kind, from, to, gap) => {
+    const a = worldToStage(from.x, from.y);
+    const c = worldToStage(to.x, to.y);
+    const line = document.createElement("div");
+    line.className = `canvas-measure-line canvas-measure-${kind}`;
+    if (kind === "h") {
+      line.style.left = `${Math.min(a.x, c.x)}px`;
+      line.style.top = `${a.y}px`;
+      line.style.width = `${Math.abs(c.x - a.x)}px`;
+    } else {
+      line.style.left = `${a.x}px`;
+      line.style.top = `${Math.min(a.y, c.y)}px`;
+      line.style.height = `${Math.abs(c.y - a.y)}px`;
+    }
+    const label = document.createElement("span");
+    label.className = "canvas-measure-label";
+    label.textContent = String(Math.round(gap));
+    label.style.left = `${(a.x + c.x) / 2}px`;
+    label.style.top = `${(a.y + c.y) / 2}px`;
+    layer.append(line, label);
+  };
+
+  if (nearest.left) {
+    ruler(
+      "h",
+      { x: nearest.left.b.x + nearest.left.b.w, y: nearest.left.at },
+      { x: sel.x, y: nearest.left.at },
+      nearest.left.gap,
+    );
+  }
+  if (nearest.right) {
+    ruler(
+      "h",
+      { x: sel.x + sel.w, y: nearest.right.at },
+      { x: nearest.right.b.x, y: nearest.right.at },
+      nearest.right.gap,
+    );
+  }
+  if (nearest.top) {
+    ruler(
+      "v",
+      { x: nearest.top.at, y: nearest.top.b.y + nearest.top.b.h },
+      { x: nearest.top.at, y: sel.y },
+      nearest.top.gap,
+    );
+  }
+  if (nearest.bottom) {
+    ruler(
+      "v",
+      { x: nearest.bottom.at, y: sel.y + sel.h },
+      { x: nearest.bottom.at, y: nearest.bottom.b.y },
+      nearest.bottom.gap,
+    );
+  }
+}
+
 function startDraw(e) {
   const start = clientToWorld(e.clientX, e.clientY);
   let item = null;
@@ -2360,6 +2623,7 @@ function onWindowPointerMove(e) {
     updatePorts();
     updateMetrics();
     refreshMinimap();
+    scheduleMeasurements();
     return;
   }
 
@@ -2529,7 +2793,7 @@ function settlePointerUp(e) {
   }
   if (e) {
     const hit = connectHit(e, []);
-    if (hit) hoverId = hit.id;
+    if (hit) setHoverId(hit.id);
     /* 以松手瞬间的位置为准，避免最后一次移动事件之后又挪到端口上 */
     if (hit && (finished.kind === "connect" || finished.kind === "connect-end")) {
       const exclude = finished.kind === "connect" ? finished.from.item : finished.fixedId;
@@ -2637,7 +2901,8 @@ function portTargets() {
   const seen = new Set();
   const push = (id, selected) => {
     const item = findItem(id);
-    if (!item || !CONNECTABLE.has(item.type) || seen.has(id)) return;
+    /* 锁住的块不挂端口圈：悬停和选中都只靠右上角那颗小点说话 */
+    if (!item || !CONNECTABLE.has(item.type) || item.locked || seen.has(id)) return;
     seen.add(id);
     out.push({ id, selected });
   };
@@ -2657,12 +2922,32 @@ function portTargets() {
 function updatePorts() {
   if (!ui?.world) return;
   for (const stale of ui.world.querySelectorAll(".canvas-port-box")) stale.remove();
+  if (ui.portVisualLayer) ui.portVisualLayer.textContent = "";
+  /* 两块挨得太近时，端口圈会叠成一颗更大的点。同一条屏幕位置只留先来的那颗：
+     选中的排在悬停前面，所以优先保留选中态。 */
+  const placed = [];
+  const painted = [];
+  const taken = (point) =>
+    placed.some((one) => Math.hypot(one.x - point.x, one.y - point.y) < 8);
   for (const target of portTargets()) {
     const item = findItem(target.id);
     const el = itemEls.get(target.id);
     if (!item || !el) continue;
-    const box = addOverlayBox(el, "canvas-port-box");
-    for (const side of ["top", "right", "bottom", "left"]) {
+    const b = itemBounds(item, el);
+    const centers = {
+      top: worldToStage(b.x + b.w / 2, b.y),
+      right: worldToStage(b.x + b.w, b.y + b.h / 2),
+      bottom: worldToStage(b.x + b.w / 2, b.y + b.h),
+      left: worldToStage(b.x, b.y + b.h / 2),
+    };
+    const sides = ["top", "right", "bottom", "left"].filter((side) => {
+      if (taken(centers[side])) return false;
+      placed.push(centers[side]);
+      return true;
+    });
+    if (!sides.length) continue;
+    const box = addOverlayBox(el, "canvas-port-box", 0.5);
+    for (const side of sides) {
       const port = document.createElement("span");
       port.className = "canvas-port";
       port.dataset.id = target.id;
@@ -2670,7 +2955,56 @@ function updatePorts() {
       if (target.selected) port.dataset.sel = "1";
       if (target.marksOnly) port.dataset.inert = "1";
       box.append(port);
+      painted.push({ port, selected: target.selected });
     }
+  }
+  /* 看得见的圆点画在屏幕层：位置取热区的实际屏幕中心，尺寸不跟缩放走 */
+  if (!ui.portVisualLayer) return;
+  const stageRect = ui.stage.getBoundingClientRect();
+  for (const { port, selected } of painted) {
+    const rect = port.getBoundingClientRect();
+    const dot = document.createElement("span");
+    dot.className = "canvas-port-dot";
+    if (selected) dot.dataset.sel = "1";
+    dot.style.left = `${Math.round(rect.left - stageRect.left + rect.width / 2)}px`;
+    dot.style.top = `${Math.round(rect.top - stageRect.top + rect.height / 2)}px`;
+    ui.portVisualLayer.append(dot);
+  }
+}
+
+/* 悬停态只认 hoverId，类也跟着它走：锁点变色和 MCP 的 ui_hover 走同一条路 */
+function setHoverId(id) {
+  if (hoverId && hoverId !== id) itemEls.get(hoverId)?.classList.remove("is-hover");
+  hoverId = id;
+  if (id) itemEls.get(id)?.classList.add("is-hover");
+  updatePorts();
+  refreshLockDots();
+}
+
+/* 锁点视觉画在屏幕层：位置取热区中心；大小随缩放温和变化，但永远是屏幕上的正圆。
+   热区还在块里，双击解锁不受影响。 */
+function refreshLockDots() {
+  const layer = ui?.lockLayer;
+  if (!layer) return;
+  layer.textContent = "";
+  if (!current || !active) return;
+  const stageRect = ui.stage.getBoundingClientRect();
+  const size = Math.max(4, 3 + 3 * current.camera.scale);
+  for (const item of current.items) {
+    if (!item.locked || item.type === "connector") continue;
+    const el = itemEls.get(item.id);
+    const hit = el?.querySelector(".canvas-lock-dot");
+    if (!hit) continue;
+    const rect = hit.getBoundingClientRect();
+    if (!rect.width) continue;
+    const dot = document.createElement("span");
+    dot.className = "canvas-lock-visual";
+    if (selectedIds.has(item.id) || el.classList.contains("is-hover")) dot.classList.add("is-active");
+    dot.style.left = `${Math.round(rect.left - stageRect.left + rect.width / 2)}px`;
+    dot.style.top = `${Math.round(rect.top - stageRect.top + rect.height / 2)}px`;
+    dot.style.width = `${size}px`;
+    dot.style.height = `${size}px`;
+    layer.append(dot);
   }
 }
 
@@ -2894,6 +3228,18 @@ function setConnectorBend(item, on) {
 
 function onStageDoubleClick(e) {
   if (!active || !current) return;
+  /* 双击锁点：解除锁定。锁住的块不吃别的双击，所以这条放在最前 */
+  const lockDot = e.target.closest?.(".canvas-lock-dot");
+  if (lockDot) {
+    const lockedEl = lockDot.closest?.(".canvas-item");
+    const lockedItem = findItem(lockedEl?.dataset.id);
+    if (lockedItem?.locked) {
+      e.preventDefault();
+      setLocked(lockedItem, false);
+      showToast("已解锁");
+    }
+    return;
+  }
   const target = e.target.closest?.(".canvas-item, .canvas-connector");
   if (!target) return;
   const item = findItem(target.dataset.id);
@@ -3021,7 +3367,7 @@ function onStageContextMenu(e) {
 /* ---------- 右键菜单 ---------- */
 
 /* 颜色行：悬停就在右边展开取色板，选色实时落到块上，色板收起时才写盘 */
-function colorEntry(item, prop, { allowNone = false, noneLabel = "透明", presets, allowAlpha = true, save } = {}) {
+function colorEntry(item, prop, { presets, allowAlpha = true, save } = {}) {
   let touched = false;
   return {
     label: "颜色",
@@ -3032,8 +3378,6 @@ function colorEntry(item, prop, { allowNone = false, noneLabel = "透明", prese
       },
       seed: prop === "color" || prop === "fillColor" ? "#ffffff" : "#9a9a9a",
       presets: presets || PRESETS,
-      allowNone,
-      noneLabel,
       allowAlpha,
       onChange: (color) => {
         touched = true;
@@ -3095,25 +3439,145 @@ async function copyBodySelectionText(text) {
   }
 }
 
+const STACK_LABELS = {
+  text: "文字",
+  note: "笔记卡",
+  image: "图片",
+  audio: "音频",
+  video: "视频",
+  file: "文件",
+  ebook: "电子书",
+  rect: "矩形",
+  ellipse: "圆形",
+  picture: "画面",
+  scene: "场景",
+  gen: "生图面板",
+};
+
+/* 右键落点下方还压着哪些块。DOM 命中永远只给最上面那块，
+   被完全盖住的矩形只能从这一摞里挑。按层从高到低排。 */
+function blocksBelowPoint(item, x, y) {
+  if (!current) return [];
+  const point = clientToWorld(x, y);
+  const baseZ = Number(item.z) || 0;
+  const baseIndex = current.items.findIndex((entry) => entry.id === item.id);
+  const out = [];
+  current.items.forEach((other, index) => {
+    if (other.id === item.id) return;
+    if (other.type === "connector" || other.type === "line" || other.type === "arrow") return;
+    const otherEl = itemEls.get(other.id);
+    if (!otherEl) return;
+    const b = itemBounds(other, otherEl);
+    if (point.x < b.x || point.x > b.x + b.w || point.y < b.y || point.y > b.y + b.h) return;
+    const z = Number(other.z) || 0;
+    /* z 相撞时按创建顺序判上下：后建的压在先建的上面，和 DOM 的叠法一致 */
+    if (z > baseZ || (z === baseZ && index > baseIndex)) return;
+    out.push({ item: other, index });
+  });
+  out.sort((a, b) => (Number(b.item.z) || 0) - (Number(a.item.z) || 0) || b.index - a.index);
+  return out.map((entry) => entry.item);
+}
+
+function selectBelowEntry(item, x, y, depth = 0) {
+  /* 只在最外层给这一项：嵌进某一层的菜单后再套一层会一路排到屏幕外，
+     要再往下钻就收起菜单、在新选中的块上重新右键 */
+  if (depth > 0) return null;
+  const below = blocksBelowPoint(item, x, y);
+  if (!below.length) return null;
+  return {
+    label: "选择下层",
+    children: below.map((other) => ({
+      label: `${STACK_LABELS[other.type] || other.type}${other.seq ? ` #${other.seq}` : ""}`,
+      /* 悬停往右展开这一层的完整菜单（只是看）；点这一行才算选中，菜单收起 */
+      onClick: () => select(other.id),
+      children: withSelect(itemMenuEntries(other, x, y, depth + 1), other),
+    })),
+  };
+}
+
+/* 悬停只在看，选中得等真的动了里面的设置：
+   给每个能落地的动作包一层，先选中这块再执行原来的动作。
+   颜色/滑杆只包 onChange——只悬停看一眼色板、没动，不算选中。 */
+function withSelect(entries, target) {
+  return entries.map((entry) => {
+    if (entry === "-") return entry;
+    if (entry.children) {
+      const copy = { ...entry, children: withSelect(entry.children, target) };
+      if (copy.onClick) {
+        const run = copy.onClick;
+        copy.onClick = () => {
+          select(target.id);
+          run();
+        };
+      }
+      return copy;
+    }
+    if (entry.colorPicker) {
+      const cfg = entry.colorPicker;
+      return {
+        ...entry,
+        colorPicker: {
+          ...cfg,
+          onChange: (value) => {
+            select(target.id);
+            cfg.onChange?.(value);
+          },
+        },
+      };
+    }
+    if (entry.slider) {
+      const cfg = entry.slider;
+      return {
+        ...entry,
+        slider: {
+          ...cfg,
+          onChange: (value) => {
+            select(target.id);
+            cfg.onChange?.(value);
+          },
+        },
+      };
+    }
+    if (entry.onClick) {
+      const run = entry.onClick;
+      return {
+        ...entry,
+        onClick: () => {
+          select(target.id);
+          run();
+        },
+      };
+    }
+    return entry;
+  });
+}
+
 function openItemMenu(item, x, y) {
+  openMenu(x, y, itemMenuEntries(item, x, y));
+}
+
+/* 一块的右键菜单内容。单独拆出来是为了「选择下层」：
+   鼠标停在某一层上时，直接把这一层的菜单当子菜单挂出去。 */
+function itemMenuEntries(item, x, y, depth = 0) {
   /* 锁住的块菜单只剩解锁和只读项：锁上之后要改什么都得先解开 */
   if (item.locked) {
     const entries = [];
     entries.push({ label: "解锁", onClick: () => setLocked(item, false) });
+    const below = selectBelowEntry(item, x, y, depth);
+    if (below) entries.push(below);
     if (PROP_KIND[item.type]) entries.push({ label: "属性", onClick: () => openItemProps(item) });
     if (revealTarget(item)) {
       entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
     }
-    openMenu(x, y, entries);
-    return;
+    return entries;
   }
   const entries = [];
   const isShape = item.type === "rect" || item.type === "ellipse";
   if (isShape) {
-    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor", { allowNone: true })));
+    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
     entries.push({
       label: "背景",
-      children: [colorEntry(item, "fillColor", { allowNone: true })],
+      children: [colorEntry(item, "fillColor")],
     });
   }
   if (item.type === "rect") {
@@ -3121,6 +3585,7 @@ function openItemMenu(item, x, y) {
       label: isContainer(item) ? "取消容器" : "编为容器",
       onClick: () => toggleContainer(item),
     });
+    entries.push({ label: "落图", onClick: () => void dropRegionImage(item.id) });
   } else if (item.type === "line" || item.type === "arrow") {
     entries.push({ ...colorEntry(item, "borderColor"), label: "线条颜色" });
   } else if (item.type === "text") {
@@ -3129,10 +3594,29 @@ function openItemMenu(item, x, y) {
       children: [colorEntry(item, "color"), { label: "字号", children: fontSizeMenuItems(item) }],
     });
     entries.push({
-      label: "背景",
-      children: [colorEntry(item, "fillColor", { allowNone: true })],
+      label: "对齐",
+      children: [
+        {
+          label: "水平",
+          children: TEXT_ALIGN_H.map(([value, label]) => ({
+            label: `${label}${item.align === value ? " ✓" : ""}`,
+            onClick: () => setTextAlign(item, "align", value),
+          })),
+        },
+        {
+          label: "垂直",
+          children: TEXT_ALIGN_V.map(([value, label]) => ({
+            label: `${label}${item.vAlign === value ? " ✓" : ""}`,
+            onClick: () => setTextAlign(item, "vAlign", value),
+          })),
+        },
+      ],
     });
-    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor", { allowNone: true })));
+    entries.push({
+      label: "背景",
+      children: [colorEntry(item, "fillColor")],
+    });
+    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
   } else if (item.type === "connector") {
     entries.push({ ...colorEntry(item, "color"), label: "线条颜色" });
     entries.push({
@@ -3153,8 +3637,10 @@ function openItemMenu(item, x, y) {
       label: item.bend ? "关闭折点" : "打开折点",
       onClick: () => setConnectorBend(item, !item.bend),
     });
+  } else if (item.type === "picture") {
+    entries.push({ label: "落图", onClick: () => void exportPictureImage(item.id) });
   } else if (item.type === "image") {
-    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor", { allowNone: true })));
+    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
   } else if (item.type === "video") {
     /* 播放器菜单：状态现问播放器，播放/全屏的文案跟着当前状态走 */
     const ctl = videoControlOf(itemEls.get(item.id));
@@ -3188,7 +3674,7 @@ function openItemMenu(item, x, y) {
     entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
     entries.push({
       label: "背景",
-      children: [colorEntry(item, "fillColor", { allowNone: true })],
+      children: [colorEntry(item, "fillColor")],
     });
   } else if (item.type === "file") {
     if (isFileEditable(item)) {
@@ -3197,12 +3683,14 @@ function openItemMenu(item, x, y) {
     entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
     entries.push({
       label: "背景",
-      children: [colorEntry(item, "fillColor", { allowNone: true })],
+      children: [colorEntry(item, "fillColor")],
     });
   }
   /* 连线不复制：它两头挂着块，粘出去无处可接。
      复制的语义：正文区有文字选区 → 复制纯文字；否则复制整块（面板） */
   if (item.type !== "connector") {
+    const below = selectBelowEntry(item, x, y, depth);
+    if (below) entries.push(below);
     entries.push({ label: "层级", children: layerMenuItems(item) });
     entries.push({
       label: "复制",
@@ -3227,7 +3715,7 @@ function openItemMenu(item, x, y) {
     entries.push({ label: "锁定", onClick: () => setLocked(item, true) });
   }
   entries.push({ label: "删除", danger: true, onClick: () => deleteItems([item.id]) });
-  openMenu(x, y, entries);
+  return entries;
 }
 
 /* 属性卡：这块是什么、文件躺在哪儿。笔记只报「笔记」，媒体和文件类带上绝对路径；
@@ -3366,6 +3854,16 @@ function openBlankMenu(x, y) {
 }
 
 const FONT_SIZES = [12, 14, 16, 18, 20, 24, 32, 48];
+const TEXT_ALIGN_H = [
+  ["left", "左对齐"],
+  ["center", "居中"],
+  ["right", "右对齐"],
+];
+const TEXT_ALIGN_V = [
+  ["top", "顶端"],
+  ["middle", "居中"],
+  ["bottom", "底端"],
+];
 
 function fontSizeMenuItems(item) {
   const current = item.fontSize || 14;
@@ -3380,6 +3878,18 @@ function fontSizeMenuItems(item) {
 
 function setFontSize(item, size) {
   item.fontSize = size;
+  const el = itemEls.get(item.id);
+  if (el) {
+    syncItemElement(el, item);
+    item.h = el.offsetHeight;
+  }
+  updateSelection();
+  scheduleItemsSave();
+}
+
+function setTextAlign(item, prop, value) {
+  if (item[prop] === value) return;
+  item[prop] = value;
   const el = itemEls.get(item.id);
   if (el) {
     syncItemElement(el, item);
@@ -3814,8 +4324,6 @@ function genContentOf(item) {
     seed: item.seed,
     mode: item.mode,
     strength: item.strength,
-    style: item.style || "",
-    shots: item.shots || 1,
   };
 }
 
@@ -3907,8 +4415,6 @@ async function loadBlockContents() {
               item.strength = Number.isFinite(file.strength)
                 ? Math.min(1, Math.max(0, file.strength))
                 : item.strength;
-              item.style = typeof file.style === "string" ? file.style : "";
-              item.shots = GEN_SHOTS_CHOICES.includes(file.shots) ? file.shots : 1;
             } else {
               await store.writeGen(canvasId, item.id, genContentOf(item));
             }
@@ -3946,14 +4452,136 @@ const srcInUse = (src) =>
         collectPictureImageSrcs(other.cmds, other.symbols).some((one) => one.src === src)),
   );
 
+/* ---------- 局部重绘：遮罩层 ----------
+   每块一张 512×512 的黑底画布，白笔迹 = 要重绘的地方；出图时整张当 mask 传给引擎。 */
+const GEN_MASK_SIZE = 512;
+const genMaskBases = new Map(); // 块 id -> 取景窗里垫的底图地址
+/* 块 id -> 涂抹模式开着没有：开着遮罩层才吃鼠标，关着就能拖面板 */
+const genMaskModes = new Map();
+/* agent 临时递过来的遮罩（base64），只在下一张用一次 */
+const genRunMasks = new Map();
+let maskPainting = null;
+
+function applyGenMaskMode(el, id, on) {
+  genMaskModes.set(id, on);
+  genMaskCanvasOf(el)?.classList.toggle("is-active", on);
+}
+
+function genMaskCanvasOf(el) {
+  return el?.querySelector(".canvas-gen-mask") || null;
+}
+
+function resetGenMask(canvas) {
+  canvas.width = GEN_MASK_SIZE;
+  canvas.height = GEN_MASK_SIZE;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, GEN_MASK_SIZE, GEN_MASK_SIZE);
+}
+
+function attachGenMask(el, item) {
+  const canvas = genMaskCanvasOf(el);
+  if (!canvas || canvas.dataset.ready) return;
+  canvas.dataset.ready = "1";
+  resetGenMask(canvas);
+  const at = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((e.clientX - rect.left) / Math.max(1, rect.width)) * canvas.width,
+      y: ((e.clientY - rect.top) / Math.max(1, rect.height)) * canvas.height,
+    };
+  };
+  const stroke = (e) => {
+    const ctx = canvas.getContext("2d");
+    const point = at(e);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, GEN_MASK_SIZE * 0.045, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  canvas.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    const target = findItem(item.id);
+    if (!target || target.locked) return;
+    if (genModeFor(target, genInputItems(target).length) !== "inpaint") return;
+    if (!genMaskModes.get(item.id)) return;
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    maskPainting = canvas;
+    stroke(e);
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (maskPainting !== canvas) return;
+    e.preventDefault();
+    stroke(e);
+  });
+  const stop = () => {
+    if (maskPainting === canvas) maskPainting = null;
+  };
+  canvas.addEventListener("pointerup", stop);
+  canvas.addEventListener("pointercancel", stop);
+}
+
+/* 局部重绘面板的底图：连线过来的第一张图；没有就清掉 */
+async function refreshGenMaskBase(item) {
+  if (!current) return;
+  const mode = genModeFor(item, genInputItems(item).length);
+  const source = mode === "inpaint" ? genInputItems(item)[0] : null;
+  if (!source) {
+    if (genMaskBases.delete(item.id)) refreshGenPanel(item.id);
+    return;
+  }
+  const canvasId = current.meta.id;
+  let url = "";
+  try {
+    if (source.type === "image" || (source.type === "gen" && source.src)) {
+      url = await store.imageUrl(canvasId, source.src, Boolean(source.linked));
+    } else if (source.type === "picture") {
+      url = await genInputPng(source);
+    }
+  } catch {
+    url = "";
+  }
+  if (!current || current.meta.id !== canvasId) return;
+  if ((genMaskBases.get(item.id) || "") === url) return;
+  if (url) genMaskBases.set(item.id, url);
+  else genMaskBases.delete(item.id);
+  refreshGenPanel(item.id);
+}
+
+/* 提示词框跟着内容长高、不出滚动条。只按「框这次长了多少」调整块高：
+   用户拖角改块高、agent 改块高都不受影响，刷新多少次也不会把尺寸弹回去 */
+function fitGenPrompt(itemId, prompt, grow = false) {
+  const item = findItem(itemId);
+  const el = itemEls.get(itemId);
+  if (!item || !prompt || !el) return;
+  /* 提示词框没显示（高清放大那档）：不参与量高，否则 0 和 56 的差会把块越撑越高 */
+  if (prompt.hidden || prompt.offsetParent === null) return;
+  const before = prompt.offsetHeight;
+  /* 先压到 0 再读 scrollHeight：textarea 的 height:auto 只会退回 rows 行，
+     不这么量出来的是三行的高度，长内容照样被裁 */
+  prompt.style.height = "0px";
+  const want = Math.max(56, prompt.scrollHeight);
+  prompt.style.height = `${want}px`;
+  if (!grow) return;
+  const delta = want - before;
+  if (!delta) return;
+  item.h = Math.max(GEN_MIN_HEIGHT, item.h + delta);
+  syncItemElement(el, item);
+  scheduleItemsSave();
+}
+
 function attachGenPanel(el, item) {
   const bar = el.querySelector(".canvas-gen-bar");
   const prompt = el.querySelector(".canvas-gen-prompt");
   const runButton = el.querySelector(".canvas-gen-run");
   const placeButton = el.querySelector(".canvas-gen-place");
   if (!bar || !prompt || !runButton || !placeButton) return;
-  /* 提示词框和按钮上的按下不能变成拖整块：整条在 pointerdown 上截住 */
-  bar.addEventListener("pointerdown", (e) => e.stopPropagation());
+  /* 只有真正的控件吃掉按下：提示词框、下拉、按钮、涂抹层；
+     行与行之间、按钮与按钮之间的空白留给拖整块 */
+  bar.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("textarea, input, button, select, canvas")) e.stopPropagation();
+  });
   /* 参数行这几颗下拉：点开一列，选中就写回块上，面板立刻跟着换字 */
   const select = (selector, makeEntries) => {
     const button = el.querySelector(selector);
@@ -3970,61 +4598,12 @@ function attachGenPanel(el, item) {
     on
       ? '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.4 8.4 6.6 11.6 12.6 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       : "";
-  select(".canvas-gen-size", (target) => {
-    /* 常用 / 手机 / 电脑 / 证件照各一组，组之间压一条分隔线 */
-    const rows = [];
-    let group = "";
-    for (const one of GEN_SIZE_CHOICES) {
-      if (one.group !== group) {
-        if (rows.length) rows.push("-");
-        group = one.group;
-      }
-      rows.push({
-        label: `${one.label} · ${one.w}×${one.h}`,
-        trailing: check(target.imageW === one.w && target.imageH === one.h),
-        onClick: () => {
-          const now = findItem(item.id);
-          if (!now || now.locked) return;
-          now.imageW = one.w;
-          now.imageH = one.h;
-          persistGen(now);
-          refreshGenPanel(now.id);
-        },
-      });
-    }
-    return rows;
-  });
-  select(".canvas-gen-style", (target) =>
-    GEN_STYLE_CHOICES.map((one) => ({
-      label: one.label,
-      trailing: check((target.style || "") === one.label),
-      onClick: () => {
-        const now = findItem(item.id);
-        if (!now || now.locked) return;
-        now.style = one.label === "无风格" ? "" : one.label;
-        persistGen(now);
-        refreshGenPanel(now.id);
-      },
-    })),
-  );
-  select(".canvas-gen-shots", (target) =>
-    GEN_SHOTS_CHOICES.map((n) => ({
-      label: `${n} 张`,
-      trailing: check((target.shots || 1) === n),
-      onClick: () => {
-        const now = findItem(item.id);
-        if (!now || now.locked) return;
-        now.shots = n;
-        persistGen(now);
-        refreshGenPanel(now.id);
-      },
-    })),
-  );
   prompt.addEventListener("input", () => {
     const target = findItem(item.id);
     if (!target) return;
     target.prompt = prompt.value.slice(0, GEN_TEXT_MAX);
     persistGen(target);
+    fitGenPrompt(item.id, prompt, true);
   });
   prompt.addEventListener("keydown", (e) => {
     /* 回车这一下是发出去，换行要按 Shift+Enter：框就三行高，写一句话用不着回车 */
@@ -4039,13 +4618,48 @@ function attachGenPanel(el, item) {
   if (run.phase === "idle" && !run.imageUrl && !run.previewUrl && item.src) {
     patchGenRun(item.id, { imageUrl: imageCache.get(item.src) || "" });
   }
+  attachGenMask(el, item);
+  /* 涂抹开关：开着遮罩吃鼠标，关着才拖得动面板 */
+  const brushButton = el.querySelector(".canvas-gen-brush");
+  brushButton?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    applyGenMaskMode(el, item.id, !genMaskModes.get(item.id));
+    refreshGenPanel(item.id);
+  });
+  const clearButton = el.querySelector(".canvas-gen-clear");
+  clearButton?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const canvas = genMaskCanvasOf(el);
+    if (canvas) resetGenMask(canvas);
+    showToast("遮罩已清空");
+  });
+  /* 高清放大的「补细节」开关：开了就在放大之后按提示词低强度重绘一遍 */
+  const refineButton = el.querySelector(".canvas-gen-refine");
+  refineButton?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const target = findItem(item.id);
+    if (!target || target.locked) return;
+    target.refine = !target.refine;
+    scheduleItemsSave();
+    refreshGenPanel(target.id);
+  });
+  /* 局部重绘面板一建好就进涂抹态：拉开就是要涂的 */
+  if (genModeFor(item, genInputItems(item).length) === "inpaint") {
+    applyGenMaskMode(el, item.id, true);
+  }
   syncGen(el, item, genFeedOf(item));
+  fitGenPrompt(item.id, prompt);
+  void refreshGenMaskBase(item);
 }
 
 function refreshGenPanel(id) {
   const item = findItem(id);
   const el = itemEls.get(id);
-  if (item && el) syncGen(el, item, genFeedOf(item));
+  if (!item || !el) return;
+  syncGen(el, item, genFeedOf(item));
+  /* 程序换掉提示词（agent 改词）后，框和块高都要跟着变；
+     加载画布走的是 attachGenPanel 那一路，不会从这里重复加高 */
+  fitGenPrompt(id, el.querySelector(".canvas-gen-prompt"), true);
 }
 
 /* 面板上那一行进料提示：接了几张、这一张会按哪档走。
@@ -4053,12 +4667,18 @@ function refreshGenPanel(id) {
 function genFeedOf(item) {
   const sources = genInputItems(item);
   const mode = genModeFor(item, sources.length);
-  return { mode, label: GEN_MODE_LABELS[mode] || mode, count: sources.length };
+  return {
+    mode,
+    label: GEN_MODE_LABELS[mode] || mode,
+    count: sources.length,
+    baseUrl: genMaskBases.get(item.id) || "",
+  };
 }
 
 function refreshGenFeeds() {
   if (!current) return;
   for (const item of current.items) {
+    if (item.type === "gen") void refreshGenMaskBase(item);
     if (item.type === "gen") refreshGenPanel(item.id);
   }
 }
@@ -4099,32 +4719,18 @@ async function genInputPng(item) {
     return toPngDataUrl(await store.imageData(space, item.src, Boolean(item.linked)));
   }
   if (item.type === "picture") {
-    const svg = itemEls.get(item.id)?.querySelector(".canvas-picture-svg");
-    if (!svg) throw new Error("那块画面还没画出来");
-    const clone = svg.cloneNode(true);
-    /* 序列化出去的 SVG 不认外面的 CSS，尺寸得写死在它身上：
-       不然浏览器按默认的 300×150 摆，画布直接糊成一团 */
-    const scale = Math.min(2, Math.max(1, 1024 / Math.max(1, item.w, item.h)));
-    const pxW = Math.max(32, Math.round(item.w * scale));
-    const pxH = Math.max(32, Math.round(item.h * scale));
-    clone.setAttribute("width", String(pxW));
-    clone.setAttribute("height", String(pxH));
-    const canvas = await rasterize(clone, pxW, pxH, "#ffffff");
-    return canvas.toDataURL("image/png");
+    /* 走导出那条光栅化：只画这一块，位图底会内联成 data:，纸色和笔迹都在 */
+    const shot = await exporter.snapshot({
+      region: { x: item.x, y: item.y, w: item.w, h: item.h },
+      only: item.id,
+      maxSide: 1024,
+    });
+    return `data:image/png;base64,${shot.data}`;
   }
   throw new Error(`「${item.type}」这块当不了输入图`);
 }
 
-/* 面板上选的风格只是一个前缀句，出图时拼在用户写的词前面 */
-function promptWithStyle(item) {
-  const style = GEN_STYLE_CHOICES.find((one) => one.label === (item.style || ""));
-  return `${style?.prefix || ""}${(item.prompt || "").trim()}`;
-}
-
-/* 「一次跑几张」的队列：块 id -> 还剩几张。前几张出完自动落块，最后一张留在面板里 */
-const genBatches = new Map();
-
-function runOrStopGen(id, continuation = false) {
+function runOrStopGen(id) {
   const item = findItem(id);
   if (!item || item.type !== "gen" || item.locked) return;
   const run = genRunOf(id);
@@ -4140,8 +4746,6 @@ function runOrStopGen(id, continuation = false) {
     showError("先写一句提示词");
     return;
   }
-  /* 这一轮要跑几张：只有用户按下的那一下才重新起队列，续跑沿用剩下的数 */
-  if (!continuation) genBatches.set(id, Math.max(0, (item.shots || 1) - 1));
   patchGenRun(id, {
     phase: "loading",
     step: 0,
@@ -4170,9 +4774,18 @@ async function startGenRun(item) {
     if (mode !== "t2i") {
       for (const source of sources) images.push(await genInputPng(source));
     }
+    let mask = genRunMasks.get(id) || "";
+    if (!mask && mode === "inpaint") {
+      const canvas = genMaskCanvasOf(itemEls.get(id));
+      if (!canvas) throw new Error("遮罩层没准备好，重开一下面板再试");
+      mask = canvas.toDataURL("image/png");
+    }
+    genRunMasks.delete(id);
     body = {
       block: id,
-      prompt: promptWithStyle(item),
+      prompt: (item.prompt || "").trim(),
+      mask,
+      refine: mode === "upscale" ? Boolean(item.refine) : false,
       negative: item.negative || "",
       width: item.imageW,
       height: item.imageH,
@@ -4200,7 +4813,6 @@ async function startGenRun(item) {
 
 async function stopGen(id) {
   /* 点了就是停了，先按画面判；后端那边走它的硬取消，不用这儿等 */
-  genBatches.delete(id);
   patchGenRun(id, { phase: "canceled" });
   refreshGenPanel(id);
   await store.genCancel().catch(() => {});
@@ -4230,7 +4842,6 @@ async function placeGenImage(id) {
 async function onGenDone(payload) {
   const item = findItem(payload.block);
   if (!item) {
-    genBatches.delete(payload.block);
     dropGenRun(payload.block);
     return;
   }
@@ -4245,7 +4856,6 @@ async function onGenDone(payload) {
   });
   refreshGenPanel(payload.block);
   if (!dataUrl) {
-    genBatches.delete(payload.block);
     keepLastGenImage(payload.block);
     refreshGenPanel(payload.block);
     return;
@@ -4269,18 +4879,7 @@ async function onGenDone(payload) {
       void store.deleteCanvasImage(canvasId, old, false).catch(() => {});
     }
     scheduleItemsSave();
-    /* 这一轮还要跑几张：先把这张落成图片块摆到面板旁边，再接着下一张。
-       最后一张不落，留在面板里由用户自己决定要不要落块 */
-    const left = genBatches.get(payload.block) || 0;
-    if (left > 0 && current && current.meta.id === canvasId) {
-      genBatches.set(payload.block, left - 1);
-      await placeGenImage(payload.block);
-      runOrStopGen(payload.block, true);
-    } else {
-      genBatches.delete(payload.block);
-    }
   } catch (error) {
-    genBatches.delete(payload.block);
     showError(error);
   }
 }
@@ -4338,6 +4937,7 @@ const PICTURE_TOOL_LABELS = {
   width: "笔宽",
   undo: "撤掉这一步笔画",
   redo: "把这一步笔画放回来",
+  paper: "纸色：画面底色",
 };
 
 /* 图形跟画布工具栏那套一个画法：currentColor 描边、不填色、不加装饰 */
@@ -4404,6 +5004,124 @@ function pictureButton(kind, title, onClick) {
   return button;
 }
 
+/* 把这块画面落成一张图片块：渲染成 PNG 存进画布 images/，在它右边摆一块独立的图片面板。
+   只渲染这一块，底下压着的别的块不跟着进图；之后就是普通图片，能拖、能双击看大图。 */
+async function exportPictureImage(id) {
+  const item = findItem(id);
+  if (!item || item.type !== "picture" || !current) return null;
+  const canvasId = current.meta.id;
+  try {
+    const shot = await exporter.snapshot({
+      region: { x: item.x, y: item.y, w: item.w, h: item.h },
+      only: item.id,
+      maxSide: Math.max(1600, Math.round(Math.max(item.w, item.h) * 2)),
+    });
+    const rel = await store.saveCanvasImage(canvasId, shot.data, "png");
+    if (!current || current.meta.id !== canvasId) return null;
+    imageCache.set(rel, `data:image/png;base64,${shot.data}`);
+    const placed = placeBlock({
+      ...makeImage(item.x + item.w + GEN_PLACE_GAP, item.y, item.w, item.h, rel),
+      /* 圆角跟着原面板走：原块是直角，落出来的图块也是直角。
+         也不留边框——1px 边框会把图片内容挤小一丝，和原面板对不上 */
+      radius: Number.isFinite(Number(item.radius)) ? Number(item.radius) : 0,
+      borderWidth: 0,
+    });
+    showToast("已把这张画面落成图片块");
+    return placed ? agentSummary(placed) : null;
+  } catch (error) {
+    showError(error);
+    return null;
+  }
+}
+
+/* 抓屏并在图片里裁出这块面板的屏幕范围。
+   抓回来的是设备像素（DPR 1.5 时窗口宽 2723），按 innerWidth 反推比例。 */
+async function grabRegionImage(item) {
+  const shotUrl = await store.captureViewport();
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("抓屏结果读不出来"));
+    img.src = shotUrl;
+  });
+  const dpr = image.naturalWidth / window.innerWidth;
+  const rect = itemEls.get(item.id).getBoundingClientRect();
+  /* 源坐标和源尺寸都取整：1.5 倍屏上 rect.left*1.5 常是 .5，
+     直接用小数裁会让 drawImage 做半像素重采样，字就被糊了一层 */
+  const sx = Math.round(rect.left * dpr);
+  const sy = Math.round(rect.top * dpr);
+  const sw = Math.max(1, Math.round(rect.width * dpr));
+  const sh = Math.max(1, Math.round(rect.height * dpr));
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  canvas.getContext("2d").drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+  return canvas.toDataURL("image/png").split(",")[1];
+}
+
+/* 矩形落图：抓当前屏幕上的这块面板，存成 PNG 摆在右边。
+   抓屏幕而不是离屏渲染，是因为屏幕上的字用 ClearType，离屏只有灰度抗锯齿，
+   同一个颜色也会显得更粗；抓屏出来的图和面板逐像素一致。
+   面板没完整露在视野里时抓不全，退回 ×2 离屏出图。 */
+async function dropRegionImage(id) {
+  if (!current || exporting) return null;
+  const item = findItem(id);
+  if (!item || item.type !== "rect") return null;
+  const el = itemEls.get(id);
+  if (!el) return null;
+  const box = itemBounds(item, el);
+  if (!(box.w > 0 && box.h > 0)) {
+    showToast("这块的范围是空的，没东西可落");
+    return null;
+  }
+  const canvasId = current.meta.id;
+  const rect = el.getBoundingClientRect();
+  const visible =
+    rect.left >= 0 &&
+    rect.top >= 0 &&
+    rect.right <= window.innerWidth &&
+    rect.bottom <= window.innerHeight;
+
+  exporting = true;
+  showToast("正在按屏幕画面生成图片…");
+  select(null);
+  document.body.classList.add("is-screen-capturing");
+  try {
+    if (editingId || edgeLabelEditor) commitEditing();
+    /* 等两帧再让窗口把藏掉记号的画面画出来，抓到的才是干净的一帧 */
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    let data;
+    if (visible) {
+      data = await grabRegionImage(item);
+    } else {
+      showToast("面板没完整露在视野里，按 ×2 离屏出图");
+      const shot = await exporter.exportRegion({ box, quality: "high", transparent: false });
+      data = shot.data;
+    }
+    const rel = await store.saveCanvasImage(canvasId, data, "png");
+    if (!current || current.meta.id !== canvasId) return null;
+    imageCache.set(rel, `data:image/png;base64,${data}`);
+    const placed = placeBlock({
+      ...makeImage(item.x + item.w + GEN_PLACE_GAP, item.y, box.w, box.h, rel),
+      /* 圆角跟着原矩形走：它设了多少就多少，没设就是直角。
+         也不留边框——1px 边框会把图片内容挤小一丝，和原面板对不上 */
+      radius: Number.isFinite(Number(item.radius)) ? Number(item.radius) : 0,
+      borderWidth: 0,
+    });
+    showToast("已把这块面板落成图片块");
+    return placed ? agentSummary(placed) : null;
+  } catch (error) {
+    select(item.id);
+    showError(error);
+    return null;
+  } finally {
+    document.body.classList.remove("is-screen-capturing");
+    exporting = false;
+  }
+}
+
 /* 工具条挂在块元素里，靠 --canvas-inv 反缩放：块缩到很小也点得着，
    跟选中框、缩放手柄同一个脾气（transform-origin 定在贴块的那条边） */
 function attachPictureTools(el, item) {
@@ -4416,9 +5134,11 @@ function attachPictureTools(el, item) {
   }
   const ink = pictureButton("color", PICTURE_TOOL_LABELS.color, (e, button) => openPictureInk(item.id, button));
   ink.innerHTML = '<span class="canvas-picture-ink"></span>';
+  const paper = pictureButton("paper", PICTURE_TOOL_LABELS.paper, (e, button) => openPicturePaper(item.id, button));
+  paper.innerHTML = '<span class="canvas-picture-paper-swatch"></span>';
   const width = pictureButton("width", PICTURE_TOOL_LABELS.width, (e, button) => openPictureWidth(item.id, button));
   width.innerHTML = '<span class="canvas-picture-width"></span>';
-  bar.append(ink, width);
+  bar.append(ink, paper, width);
   bar.append(
     pictureButton("undo", PICTURE_TOOL_LABELS.undo, () => pictureStepMove(item.id, "undo")),
     pictureButton("redo", PICTURE_TOOL_LABELS.redo, () => pictureStepMove(item.id, "redo")),
@@ -4444,6 +5164,8 @@ function syncPictureChrome(el, item) {
   }
   const ink = bar.querySelector(".canvas-picture-ink");
   if (ink) ink.style.setProperty("--picture-ink", editor.color);
+  const paper = bar.querySelector(".canvas-picture-paper-swatch");
+  if (paper) paper.style.setProperty("--picture-paper", item.paperColor || "transparent");
   const width = bar.querySelector(".canvas-picture-width");
   if (width) width.textContent = String(editor.size);
 }
@@ -4481,6 +5203,32 @@ function openPictureInk(id, button) {
       if (color) editor.color = color;
       refreshPictureChrome(id);
     },
+  });
+}
+
+/* 纸色：画面块的底色。选全透明就存空串，卡片背景交回 transparent */
+function openPicturePaper(id, button) {
+  const item = findItem(id);
+  if (!item) return;
+  const rect = button.getBoundingClientRect();
+  const apply = (color) => {
+    const now = findItem(id);
+    if (!now) return;
+    now.paperColor = color && !String(color).endsWith("00") ? color : "";
+    const el = itemEls.get(id);
+    if (el) syncItemElement(el, now);
+    refreshPictureChrome(id);
+    scheduleItemsSave();
+  };
+  openColorPicker({
+    x: rect.right + 6,
+    y: rect.top,
+    value: item.paperColor || "",
+    seed: "#ffffff",
+    presets: PRESETS,
+    allowAlpha: true,
+    onChange: apply,
+    onDone: apply,
   });
 }
 
@@ -5362,7 +6110,7 @@ async function pasteBlocks(payload) {
   for (const raw of blocks) {
     /* 拷贝副本那几下是异步的：期间切了画布就别再把块往原来那个画布上摆 */
     if (!current || current.meta.id !== canvasId) return;
-    const item = normalizeItem({ ...raw, id: newId(), z: null });
+    const item = normalizeItem({ ...raw, id: newId(), seq: 0, z: null });
     if (!item || item.type === "connector") continue;
     const dx = coord(raw.x) - box.x;
     const dy = coord(raw.y) - box.y;
@@ -5588,7 +6336,7 @@ function batchRowPoint(origin) {
   return { x: at.x, y: at.y };
 }
 
-/* 工具栏四个按钮都是「开文件框 → 把选中的那一个路径交给统一流程」 */
+/* 工具栏的插入文件按钮：开文件框 → 把选中的路径交给统一流程，按扩展名落成图片/音乐/视频/附件 */
 async function pickAndInsert(pick) {
   if (!active || !current) return;
   const canvasId = current.meta.id;
@@ -5603,10 +6351,6 @@ async function pickAndInsert(pick) {
   }
 }
 
-function insertImageFromFile() {
-  return pickAndInsert(store.pickCanvasImage);
-}
-
 /* 工具栏右端的「AI 出图」下拉：一列纯文字，点哪一项就摆一块对应档位的生图面板 */
 function openInsertGenMenu() {
   if (!current) return;
@@ -5617,6 +6361,7 @@ function openInsertGenMenu() {
     [
       { label: "文生图", onClick: () => insertGenPanel("t2i") },
       { label: "图生图", onClick: () => insertGenPanel("i2i") },
+      { label: "图片局部重绘", onClick: () => insertGenPanel("inpaint") },
       { label: "图片高清放大", onClick: () => insertGenPanel("upscale") },
     ],
     { kind: "gen-insert" },
@@ -5633,18 +6378,12 @@ function insertGenPanel(mode) {
   showToast(
     mode === "upscale"
       ? "高清放大面板已摆好：把要放大的图连进来，点开始"
-      : mode === "i2i"
-        ? "图生图面板已摆好：把底图连进来，写清要改成什么样"
-        : "文生图面板已摆好：写一句提示词就能出图",
+      : mode === "inpaint"
+        ? "局部重绘面板已摆好：把要改的图连进来，在预览上涂出要重绘的地方"
+        : mode === "i2i"
+          ? "图生图面板已摆好：把底图连进来，写清要改成什么样"
+          : "文生图面板已摆好：写一句提示词就能出图",
   );
-}
-
-function insertAudioFromFile() {
-  return pickAndInsert(store.pickCanvasAudio);
-}
-
-function insertVideoFromFile() {
-  return pickAndInsert(store.pickCanvasVideo);
 }
 
 function insertFileFromPicker() {
@@ -6158,6 +6897,13 @@ function onKeyDown(e) {
   if (!active || !current || modalOpen) return;
   /* 全屏播放时按键是给影片的：Esc 归浏览器退全屏，Delete 不能顺手把这块删了 */
   if (document.fullscreenElement) return;
+  /* F9 收起顶栏三组浮层（画布名、工具条、缩放 + 导出），再按一次放回来。
+     放在输入框判断之前：焦点在缩放框或正文里时也该能用 */
+  if (e.key === "F9" && !e.repeat) {
+    e.preventDefault();
+    ui.page.classList.toggle("is-chrome-hidden");
+    return;
+  }
   const focused = document.activeElement;
   if (
     focused &&
@@ -6165,6 +6911,12 @@ function onKeyDown(e) {
       focused.tagName === "TEXTAREA" ||
       focused.isContentEditable)
   ) {
+    return;
+  }
+  /* 按住 Alt 给选中的块量四周距离；松开在 keyup 里收 */
+  if (e.key === "Alt") {
+    if (!e.repeat) setMeasureHeld(true);
+    e.preventDefault();
     return;
   }
   /* Ctrl+Z / Ctrl+Shift+Z（Ctrl+Y 也行）只在画面块里退笔画：
@@ -6316,6 +7068,7 @@ function agentSummary(item) {
   /* 连线自己没有坐标，包围盒只对块算 */
   const base = {
     id: item.id,
+    seq: item.seq || null,
     type: item.type,
     z: Number.isFinite(item.z) ? item.z : null,
     locked: Boolean(item.locked),
@@ -6343,6 +7096,8 @@ function agentSummary(item) {
       text: item.text,
       color: item.color,
       fontSize: item.fontSize,
+      align: item.align || "left",
+      vAlign: item.vAlign || "top",
       fillColor: item.fillColor,
       borderColor: item.borderColor,
       bordered: item.bordered,
@@ -6725,10 +7480,13 @@ async function agentCreateBlock(spec = {}) {
 
   if (type === "text") {
     const w = Math.max(40, numOr(spec.w, TEXT_DEFAULT_WIDTH));
+    const minH = Math.max(0, numOr(spec.h, 0));
     const at = agentPlacePoint(w, 24, spec);
-    const item = withLock(makeText(at.x, at.y, w));
+    const item = withLock(makeText(at.x, at.y, w, minH));
     item.text = String(spec.text ?? "");
     item.fontSize = clamp(Math.round(numOr(spec.fontSize, item.fontSize)), 8, 200);
+    if (["left", "center", "right"].includes(spec.align)) item.align = spec.align;
+    if (["top", "middle", "bottom"].includes(spec.vAlign)) item.vAlign = spec.vAlign;
     if (spec.borderColor !== undefined) {
       item.borderColor = String(spec.borderColor || "");
       item.bordered = Boolean(item.borderColor);
@@ -6998,7 +7756,7 @@ async function agentDuplicateBlock(id, patch = {}) {
   const fromId = current.meta.id;
   const sourceId = source.id;
   if (elsewhere) await agentOpenSpace(target.id);
-  const item = normalizeItem({ ...raw, id: newId(), z: null });
+  const item = normalizeItem({ ...raw, id: newId(), seq: 0, z: null });
   if (!item) throw new Error("这块没法复制");
   if (elsewhere) {
     /* 目标画布没有「原块右下一格」这回事：给了落点就照着摆，没给就摆在镜头正中 */
@@ -7094,6 +7852,17 @@ async function agentUpdateBlock(id, patch = {}) {
   if (patch.fontSize !== undefined && item.type === "text") {
     setFontSize(item, clamp(Math.round(numOr(patch.fontSize, item.fontSize)), 8, 200));
   }
+  /* 文字块的高度是内容撑开的；给 h 就是抬高地板，垂直对齐才有地方体现 */
+  if (patch.h !== undefined && item.type === "text") {
+    item.minH = Math.max(0, numOr(patch.h, item.minH));
+    geometry = true;
+  }
+  if (item.type === "text" && ["left", "center", "right"].includes(patch.align)) {
+    setTextAlign(item, "align", patch.align);
+  }
+  if (item.type === "text" && ["top", "middle", "bottom"].includes(patch.vAlign)) {
+    setTextAlign(item, "vAlign", patch.vAlign);
+  }
   if ((item.type === "line" || item.type === "arrow") && patch.x2 !== undefined && patch.y2 !== undefined) {
     item.x2 = numOr(patch.x2, item.x2);
     item.y2 = numOr(patch.y2, item.y2);
@@ -7118,7 +7887,8 @@ async function agentUpdateBlock(id, patch = {}) {
     item.text = String(patch.text);
     const body = el?.querySelector(".canvas-text-body");
     if (body) body.textContent = item.text;
-    if (el) item.h = el.offsetHeight;
+    /* 被视口裁掉的块量不到高度，等回到视野里再补 */
+    if (el && !el.classList.contains("is-culled")) item.h = el.offsetHeight;
   }
   if (patch.markdown !== undefined && item.type === "note") {
     if (item.linked) throw new Error("这是引用外部 .md 的笔记块，写正文请用 note_write_back");
@@ -7150,6 +7920,7 @@ async function agentUpdateBlock(id, patch = {}) {
   }
   if (item.type === "picture" && patch.paperColor !== undefined) {
     item.paperColor = String(patch.paperColor || "");
+    refreshPictureChrome(item.id);
   }
   /* 图层开关也是块上的属性，和纸色并一处；写在指令之后：那一头抛了错这块不该半改 */
   if (item.type === "picture" && patch.hidden !== undefined) {
@@ -7184,7 +7955,11 @@ async function agentUpdateBlock(id, patch = {}) {
     item.light = got.light;
   }
   /* 生图面板的参数也在这条路上改：改完单独落那份文件，和画面块一个规矩 */
-  if (item.type === "gen" && applyGenFields(item, patch)) persistGen(item);
+  if (item.type === "gen" && applyGenFields(item, patch)) {
+    persistGen(item);
+    /* 提示词/尺寸被 agent 改过，面板上的字和框高都要重新算 */
+    refreshGenPanel(item.id);
+  }
   if (el) syncItemElement(el, item);
   if (geometry) {
     updateSelection();
@@ -7506,7 +8281,10 @@ async function agentPictureDraw(id, patch = {}) {
   item.cmds = next;
   /* 指令和素材不归 items.json 管，改完单独落 pictures/<块id>.json 那一份 */
   persistPicture(item);
-  if (patch.paperColor !== undefined) item.paperColor = String(patch.paperColor || "");
+  if (patch.paperColor !== undefined) {
+    item.paperColor = String(patch.paperColor || "");
+    refreshPictureChrome(item.id);
+  }
   /* 开关要在重画之前就写上，不然这一帧还是按旧的层画 */
   if (hidden) item.hidden = hidden.hidden;
   if (light) item.light = light.light;
@@ -7715,7 +8493,7 @@ async function waitGenRun(id, timeoutMs) {
   }
 }
 
-async function agentGenRun(id, patch = {}) {
+async function agentGenRun(id, patch = {}, mask = "") {
   const item = agentGenOf(id);
   /* 锁拦改不拦看，但这一趟既改字段又发任务：先看锁，不许把提示词写进一块锁着的面板 */
   if (item.locked) throw new Error("这块已锁定，先解锁再出图");
@@ -7723,8 +8501,16 @@ async function agentGenRun(id, patch = {}) {
   if (busy && busy !== item.id) {
     throw new Error(`引擎正被生图面板 ${busy} 占着，一次只出一张`);
   }
+  if (mask) genRunMasks.set(item.id, String(mask));
+  else genRunMasks.delete(item.id);
+  /* 补细节是块上的开关，不走 applyGenFields */
+  let refined = false;
+  if (patch.refine !== undefined) {
+    item.refine = Boolean(patch.refine);
+    refined = true;
+  }
   /* 改字段和发出去是同一次调用：先落到块上，出图取的就是块上这一份 */
-  if (applyGenFields(item, patch)) {
+  if (applyGenFields(item, patch) || refined) {
     persistGen(item);
     const el = itemEls.get(item.id);
     if (el) syncItemElement(el, item);
@@ -8028,6 +8814,253 @@ function agentResetZoom() {
 /* ---------- 汇总出口 ---------- */
 
 export const canvasAgent = {
+  /* —— 调试口：不经过鼠标，直接开浮层、读元素样式。给 MCP 自测用 —— */
+  debugColorPicker: ({ id, prop = "borderColor" } = {}) => {
+    agentRequireSpace();
+    const item = findItem(id);
+    if (!item) throw new Error("没有这块");
+    const el = itemEls.get(id);
+    const rect = el ? el.getBoundingClientRect() : { right: 240, top: 240 };
+    openColorPicker({
+      x: Math.max(8, Math.min(rect.right + 12, window.innerWidth - 250)),
+      y: Math.max(8, Math.min(rect.top, window.innerHeight - 400)),
+      value: item[prop] || "",
+      presets: PRESETS,
+      allowAlpha: true,
+      onChange: (color) => applyColor(item, prop, color),
+    });
+    return { id, prop, opened: true };
+  },
+  /* 调试用：按块 id 打开右键菜单，不展开子菜单 */
+  debugMenu: ({ id } = {}) => {
+    agentRequireSpace();
+    const item = findItem(id);
+    if (!item) throw new Error("没有这块");
+    const el = itemEls.get(id);
+    const r = el ? el.getBoundingClientRect() : { left: 200, top: 200 };
+    openItemMenu(item, r.left + 24, r.top + 24);
+    return { id, opened: true };
+  },
+  /* 调试用：按块 id 打开右键菜单，并程序化展开「边框 → 颜色」三级色盘 */
+  debugMenuColor: async ({ id } = {}) => {
+    agentRequireSpace();
+    const item = findItem(id);
+    if (!item) throw new Error("没有这块");
+    const el = itemEls.get(id);
+    const r = el ? el.getBoundingClientRect() : { left: 200, top: 200 };
+    openItemMenu(item, r.left + 24, r.top + 24);
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 40));
+    const menu = document.getElementById("ctx-menu");
+    const border = [...menu.querySelectorAll("button")].find((b) => b.textContent.trim() === "边框");
+    if (!border) throw new Error("菜单里没有「边框」");
+    border.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    await tick();
+    const color = [...document.querySelectorAll(".ctx-submenu button")].find((b) =>
+      b.textContent.trim().startsWith("颜色"),
+    );
+    if (!color) throw new Error("二级菜单里没有「颜色」");
+    color.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    await tick();
+    return { id, opened: true };
+  },
+  /* 调试用：按选择器点一下（可再按文字筛），走 DOM 的 click，不模拟鼠标 */
+  debugClick: ({ selector, text = "", focus = false, detail = 0 } = {}) => {
+    /* 隐藏的元素（别的面板上的同名按钮）不算候选，免得点错块 */
+    const nodes = [...document.querySelectorAll(String(selector || ""))].filter(
+      (node) => node.getBoundingClientRect().width > 0,
+    );
+    const el = text
+      ? nodes.find((node) => (node.textContent || "").includes(String(text)))
+      : nodes[0];
+    if (!el) throw new Error("没找到要点的元素");
+    if (focus) el.focus({ preventScroll: true });
+    /* detail > 0 模拟真实鼠标点击，走和鼠标一样的 click 事件路径（含全局的“点完摘焦点”） */
+    if (detail > 0) el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail }));
+    else el.click();
+    return {
+      clicked: true,
+      focused: focus && document.activeElement === el,
+      className: typeof el.className === "string" ? el.className : "",
+      text: (el.textContent || "").trim().slice(0, 30),
+    };
+  },
+  /* 调试用：按选择器双击一下，走 DOM 的 dblclick，不模拟鼠标 */
+  debugDoubleClick: ({ selector, text = "" } = {}) => {
+    const nodes = [...document.querySelectorAll(String(selector || ""))].filter(
+      (node) => node.getBoundingClientRect().width > 0,
+    );
+    const el = text
+      ? nodes.find((node) => (node.textContent || "").includes(String(text)))
+      : nodes[0];
+    if (!el) throw new Error("没找到要双击的元素");
+    el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
+    return {
+      doubleClicked: true,
+      className: typeof el.className === "string" ? el.className : "",
+      text: (el.textContent || "").trim().slice(0, 30),
+    };
+  },
+  /* 调试用：只派发 pointermove，验证悬停样式（不按下、不选中） */
+  debugHover: ({ x = 0, y = 0, selector = "", text = "", last = false } = {}) => {
+    /* 合成 pointermove 造不出 mouseenter（那是浏览器按真实位置推的），
+       所以按选择器直接往元素上派发一份悬停事件，专供菜单展开这类验证 */
+    let target = null;
+    if (selector) {
+      const all = [...document.querySelectorAll(selector)];
+      const matches = text ? all.filter((el) => el.textContent.trim().includes(text)) : all;
+      target = last ? matches.at(-1) : matches[0];
+      if (!target) throw new Error(`没有匹配 ${selector} ${text} 的元素`);
+      const rect = target.getBoundingClientRect();
+      x = rect.left + rect.width / 2;
+      y = rect.top + rect.height / 2;
+      const opts = { bubbles: false, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse", isPrimary: true };
+      target.dispatchEvent(new PointerEvent("pointerenter", opts));
+      target.dispatchEvent(new MouseEvent("mouseenter", opts));
+      target.dispatchEvent(new PointerEvent("pointermove", { ...opts, bubbles: true }));
+      return { hovered: true, x, y, target: target.textContent.trim().slice(0, 24) };
+    }
+    target = document.elementFromPoint(x, y) || document.body;
+    target.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: x,
+        clientY: y,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      }),
+    );
+    return {
+      hovered: true,
+      x,
+      y,
+      target: typeof target.className === "string" ? target.className : target.tagName,
+    };
+  },
+  /* 调试用：把元素滚进视野，不模拟滚轮 */
+  debugScroll: ({ selector, align = "center" } = {}) => {
+    const el = [...document.querySelectorAll(String(selector || ""))].find(
+      (node) => node.getBoundingClientRect().width > 0,
+    );
+    if (!el) throw new Error("没找到要滚动的元素");
+    el.scrollIntoView({ block: align, inline: "nearest" });
+    return { scrolled: true, className: typeof el.className === "string" ? el.className : "" };
+  },
+  /* 调试用：从视口坐标 (x,y) 拖 (dx,dy)，走 DOM 的 pointer 事件、不模拟鼠标 */
+  debugDrag: ({ x = 0, y = 0, dx = 0, dy = 0 } = {}) => {
+    const fire = (type, cx, cy) => {
+      const target = document.elementFromPoint(cx, cy) || document.body;
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: cx,
+          clientY: cy,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+          button: 0,
+          buttons: type === "pointerup" ? 0 : 1,
+        }),
+      );
+    };
+    fire("pointerdown", x, y);
+    fire("pointermove", x + dx * 0.5, y + dy * 0.5);
+    fire("pointermove", x + dx, y + dy);
+    fire("pointerup", x + dx, y + dy);
+    return { dragged: true, from: [x, y], to: [x + dx, y + dy] };
+  },
+  /* 调试用：向页面派发一次键盘事件，不模拟鼠标、不抢系统焦点 */
+  debugKey: ({ key, action = "press", ctrl = false, shift = false, alt = false, meta = false } = {}) => {
+    if (!key) throw new Error("缺少按键名");
+    const target = document.activeElement || document.body;
+    const init = {
+      key: String(key),
+      code: String(key),
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: Boolean(ctrl),
+      shiftKey: Boolean(shift),
+      altKey: Boolean(alt),
+      metaKey: Boolean(meta),
+    };
+    let down = null;
+    if (action !== "up") {
+      down = new KeyboardEvent("keydown", init);
+      target.dispatchEvent(down);
+    }
+    if (action !== "down") target.dispatchEvent(new KeyboardEvent("keyup", init));
+    return {
+      dispatched: true,
+      key: String(key),
+      action,
+      prevented: Boolean(down?.defaultPrevented),
+    };
+  },
+  /* 调试用：把文字写进输入框并触发 input，不模拟键盘。搜索框的实时定位走这条 */
+  debugInput: async ({ selector, text = "" } = {}) => {
+    const el = [...document.querySelectorAll(String(selector || ""))].find(
+      (node) => node.getBoundingClientRect().width > 0,
+    );
+    if (!el || !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+      throw new Error("没找到可输入的输入框");
+    }
+    el.focus();
+    el.value = String(text);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    /* 搜索有 90ms 防抖：等它跑完再回话，调用方拿到的就是定位后的状态 */
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return { input: true, value: el.value };
+  },
+  debugInspect: ({ selector, pseudo = "" } = {}) => {
+    const nodes = [...document.querySelectorAll(String(selector || ""))].slice(0, 40);
+    const active = document.activeElement;
+    return {
+      count: nodes.length,
+      activeElement: active
+        ? {
+            tag: active.tagName.toLowerCase(),
+            id: active.id || "",
+            className: typeof active.className === "string" ? active.className : "",
+          }
+        : null,
+      items: nodes.map((el) => {
+        const r = el.getBoundingClientRect();
+        const style = getComputedStyle(el, pseudo || null);
+        return {
+          tag: el.tagName.toLowerCase(),
+          className: typeof el.className === "string" ? el.className : "",
+          text: (el.textContent || "").trim().slice(0, 30),
+          value:
+            el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+              ? el.value
+              : undefined,
+          ...(pseudo ? { content: style.content } : {}),
+          scrollHeight: el.scrollHeight || undefined,
+          clientHeight: el.clientHeight || undefined,
+          rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+          display: style.display,
+          opacity: style.opacity,
+          pointerEvents: style.pointerEvents,
+          width: style.width,
+          height: style.height,
+          border: style.border,
+          background: style.backgroundColor,
+          backgroundImage: style.backgroundImage,
+          gridColumns: style.gridTemplateColumns,
+          gap: style.gap,
+          textAlign: style.textAlign,
+          justifyContent: style.justifyContent,
+        };
+      }),
+    };
+  },
+  debugClose: () => {
+    closeColorPicker(true);
+    closeMenu();
+    searchApi?.close();
+    return { closed: true };
+  },
   /* 一次提交一串操作：期间不运镜不打光带 */
   beginBatch: () => {
     batching = true;
@@ -8078,6 +9111,7 @@ export const canvasAgent = {
     agentHighlight([placed.id], 1200);
     return placed;
   },
+  pictureExport: (id) => exportPictureImage(id),
   blockSelect: agentSelectBlocks,
   blockLayer: (id, direction) => {
     const result = agentSetLayer(id, direction);
@@ -8105,6 +9139,10 @@ export const canvasAgent = {
   exportAs: (format, options) => {
     if (!current) throw new Error("当前没有打开的画布");
     return exporter.exportAs(format, options || {});
+  },
+  exportRegion: (options) => {
+    if (!current) throw new Error("当前没有打开的画布");
+    return exporter.exportRegion(options || {});
   },
   importFile: agentImportFile,
   pictureGet: agentPictureGet,

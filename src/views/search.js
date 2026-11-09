@@ -132,6 +132,33 @@ export function initSearch({ getItems, getSpaceId, focusBlock, jumpToSpace }) {
       renderResults([]);
       return;
     }
+    /* #N 是「定位到 N 号面板」的实时指令：数字没敲完就只跳已经能对上的号，
+       对不上就停在这儿显示没有；不走全文搜索，也别去别的画布找 */
+    const seqMatch = /^#(\d+)$/.exec(text);
+    if (seqMatch) {
+      const wanted = Number(seqMatch[1]);
+      const target = getItems().find((item) => item.type !== "connector" && item.seq === wanted);
+      if (!target) {
+        renderResults([], text, { emptyText: `这个画布里没有 #${wanted} 面板` });
+        return;
+      }
+      const { title } = describeBlock(target);
+      renderResults(
+        [
+          {
+            kind: "block",
+            id: target.id,
+            type: target.type,
+            title: `#${target.seq} · ${title.length > 60 ? `${title.slice(0, 60)}…` : title}`,
+            text: "",
+            score: 1,
+          },
+        ],
+        text,
+      );
+      focusBlock(target.id);
+      return;
+    }
     const local = searchBlocks(text).sort((a, b) => b.score - a.score);
     /* 本地的先上屏：块在内存里，这一屏不该为了等磁盘而空着 */
     renderResults(local.slice(0, LOCAL_RESULTS), text);
@@ -179,9 +206,9 @@ export function initSearch({ getItems, getSpaceId, focusBlock, jumpToSpace }) {
       if (query) {
         const empty = document.createElement("p");
         empty.className = "canvas-search-empty";
-        empty.textContent = remotePending
-          ? "这个画布里没有（还在搜其它画布…）"
-          : "这个画布和别的画布里都没有";
+        empty.textContent =
+          options.emptyText ||
+          (remotePending ? "这个画布里没有（还在搜其它画布…）" : "这个画布和别的画布里都没有");
         list.append(empty);
       }
       return;
@@ -268,6 +295,8 @@ export function initSearch({ getItems, getSpaceId, focusBlock, jumpToSpace }) {
 
   document.addEventListener("keydown", (event) => {
     if (document.querySelector("#canvas-view")?.hidden) return;
+    /* 设置弹层开着的时候，快捷键归设置页管，别在它背后开搜索 */
+    if (window.__inspace?.route && window.__inspace.route !== "canvas") return;
     if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f") return;
     event.preventDefault();
     if (isOpen()) {

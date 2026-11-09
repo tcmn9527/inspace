@@ -91,6 +91,8 @@ id 从 theme_list 拿。调 "cosmos" 会给画布页打开一条自动飞行的�
 
 返回里的 id 就是后面 block_update / connector_create / 内容工具要的 id。
 
+每块的 **seq** 是画布内的固定编号，也是用户选中它时右下角坐标条显示的「#N」。用户说「3 号面板」「把 2 号变红」时，按 seq 找块（不是按数组顺序、也不是按 z）；删掉的号不回收。
+
 ### space_snapshot
 **你的眼睛。** 返回一张 PNG 图片（真的图片，不是坐标），你能直接看到画布现在长什么样。
 
@@ -201,6 +203,7 @@ region 三选一：all 整张画布（默认，看整体构图）、viewport 用
 
 - w 决定宽度（默认 320），高度随内容自动长；borderColor 传 "" 去掉默认细边框，传颜色才有框。
 - color 是字色，fillColor 是底色；borderWidth 是边框宽度（px），radius 是圆角。
+- align 是水平对齐（left / center / right），vAlign 是垂直对齐（top / middle / bottom）；垂直对齐要块被拉高（block_update 传 h 或人手动拉高）后才看得出来。
 
 矩形 / 椭圆：
 
@@ -693,9 +696,9 @@ off:true 关掉，画面回到没有光的原样（和没做这功能时逐字�
 
 ### 先有一块
 block_create {type:"gen", x, y, w, h, prompt, imageW, imageH, steps, cfg, seed, mode, strength}。
-面板上摆着提示词框、尺寸、风格、张数和一颗「开始」；步数 / 贴合度 / 种子 / 那一档 / 改动幅度没有控件——想调就调块上这几个字段，
+面板上摆着提示词框和一颗「开始」；尺寸 / 步数 / 贴合度 / 种子 / 那一档 / 改动幅度都没有控件——想调就调块上这几个字段，
 gen_run 和 block_update 都收这九个。默认 1024×1024、20 步、cfg 6、seed -1、mode auto、strength 0.75。
-风格只是往提示词前面拼一句前缀（面板上选的风格存 style 字段），agent 想指定画风直接在 prompt 里写清楚就行。
+出图时不另外拼画风前缀，agent 想指定画风直接在 prompt 里写清楚就行。
 
 ### gen_run：一条命令出一张
 gen_run {id, prompt} 默认等到出完再回（本机一张约 30 秒）。返回里 phase 回到 idle、seconds 是这一张花了多久，
@@ -709,6 +712,7 @@ src 是这张图在这个画布 images/ 里的相对路径。
 
 ### 进料靠连线：图生图与参考图编辑
 **谁用 connector 连到这块面板，谁就是输入图**（方向是上游 → 面板；面板现在也能当连线的两端，圈才画得出来）。
+图片块、生图面板、**画面块（picture）**都能当上游：画面块会按块区域光栅化成 PNG 再喂进去，手绘的笔迹、矢量指令和纸色都会进去（框外的内容不带）。
 一根不接是文生图；接一张当底图重绘，是图生图；接多张一起当参考，是参考图编辑（Qwen-Image 2.1 一路最多吃 10 张）。
 这套推断就是 mode 的 auto 档，块上面板上都会显式报一句「接了 N 张输入图 · 图生图 / 参考图编辑」，别猜。
 - mode 明写才盖得住推断：auto / t2i / i2i / edit。**「只有一张、但它是画风锚点不是底图」必须明写 edit**——

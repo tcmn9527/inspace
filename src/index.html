@@ -225,64 +225,6 @@
               </svg>
             </button>
             <!-- 场景块故意不给工具栏入口：里面的东西目前只能由 agent 摆（block_create type:"scene"），已落块的照常渲染 -->
-            <button class="canvas-tool" id="canvas-insert-image" type="button" title="插入本地图片">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <rect
-                  x="3.5"
-                  y="4.5"
-                  width="13"
-                  height="11"
-                  rx="1.2"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                />
-                <circle cx="7.4" cy="8.4" r="1.2" fill="currentColor" />
-                <path
-                  d="M4.6 14 8.2 10.4l2.4 2.3 1.9-1.7 2.6 2.5"
-                  stroke="currentColor"
-                  stroke-width="1.2"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-            <button class="canvas-tool" id="canvas-insert-audio" type="button" title="插入本地音乐">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <path
-                  d="M7.6 14.2V5.7l7-1.5v8.3"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <circle cx="5.9" cy="14.6" r="2.1" fill="currentColor" />
-                <circle cx="12.9" cy="13.1" r="2.1" fill="currentColor" />
-              </svg>
-            </button>
-            <button class="canvas-tool" id="canvas-insert-video" type="button" title="插入本地视频">
-              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
-                <rect
-                  x="3"
-                  y="5.6"
-                  width="10"
-                  height="8.8"
-                  rx="1.6"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                />
-                <path
-                  d="M13 9.1 16.7 6.7v6.6L13 10.9z"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  fill="none"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
             <button class="canvas-tool" id="canvas-insert-file" type="button" title="插入本地文件（任何格式）">
               <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
                 <path
@@ -392,6 +334,10 @@
           <div class="canvas-world" id="canvas-world"></div>
           <div class="canvas-endpoint-layer" id="canvas-endpoint-layer"></div>
           <div class="canvas-guide-layer" id="canvas-guide-layer" aria-hidden="true"></div>
+          <div class="canvas-measure-layer" id="canvas-measure-layer" aria-hidden="true"></div>
+          <div class="canvas-port-visual-layer" id="canvas-port-visual-layer" aria-hidden="true"></div>
+          <div class="canvas-lock-layer" id="canvas-lock-layer" aria-hidden="true"></div>
+          <div class="canvas-handle-visual-layer" id="canvas-handle-visual-layer" aria-hidden="true"></div>
           <p class="canvas-metrics" id="canvas-metrics" hidden></p>
 
           <!-- 鸟瞰窗：右下角整个画布的缩小版，拖亮框或点框外就把视野带到那儿 -->
@@ -435,10 +381,7 @@
         <div class="canvas-empty" id="canvas-empty" hidden>
           <div class="canvas-empty-card">
             <h2>无限画布</h2>
-            <p>
-              每个画布都是本地的一个文件夹：图片放在 images 里，内容放在 json 里。
-              重启后还在，也能直接用资源管理器打开。
-            </p>
+            <p>画布就是本地的一个文件夹，所有数据都在文件中</p>
             <button class="plain-btn plain-btn-primary" id="canvas-create" type="button">
               新建画布
             </button>
@@ -449,10 +392,18 @@
       </section>
 
       <section class="settings-page" id="settings-view" hidden>
-        <header class="settings-head">
-          <span class="section-label">设置</span>
-        </header>
-        <div class="settings-card">
+        <div class="settings-scrim" id="settings-scrim"></div>
+        <div class="settings-dialog" id="settings-dialog" role="dialog" aria-modal="true" aria-label="设置" tabindex="-1">
+          <header class="settings-head">
+            <span class="section-label">设置</span>
+            <button class="settings-close" id="settings-close" type="button" title="关闭" aria-label="关闭">
+              <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1" fill="none" />
+              </svg>
+            </button>
+          </header>
+          <div class="settings-body" id="settings-body">
+          <div class="settings-card">
           <p class="settings-title">数据文件夹</p>
           <p class="settings-hint">
             画布都存在这一个文件夹里：spaces/ 是一个画布一个文件夹。 换文件夹时会先问旧的要拷贝一份留着、剪贴走，还是干脆新建一份不带过去。
@@ -538,9 +489,150 @@
           <p class="settings-status" id="settings-mcp-status" hidden></p>
           <p class="settings-error" id="settings-mcp-error" hidden></p>
         </div>
+        <div class="settings-card" id="settings-shortcuts-card">
+          <p class="settings-title">快捷键</p>
+          <p class="settings-hint">
+            当前画布的键盘操作一览。这里只做说明，暂不支持自定义。
+          </p>
+          <div class="settings-shortcuts">
+            <div class="settings-shortcut-group">
+              <p class="settings-shortcut-heading">画布</p>
+              <div class="settings-shortcut-row">
+                <span>全选面板</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>A</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>复制选中的面板（有文字选区时复制文字）</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>C</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>粘贴面板、图片、音频或文字</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>V</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>原地复制并粘贴选中的面板</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>D</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>删除选中的面板</span>
+                <span class="settings-keys"><kbd>Delete</kbd><span class="settings-key-sep">/</span><kbd>Backspace</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>微移选中的面板（按住 Shift 走 10 倍）</span>
+                <span class="settings-keys"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>按住 Alt：量选中面板到四周最近面板的距离（拖动时实时更新）</span>
+                <span class="settings-keys"><kbd>Alt</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>鸟瞰窗选中后移动视野（Shift 走得更远）</span>
+                <span class="settings-keys"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>缩放回到 100%</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>0</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>缩放画布（以指针为中心）</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>滚轮</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>平移画布</span>
+                <span class="settings-keys"><kbd>滚轮</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>依次退出鸟瞰窗焦点、画图工具、选中</span>
+                <span class="settings-keys"><kbd>Esc</kbd></span>
+              </div>
+            </div>
+            <div class="settings-shortcut-group">
+              <p class="settings-shortcut-heading">搜索</p>
+              <div class="settings-shortcut-row">
+                <span>打开搜索（再按一次聚焦并全选）</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>F</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>输入 #1 直接定位并选中 1 号面板（实时）</span>
+                <span class="settings-keys"><kbd>#</kbd><kbd>数字</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>切换搜索结果</span>
+                <span class="settings-keys"><kbd>↑</kbd><kbd>↓</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>跳到选中的结果</span>
+                <span class="settings-keys"><kbd>Enter</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>关闭搜索</span>
+                <span class="settings-keys"><kbd>Esc</kbd></span>
+              </div>
+            </div>
+            <div class="settings-shortcut-group">
+              <p class="settings-shortcut-heading">编辑</p>
+              <div class="settings-shortcut-row">
+                <span>结束文字、笔记或文件编辑</span>
+                <span class="settings-keys"><kbd>Esc</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>在笔记或文件编辑器里缩进两个空格</span>
+                <span class="settings-keys"><kbd>Tab</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>撤销（笔记、文件编辑器、画面块笔画）</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>Z</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>重做</span>
+                <span class="settings-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Z</kbd><span class="settings-key-sep">/</span><kbd>Ctrl</kbd><kbd>Y</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>保存连线标签（Esc 取消）</span>
+                <span class="settings-keys"><kbd>Enter</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>生图提示词：开始出图（Shift+Enter 换行）</span>
+                <span class="settings-keys"><kbd>Enter</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>就地输入时确认 / 取消（缩放比例、间隔分钟）</span>
+                <span class="settings-keys"><kbd>Enter</kbd><span class="settings-key-sep">/</span><kbd>Esc</kbd></span>
+              </div>
+            </div>
+            <div class="settings-shortcut-group">
+              <p class="settings-shortcut-heading">弹窗与浮层</p>
+              <div class="settings-shortcut-row">
+                <span>确定当前弹窗</span>
+                <span class="settings-keys"><kbd>Enter</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>关闭弹窗、菜单、主题面板或取色板</span>
+                <span class="settings-keys"><kbd>Esc</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>在多选弹窗里切换选项</span>
+                <span class="settings-keys"><kbd>↑</kbd><kbd>↓</kbd></span>
+              </div>
+            </div>
+            <div class="settings-shortcut-group">
+              <p class="settings-shortcut-heading">窗口</p>
+              <div class="settings-shortcut-row">
+                <span>收起 / 恢复画布顶栏（画布名、工具条、缩放和导出）</span>
+                <span class="settings-keys"><kbd>F9</kbd></span>
+              </div>
+              <div class="settings-shortcut-row">
+                <span>收起 / 恢复软件标题栏</span>
+                <span class="settings-keys"><kbd>F10</kbd></span>
+              </div>
+            </div>
+          </div>
+        </div>
         <p class="settings-credit">
           宇宙主题的星体与银河贴图来自 Solar System Scope（CC BY 4.0）。
         </p>
+          </div>
+        </div>
       </section>
     </div>
 

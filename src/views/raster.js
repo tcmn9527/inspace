@@ -31,8 +31,11 @@ export async function rasterize(svg, pxW, pxH, background) {
   canvas.width = Math.max(1, Math.round(pxW));
   canvas.height = Math.max(1, Math.round(pxH));
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = background || "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  /* background 传 null 表示要透明底：连底色都不铺，alpha 全留给 SVG 自己 */
+  if (background !== null) {
+    ctx.fillStyle = background || "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
   /* SVG 自身的像素尺寸就是目标尺寸，这里 1:1 贴上去，不会再糊一层 */
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
   return canvas;

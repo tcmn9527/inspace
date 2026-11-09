@@ -1,4 +1,5 @@
 mod canvas;
+mod capture;
 mod cosmos;
 mod db;
 mod ebook;
@@ -10,6 +11,57 @@ mod store;
 
 use std::sync::Arc;
 use tauri::Manager;
+
+/* F10 是 WebView2 的浏览器加速键（菜单栏焦点），页面拿不到它的 keydown。
+   在控制器层把这一次拦下来，再通知前端切换软件头部。 */
+#[cfg(windows)]
+fn listen_f10_toggle(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2Controller,
+        COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+        COREWEBVIEW2_PHYSICAL_KEY_STATUS,
+    };
+    use webview2_com::AcceleratorKeyPressedEventHandler;
+
+    const VK_F10: u32 = 0x79;
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let app = tauri::AppHandle::clone(app);
+    let _ = window.with_webview(move |platform| {
+        let controller = platform.controller();
+        let mut token = 0i64;
+        let handler = AcceleratorKeyPressedEventHandler::create(Box::new(
+            move |_controller: Option<ICoreWebView2Controller>,
+                  args: Option<ICoreWebView2AcceleratorKeyPressedEventArgs>| {
+                let Some(args) = args else { return Ok(()) };
+                let mut key = 0u32;
+                let mut kind = COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN;
+                let mut status: COREWEBVIEW2_PHYSICAL_KEY_STATUS = unsafe { std::mem::zeroed() };
+                unsafe {
+                    args.VirtualKey(&mut key)?;
+                    args.KeyEventKind(&mut kind)?;
+                    args.PhysicalKeyStatus(&mut status)?;
+                    if key == VK_F10 {
+                        args.SetHandled(true)?;
+                    }
+                }
+                /* F10 到的是系统键（SYSTEM_KEY_DOWN），不是普通 KEY_DOWN */
+                let down = kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                    || kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN;
+                if key == VK_F10 && down && status.RepeatCount <= 1 {
+                    let _ = app.emit("inspace:toggle-titlebar", ());
+                }
+                Ok(())
+            },
+        ));
+        unsafe {
+            let _ = controller.add_AcceleratorKeyPressed(&handler, &mut token);
+        }
+    });
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,10 +108,13 @@ pub fn run() {
             app.manage(mcp::start(app.handle().clone(), config_dir));
             match app.get_webview_window("main") {
                 Some(w) => {
-                    /* 仅开发时把窗口钉在屏幕左上角（用户预留的可见区域）。
+                    /* 仅开发时按用户记录的布局开窗：左上角 (0,0)、客户区 2723×1200 物理像素。
                        release 打包不编译这段，窗口仍按配置居中。 */
                     #[cfg(debug_assertions)]
-                    let _ = w.set_position(tauri::PhysicalPosition::new(0, 0));
+                    {
+                        let _ = w.set_position(tauri::PhysicalPosition::new(0, 0));
+                        let _ = w.set_size(tauri::PhysicalSize::new(2723, 1200));
+                    }
                     eprintln!(
                         "[diag] scale_factor={:.3} inner={:?} outer={:?}",
                         w.scale_factor().unwrap_or(1.0),
@@ -78,6 +133,8 @@ pub fn run() {
                 }
                 None => eprintln!("[diag] no main window in setup"),
             }
+            #[cfg(windows)]
+            listen_f10_toggle(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -170,11 +227,13 @@ pub fn run() {
             canvas::canvas_open_export,
             canvas::canvas_export_pick_dir,
             canvas::canvas_export_write,
+            capture::webview_capture,
             mcp::mcp_register_tools,
             mcp::mcp_reply,
             mcp::mcp_info,
             mcp::mcp_reset_token
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_, _| {});
 }

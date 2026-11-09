@@ -17,9 +17,12 @@ let closeTimer = 0;
 /* 拖滑条时指针会离开浮层，这时不能按「鼠标走了」把菜单收掉 */
 let sliderDragging = false;
 
-/* 二级、三级各一个浮层槽位；[0] 空着，对应主菜单 #ctx-menu */
+/* 每一级子菜单一个浮层槽位；[0] 空着，对应主菜单 #ctx-menu。
+   「选择下层」会把一整块菜单挂成子菜单，边框/背景再往下还有取色板，所以开到第四列。 */
 const slots = [
   null,
+  { el: null, row: null, commit: null },
+  { el: null, row: null, commit: null },
   { el: null, row: null, commit: null },
   { el: null, row: null, commit: null },
 ];
@@ -34,16 +37,17 @@ function cancelClose() {
 /* 收起一列：先把它的临时改动按确定落库，再藏起来 */
 function commitSlot(slot) {
   if (!slot) return;
-  const { el, commit } = slot;
+  const { el, row, commit } = slot;
   slot.row = null;
   slot.commit = null;
+  row?.classList.remove("is-open");
   if (el) el.hidden = true;
   commit?.();
 }
 
 /* 只收比 fromLevel 更深的那几列，当前这一列留着 */
 function closeDeeper(fromLevel) {
-  for (let level = 2; level >= fromLevel; level -= 1) commitSlot(slots[level]);
+  for (let level = slots.length - 1; level >= fromLevel; level -= 1) commitSlot(slots[level]);
 }
 
 function closeSubmenu() {
@@ -88,7 +92,10 @@ function ensureSlot(level) {
 export function closeMenu() {
   closeSubmenu();
   const menu = document.getElementById("ctx-menu");
-  if (menu) menu.hidden = true;
+  if (menu) {
+    for (const el of menu.querySelectorAll("button.is-open")) el.classList.remove("is-open");
+    menu.hidden = true;
+  }
 }
 
 /* 主菜单是不是正开着。给「同一个按钮再点一下收起」那种入口用；
@@ -155,7 +162,7 @@ function createSliderPanel({ value = 0, onChange } = {}) {
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       /* 松手时指针已经不在任何一列菜单上，就把菜单收了；还在菜单里就留着 */
-      const panels = [document.getElementById("ctx-menu"), slots[1]?.el, slots[2]?.el];
+      const panels = [document.getElementById("ctx-menu"), ...slots.slice(1).map((slot) => slot?.el)];
       if (!panels.some((el) => el && !el.hidden && el.matches(":hover"))) closeMenu();
     };
     window.addEventListener("pointermove", move);
@@ -170,6 +177,15 @@ function createSliderPanel({ value = 0, onChange } = {}) {
       return level;
     },
   };
+}
+
+function markOpenRow(row) {
+  if (!row) return;
+  const parent = row.parentElement;
+  if (parent) {
+    for (const el of parent.querySelectorAll("button.is-open")) el.classList.remove("is-open");
+  }
+  row.classList.add("is-open");
 }
 
 /* 在下一级槽位里放内容：普通菜单项列表、一块取色板，或者一根滑条 */
@@ -214,6 +230,8 @@ function openSlot(level, row, item, closeAll) {
     fill(el, item.children, closeAll, level);
   }
   slot.row = row;
+  /* 子菜单展开时把父行按住高亮：鼠标跑到子菜单上，一级菜单里还得看得出是哪一项开着 */
+  markOpenRow(row);
   el.hidden = false;
   placePanel(el, row);
 }
@@ -249,7 +267,7 @@ function fill(container, items, closeAll, level) {
     }
     button.append(item.label);
 
-    const deeper = Boolean(item.colorPicker || item.slider || item.children) && level < 2;
+    const deeper = Boolean(item.colorPicker || item.slider || item.children) && level < 4;
     if (deeper) {
       /* 行尾只说「这行还有下一级」，不吃指针 */
       button.classList.add("has-trailing");
@@ -274,8 +292,14 @@ function fill(container, items, closeAll, level) {
       /* 直接从这一行滑出去（没落到子菜单上）也要收 */
       button.addEventListener("mouseleave", scheduleClose);
       button.addEventListener("click", (event) => {
-        /* hover 时多半已经展开了；点一下也让它在，但别把菜单关掉 */
+        /* 行自己带动作（「选择下层」里的层名行）：点它就算选中，整摞菜单收掉 */
         event.stopPropagation();
+        if (item.onClick) {
+          closeAll();
+          item.onClick();
+          return;
+        }
+        /* hover 时多半已经展开了；点一下也让它在，但别把菜单关掉 */
         openSlot(level + 1, button, item, closeAll);
       });
     } else {

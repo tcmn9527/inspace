@@ -1,7 +1,7 @@
 [package]
 name = "inspace"
 version = "0.1.0"
-description = "无限空间：一块装得下笔记、文件和媒体的桌面空间"
+description = "无限画布：一块装得下笔记、文件和媒体的桌面空间"
 authors = ["you"]
 edition = "2024"
 
@@ -58,6 +58,13 @@ rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"
 # cuda 特性关掉就是纯 CPU。
 # 只开 png：出图和逐步预览都要把 RGBA 编成 PNG 推给前端。
 image = { version = "0.25", default-features = false, features = ["png"] }
+# 落图抓屏：直接读窗口客户区像素，屏幕上 ClearType 渲染的文本才和原面板完全一致。
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_Xps",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
@@ -66,3 +73,8 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# F10 是 WebView2 的保留加速键，页面收不到 keydown；只有直接从 WebView2 控制器上
+# 接 AcceleratorKeyPressed，才能既保留其它浏览器快捷键、又拿到 F10。
+[target."cfg(windows)".dependencies]
+webview2-com = "0.39"

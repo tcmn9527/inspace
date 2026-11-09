@@ -20,6 +20,9 @@ target/
 src-tauri/resources/components/ffmpeg/*
 !src-tauri/resources/components/ffmpeg/README.md
 
+# 生图引擎的 CUDA 12 运行库，构建前从本机 CUDA 现拷，不入库
+src-tauri/resources/cuda/*.dll
+
 # bindgen 用的 libclang.dll，跑 scripts/prepare-libclang.mjs 现取，不入库
 tools/libclang/
 
@@ -50,3 +53,6 @@ tools/sdcpp-cache/
 
 # 本地工作流工具的临时目录
 .workbuddy/
+
+# 提示词润色用的 llama.cpp 现成运行时（约 25MB），从 releases 下载解压到这里，不入库
+tools/llamacpp/

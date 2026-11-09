@@ -2,7 +2,10 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "resources": {
-      "resources/components/ffmpeg/ffmpeg.exe": "components/ffmpeg/ffmpeg.exe"
+      "resources/components/ffmpeg/ffmpeg.exe": "components/ffmpeg/ffmpeg.exe",
+      "resources/cuda/cudart64_12.dll": "cudart64_12.dll",
+      "resources/cuda/cublas64_12.dll": "cublas64_12.dll",
+      "resources/cuda/cublasLt64_12.dll": "cublasLt64_12.dll"
     }
   }
 }

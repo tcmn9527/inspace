@@ -279,10 +279,46 @@ export function createExporter({
 
   /* 克隆世界层，顺手把留不住、画不出的东西换掉。
      导出图片和导出网页共用这一段——两种产物要长得一样，就不该有两套准备流程。 */
-  async function prepareWorld() {
+  async function prepareWorld(onlyId, { hideIds = [], stripIds = [] } = {}) {
     const world = getWorld().cloneNode(true);
     world.removeAttribute("id");
     world.setAttribute("style", "position:absolute;left:0;top:0;width:0;height:0;");
+
+    /* 只导一块时，把别的块从克隆里整个摘掉：画面块底下压着的东西不该跟着进图 */
+    if (onlyId) {
+      for (const el of world.querySelectorAll(".canvas-item")) {
+        if (el.dataset.id !== onlyId) el.remove();
+        else {
+          /* 导出的是一幅画，不是这块面板的外框：边框和圆角都摘掉 */
+          el.style.border = "0";
+          el.style.borderRadius = "0";
+          el.style.boxShadow = "none";
+          for (const card of el.querySelectorAll("*")) {
+            if (card.style?.borderWidth) card.style.borderWidth = "0";
+            if (card.style?.borderRadius) card.style.borderRadius = "0";
+          }
+        }
+      }
+    }
+
+    /* 画板导出：透明模式把画板整个摘掉，含底色模式留底色只摘外框 */
+    for (const id of hideIds) {
+      for (const el of world.querySelectorAll(".canvas-item")) {
+        if (el.dataset.id === id) el.remove();
+      }
+    }
+    for (const id of stripIds) {
+      const el = [...world.querySelectorAll(".canvas-item")].find((node) => node.dataset.id === id);
+      if (!el) continue;
+      el.style.border = "0";
+      el.style.borderRadius = "0";
+      el.style.boxShadow = "none";
+      for (const node of el.querySelectorAll("*")) {
+        node.style.borderWidth = "0";
+        node.style.borderRadius = "0";
+        node.style.boxShadow = "none";
+      }
+    }
 
     /* 记号层先摘掉，再处理留不住的元素 */
     for (const node of world.querySelectorAll(OVERLAY_SELECTOR)) node.remove();
@@ -302,9 +338,11 @@ export function createExporter({
   /* 造一张 SVG：只画 slice 这块世界区域，输出恰好 pxW×pxH 像素。
      分片渲染时每片都调它一次——世界层在外面只准备一次（prepared），
      这里只做浅克隆，图片已经是 data URL，不会重复读盘。 */
-  function buildSvg(slice, prepared, pxW, pxH) {
+  function buildSvg(slice, prepared, pxW, pxH, only, transparent = false) {
     const stageStyle = getComputedStyle(getStage());
-    const background = stageStyle.backgroundColor || "#ffffff";
+    const background = transparent
+      ? "transparent"
+      : stageStyle.backgroundColor || "#ffffff";
     const w = Math.max(0.5, slice.w);
     const h = Math.max(0.5, slice.h);
 
@@ -312,6 +350,9 @@ export function createExporter({
     svg.setAttribute("xmlns", SVG_NS);
     svg.setAttribute("width", String(Math.max(1, Math.round(pxW))));
     svg.setAttribute("height", String(Math.max(1, Math.round(pxH))));
+    /* 应用样式表里有 :root{background:var(--bg)}，序列化成 SVG 图后 :root 是这根 svg，
+       会在整张图底下铺一层舞台色。透明导出必须把它内联盖掉，不然 alpha 永远不透明。 */
+    if (transparent) svg.style.setProperty("background", "transparent", "important");
     /* viewBox 直接用世界坐标：这片图在世界里的位置由它决定，
        里面的块不用逐个挪，换算全交给浏览器 */
     svg.setAttribute("viewBox", `${slice.x} ${slice.y} ${w} ${h}`);
@@ -358,32 +399,47 @@ export function createExporter({
       "style",
       `position:absolute;left:0;top:0;overflow:visible;width:${w}px;height:${h}px;`,
     );
-    const edgeGroup = getEdgeG()?.cloneNode(true);
+    const edgeGroup = only ? null : getEdgeG()?.cloneNode(true);
     if (edgeGroup) {
       edgeGroup.removeAttribute("transform");
       edgeSvg.append(edgeGroup);
     }
 
-    shift.append(prepared.cloneNode(true));
+    /* 只导一块时，在最靠近渲染的这一层再把外框扒掉：块的外壳边框在 CSS 类上、
+       圆角在卡片的内联样式上，准备阶段改一遍、这里再保一遍最稳 */
+    const worldClone = prepared.cloneNode(true);
+    if (only) {
+      for (const el of worldClone.querySelectorAll(".canvas-item")) {
+        for (const node of [el, ...el.querySelectorAll("*")]) {
+          node.style.borderWidth = "0";
+          node.style.borderRadius = "0";
+          node.style.boxShadow = "none";
+        }
+      }
+    }
+    shift.append(worldClone);
     frame.append(edgeSvg, shift);
     host.append(frame);
     foreign.append(host);
     svg.append(foreign);
-    return { svg, background };
+    /* 透明导出交给 rasterize 一个 null：那边看到 null 就不铺底色 */
+    return { svg, background: transparent ? null : background };
   }
 
   /* 把 slice 这块世界区域画成一张画布，内部按 TILE 分片。
      分片只管峰值内存，不影响成品像素：片与片按整数像素对齐，拼起来是连续的。 */
-  async function renderRegion(prepared, slice, pxW, pxH, scale, onProgress) {
+  async function renderRegion(prepared, slice, pxW, pxH, scale, onProgress, only, transparent = false) {
     const width = Math.max(1, Math.round(pxW));
     const height = Math.max(1, Math.round(pxH));
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
-    const background = getComputedStyle(getStage()).backgroundColor || "#ffffff";
-    ctx.fillStyle = background;
-    ctx.fillRect(0, 0, width, height);
+    if (!transparent) {
+      const background = getComputedStyle(getStage()).backgroundColor || "#ffffff";
+      ctx.fillStyle = background;
+      ctx.fillRect(0, 0, width, height);
+    }
 
     const cols = Math.ceil(width / TILE);
     const rows = Math.ceil(height / TILE);
@@ -401,7 +457,7 @@ export function createExporter({
           w: tw / scale,
           h: th / scale,
         };
-        const built = buildSvg(part, prepared, tw, th);
+        const built = buildSvg(part, prepared, tw, th, only, transparent);
         const tile = await rasterize(built.svg, tw, th, built.background);
         ctx.drawImage(tile, ox, oy);
         done += 1;
@@ -1261,7 +1317,7 @@ body { font-family: ${FONT_STACK}; }
 
     /* 先定倍数再建图，画完再放大只会糊 */
     const { scale, capped } = scaleFor(box, options.quality);
-    const prepared = await prepareWorld();
+    const prepared = await prepareWorld(options.only);
     const canvas = await renderRegion(
       prepared,
       box,
@@ -1335,6 +1391,43 @@ body { font-family: ${FONT_STACK}; }
   }
 
 
+  /* 按一块矩形面板的范围导出：框里所有块按层级合成，框外自然裁掉（装饰可以出血）。
+     透明模式把面板自己整个摘掉，只留框里的内容；含底色模式只摘面板的外框和圆角。 */
+  async function exportRegion(options = {}) {
+    const box = options.box;
+    if (!box || ![box.x, box.y, box.w, box.h].every((n) => Number.isFinite(n))) {
+      throw new Error("导出范围必须是 {x, y, w, h}");
+    }
+    if (box.w <= 0 || box.h <= 0) throw new Error("导出范围的宽高要大于 0");
+    const transparent = options.transparent === true;
+    const { scale, capped } = scaleFor(box, options.quality);
+    const prepared = await prepareWorld(undefined, {
+      hideIds: transparent && options.hideId ? [options.hideId] : [],
+      stripIds: !transparent && options.hideId ? [options.hideId] : [],
+    });
+    const canvas = await renderRegion(
+      prepared,
+      box,
+      box.w * scale,
+      box.h * scale,
+      scale,
+      options.onProgress,
+      undefined,
+      transparent,
+    );
+    const data = canvas.toDataURL("image/png").split(",")[1];
+    return {
+      format: "png",
+      name: options.name || "海报",
+      data,
+      width: canvas.width,
+      height: canvas.height,
+      scale,
+      capped,
+      transparent,
+    };
+  }
+
   /* 截图：给 agent「看」自己刚画出来的东西。
    *
    * 和导出的区别只在「框哪儿」和「多大」。截图是回给模型看的，越大越亏 token，
@@ -1373,7 +1466,7 @@ body { font-family: ${FONT_STACK}; }
     scale = Math.max(0.02, Math.min(scale, byPixels));
 
     const prepared = await prepareWorld();
-    const canvas = await renderRegion(prepared, box, box.w * scale, box.h * scale, scale);
+    const canvas = await renderRegion(prepared, box, box.w * scale, box.h * scale, scale, undefined, options.only);
     const data = canvas.toDataURL("image/png").split(",")[1];
     return {
       format: "png",
@@ -1390,6 +1483,7 @@ body { font-family: ${FONT_STACK}; }
   return {
     exportAs: run,
     exportSlices,
+    exportRegion,
     plan,
     snapshot,
     reportError(error) {

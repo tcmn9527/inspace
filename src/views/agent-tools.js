@@ -351,6 +351,145 @@ const TOOL_DEFS = [
     },
   ),
   def(
+    "block_export",
+    "把一块矩形面板的范围导成一张 PNG：框里所有块按层级合成，框外裁掉，装饰可以故意出血。transparent 为 true 时连面板自己的底色都不画，只留框里的内容。返回图片本身，能直接看。",
+    {
+      id: ID,
+      quality: { type: "string", enum: ["normal", "high", "ultra"], description: "清晰度 ×1 / ×2 / ×3，默认 high" },
+      transparent: { type: "boolean", description: "true = 透明背景，不画面板底色" },
+    },
+    ["id"],
+  ),
+  def(
+    "ui_color_picker",
+    "调试用：直接在指定块上打开颜色面板，不经过鼠标——面板位置按块在屏幕上的位置算。打开后配合 ui_inspect 读元素样式验证布局，再用 ui_close 收起。",
+    {
+      id: ID,
+      prop: {
+        type: "string",
+        enum: ["borderColor", "fillColor"],
+        description: "要改哪一个颜色，默认 borderColor",
+      },
+    },
+    ["id"],
+  ),
+  def(
+    "ui_menu",
+    "调试用：按块 id 打开右键菜单（不展开子菜单），配合 ui_click 逐级点菜单项做验证。",
+    { id: ID },
+    ["id"],
+  ),
+  def(
+    "ui_menu_color",
+    "调试用：按块 id 打开右键菜单，并程序化展开「边框 → 颜色」三级色盘（不经过鼠标）。打开后用 ui_inspect 读 .color-menu .color-pop-preset 验证样式，再用 ui_close 收起。",
+    { id: ID },
+    ["id"],
+  ),
+  def(
+    "ui_click",
+    "调试用：按 CSS 选择器点一下元素（可再用 text 筛内容），走 DOM click、不模拟鼠标。focus 为 true 时先让元素拿到焦点再点，模拟真实鼠标点击的焦点副作用。适合验证按钮和菜单项的效果，点完用 ui_inspect 读结果。",
+    {
+      selector: { type: "string", description: "CSS 选择器，例如 .canvas-gen-prompt" },
+      text: { type: "string", description: "多个匹配时，挑文字里包含这一段的那个" },
+      focus: { type: "boolean", description: "先 focus 再 click，默认 false" },
+      detail: {
+        type: "number",
+        description: "点击事件的 detail；真实鼠标点击一般是 1，默认 0（DOM click）",
+      },
+    },
+    ["selector"],
+  ),
+  def(
+    "ui_key",
+    "调试用：向页面派发一次按键（不模拟鼠标、不抢系统焦点）。key 如 f、Escape、F9；ctrl 为 true 就是 Ctrl+组合键，例如 key:f + ctrl:true 开搜索。",
+    {
+      key: { type: "string", description: "按键名，如 f、Escape、F9" },
+      action: {
+        type: "string",
+        enum: ["press", "down", "up"],
+        description: "press 按下并松开（默认）；down/up 只发一半，用来模拟按住修饰键",
+      },
+      ctrl: { type: "boolean", description: "按住 Ctrl，默认 false" },
+      shift: { type: "boolean", description: "按住 Shift，默认 false" },
+      alt: { type: "boolean", description: "按住 Alt，默认 false" },
+      meta: { type: "boolean", description: "按住 Meta/Win，默认 false" },
+    },
+    ["key"],
+  ),
+  def(
+    "ui_input",
+    "调试用：把文字写进输入框并触发 input 事件（不模拟键盘），等实时逻辑跑完再回话。搜索框的 #N 定位就用它。",
+    {
+      selector: { type: "string", description: "CSS 选择器，例如 #canvas-search-input" },
+      text: { type: "string", description: "要写入的文字" },
+    },
+    ["selector", "text"],
+  ),
+  def(
+    "ui_hover",
+    "调试用：把指针悬停到视口坐标 (x,y) 上（只派发移动事件，不按下、不选中），用来验证悬停样式。给 selector 时直接悬停到该元素中心。",
+    {
+      x: { type: "number", description: "视口坐标 x（给了 selector 可省略）" },
+      y: { type: "number", description: "视口坐标 y（给了 selector 可省略）" },
+      selector: { type: "string", description: "CSS 选择器；给了就悬停到它的中心" },
+      text: { type: "string", description: "按文字筛元素：同一选择器命中多个时用" },
+      last: { type: "boolean", description: "命中多个时取最后一个（深几级的子菜单）" },
+    },
+    [],
+  ),
+  def(
+    "ui_scroll",
+    "调试用：把匹配到的元素滚动到视野里（scrollIntoView），不模拟滚轮。",
+    {
+      selector: { type: "string", description: "CSS 选择器" },
+      align: {
+        type: "string",
+        enum: ["start", "center", "end", "nearest"],
+        description: "滚到视野的哪个位置，默认 center",
+      },
+    },
+    ["selector"],
+  ),
+  def(
+    "ui_dblclick",
+    "调试用：按 CSS 选择器双击一下元素（可再用 text 筛内容），走 DOM dblclick、不模拟鼠标。",
+    {
+      selector: { type: "string", description: "CSS 选择器" },
+      text: { type: "string", description: "多个匹配时，挑文字里包含这一段的那个" },
+    },
+    ["selector"],
+  ),
+  def(
+    "ui_drag",
+    "调试用：从视口坐标 (x,y) 拖到 (x+dx, y+dy)，走 DOM 的 pointer 事件、不模拟鼠标。用来验证拖块、拖遮罩这类交互。",
+    {
+      x: { type: "number", description: "起点 x（视口坐标）" },
+      y: { type: "number", description: "起点 y" },
+      dx: { type: "number", description: "横向拖多少" },
+      dy: { type: "number", description: "纵向拖多少" },
+    },
+    ["x", "y"],
+  ),
+  def(
+    "ui_inspect",
+    "调试用：读页面上匹配元素的标签、位置和计算样式（display/宽高/边框/背景/网格列/间距），最多返回 40 个。验证 CSS 布局时用它，不用靠截图猜；pseudo 传 ::after 这类伪元素时读的是伪元素的样式。",
+    {
+      selector: { type: "string", description: "CSS 选择器，例如 .color-pop-preset" },
+      pseudo: { type: "string", description: "可选：要读的伪元素，如 ::after / ::before" },
+      view: {
+        type: "string",
+        enum: ["canvas", "settings", "current"],
+        description: "量之前先切到哪个页面；默认 canvas，current 表示保持当前页面不动",
+      },
+    },
+    ["selector"],
+  ),
+  def("ui_close", "调试用：收起当前打开的取色板和菜单。"),
+  def(
+    "ui_reload",
+    "调试用：重新加载前端页面，改完 JS/CSS 后让新代码生效（等同 Ctrl+R），不重启应用进程。",
+  ),
+  def(
     "space_batch",
     "一次提交一串操作，期间不会每个块都运镜打光，只在最后把整批框进视野。铺一整块区域、批量改样式、批量连线，都该用它，别一个一个调：既快，画面也不会被一串镜头跳动搅乱。每项 {tool, args}；某项失败不会中断后面的，返回里逐项标 ok。",
     {
@@ -381,6 +520,16 @@ const TOOL_DEFS = [
     mode: { type: "string", enum: ["copy", "link"], description: "文件拷进画布还是只引用原文件，默认 copy" },
     as: { type: "string", enum: ["image", "audio", "video", "file", "ebook"], description: "按指定类型落块，覆盖按扩展名的自动判断" },
     fontSize: { type: "number", description: "文字块字号" },
+    align: {
+      type: "string",
+      enum: ["left", "center", "right"],
+      description: "文字块水平对齐，默认 left",
+    },
+    vAlign: {
+      type: "string",
+      enum: ["top", "middle", "bottom"],
+      description: "文字块垂直对齐，默认 top；块被拉高后才看得出来",
+    },
     radius: { type: "number", description: "圆角像素（px）：矩形/文字/图片/笔记/文件都认，椭圆没有圆角" },
     borderWidth: { type: "number", description: "边框宽度（px，0 为无边框）：矩形/椭圆/文字/图片默认 2，笔记/文件默认 1" },
     locked: { type: "boolean", description: "建好就锁住（锁住的块不能移动、缩放、改内容、删除，要先解锁）" },
@@ -412,6 +561,16 @@ const TOOL_DEFS = [
     x2: { type: "number", description: "线段终点 x" },
     y2: { type: "number", description: "线段终点 y" },
     fontSize: { type: "number", description: "文字块字号" },
+    align: {
+      type: "string",
+      enum: ["left", "center", "right"],
+      description: "文字块水平对齐",
+    },
+    vAlign: {
+      type: "string",
+      enum: ["top", "middle", "bottom"],
+      description: "文字块垂直对齐；块被拉高后才看得出来",
+    },
     radius: { type: "number", description: "圆角像素（px）：所有带边框的块都认，椭圆没有圆角" },
     borderWidth: { type: "number", description: "边框宽度（px，0 为无边框）：所有带边框的块都认" },
     locked: { type: "boolean", description: "锁定/解锁这块；锁住的块要先传 locked:false 才能改其他字段" },
@@ -523,6 +682,12 @@ const TOOL_DEFS = [
     id: ID,
     maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
   }, ["id"]),
+  def(
+    "picture_export",
+    "把一块画面落成一张独立的图片块：只渲染这一块、存成 PNG 进画布 images/，摆在原块右边。之后它就是普通图片，能拖、能双击看大图、也能单独导出。",
+    { id: ID },
+    ["id"],
+  ),
   def("picture_layers", "看这块画面有哪些图层（同名指令算一层，group 里单独起了名的那笔也算一层；报每层几条、关没关着，另外给还没起名的条数），带 hide / show 就按层名整层开关。关掉的层真不画（截图和导出里都没有它），但指令、条数和展开额度都还在，重新打开就回来；关着的层橡皮也擦不到。名字不在 hide 和 show 里同时给才有意义：同名两边都给按 show 算（开着）。素材内部那套 name / variants 是给 use 的 hide / variant 挑的，和这块的层开关是两回事。", {
     id: ID,
     hide: { type: "array", items: { type: "string" }, description: "要关掉的层名" },
@@ -550,9 +715,17 @@ const TOOL_DEFS = [
     seed: { type: "number", description: "种子；-1 每张换一个，给正数才能同一张复现" },
     mode: {
       type: "string",
-      enum: ["auto", "t2i", "i2i", "edit", "upscale"],
+      enum: ["auto", "t2i", "i2i", "edit", "upscale", "inpaint"],
       description:
-        "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑。upscale 是纯 ESRGAN 高清放大，不参与推断、要明说：连一张图进来，出不带提示词的 4× 那张",
+        "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑。upscale 是纯 ESRGAN 高清放大，不参与推断、要明说：连一张图进来，出不带提示词的 4× 那张。inpaint 是局部重绘：连一张底图、再带 mask，白的地方按 prompt 重画",
+    },
+    mask: {
+      type: "string",
+      description: "局部重绘（mode=inpaint）的遮罩：PNG 的 base64（data: 前缀也吃），白=重绘、黑=保留，尺寸会自动缩到底图",
+    },
+    refine: {
+      type: "boolean",
+      description: "高清放大（mode=upscale）时是否在放大后再低强度重绘一遍补细节；要配 prompt 一起用",
     },
     strength: { type: "number", description: "图生图改多少 0~1，默认 0.75" },
     wait: { type: "boolean", description: "false 只起一轮就返回（马上拿 phase 判断），默认 true 等到出完" },
@@ -643,7 +816,7 @@ function pick(args, keys) {
 }
 
 const BLOCK_FIELDS = [
-  "x", "y", "w", "h", "x2", "y2", "fontSize", "radius", "borderWidth", "locked",
+  "x", "y", "w", "h", "x2", "y2", "fontSize", "align", "vAlign", "radius", "borderWidth", "locked",
   "borderColor", "fillColor", "color", "textColor", "text", "markdown",
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
   "cmds", "symbols", "paperColor", "hidden", "light",
@@ -813,6 +986,27 @@ async function snapshot(args) {
   };
 }
 
+/* 把一块矩形面板的范围导出成图。和截图走同一套世界层光栅化，
+   区别是这里会连「框外裁掉、透明底不画面板」一起按导出规格处理。 */
+async function blockExport(args) {
+  await ensureView("canvas");
+  const block = canvasAgent.blockGet(args.id);
+  if (block.type !== "rect") throw new Error("只有矩形面板能按范围导出");
+  const shot = await canvasAgent.exportRegion({
+    box: { x: block.x, y: block.y, w: block.w, h: block.h },
+    quality: args.quality || "high",
+    transparent: args.transparent === true,
+    hideId: block.id,
+    name: `${block.seq ?? "面板"}`,
+  });
+  return {
+    __image: { data: shot.data, mimeType: "image/png" },
+    note:
+      `已导出 ${shot.width}×${shot.height} 的 PNG（${shot.transparent ? "透明背景" : "含面板底色"}，×${shot.scale}），` +
+      `覆盖世界坐标 x ${block.x}~${block.x + block.w}、y ${block.y}~${block.y + block.h}。`,
+  };
+}
+
 /* 只看一块画面：把这块的包围盒当自定义矩形交给同一套截图管线。
    外扩 2px 是为了把块自己那圈边框也带上，不然看不出画到边了没有。 */
 async function blockScreenshot(args, type, label) {
@@ -944,8 +1138,59 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.scene(pick(args, ["type"])));
     case "space_snapshot":
       return snapshot(args);
+    case "block_export":
+      return blockExport(args);
     case "space_batch":
       return runBatch(args);
+    case "ui_color_picker":
+      return onCanvas(args, () => canvasAgent.debugColorPicker({ id: args.id, prop: args.prop }));
+    case "ui_menu":
+      return onCanvas(args, () => canvasAgent.debugMenu({ id: args.id }));
+    case "ui_menu_color":
+      return onCanvas(args, () => canvasAgent.debugMenuColor({ id: args.id }));
+    case "ui_drag":
+      return canvasAgent.debugDrag({ x: Number(args.x) || 0, y: Number(args.y) || 0, dx: Number(args.dx) || 0, dy: Number(args.dy) || 0 });
+    case "ui_click":
+      return canvasAgent.debugClick({
+        selector: args.selector,
+        text: args.text,
+        focus: args.focus,
+        detail: args.detail,
+      });
+    case "ui_key":
+      return canvasAgent.debugKey({
+        key: args.key,
+        action: args.action,
+        ctrl: args.ctrl,
+        shift: args.shift,
+        alt: args.alt,
+        meta: args.meta,
+      });
+    case "ui_input":
+      return canvasAgent.debugInput({ selector: args.selector, text: args.text });
+    case "ui_hover":
+      return canvasAgent.debugHover({
+        x: Number(args.x) || 0,
+        y: Number(args.y) || 0,
+        selector: args.selector,
+        text: args.text,
+        last: args.last === true,
+      });
+    case "ui_dblclick":
+      return canvasAgent.debugDoubleClick({ selector: args.selector, text: args.text });
+    case "ui_scroll":
+      return canvasAgent.debugScroll({ selector: args.selector, align: args.align });
+    case "ui_inspect": {
+      const view = args.view || "canvas";
+      if (view !== "current") await ensureView(view);
+      return canvasAgent.debugInspect({ selector: args.selector, pseudo: args.pseudo });
+    }
+    case "ui_close":
+      return canvasAgent.debugClose();
+    case "ui_reload":
+      /* 先把回执发出去再刷新，不然请求会跟着页面一起断在半路 */
+      setTimeout(() => window.location.reload(), 80);
+      return { reloading: true };
 
     case "block_get":
       return onCanvas(args, () => canvasAgent.blockGet(args.id));
@@ -956,7 +1201,7 @@ async function dispatch(name, args) {
         canvasAgent.blockCreate(
           pick(args, [
             "type", "x", "y", "w", "h", "text", "markdown", "name", "path", "mode", "as",
-            "fontSize", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
+            "fontSize", "align", "vAlign", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
             "paperColor", "cmds", "symbols", "light", "parts", "camera", "groundColor",
             ...GEN_KEYS,
             "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
@@ -1004,6 +1249,8 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.pictureLayers(args.id, pick(args, ["hide", "show"])));
     case "picture_light":
       return onCanvas(args, () => canvasAgent.pictureLight(args.id, pick(args, ["angle", "elev", "lit", "dark", "k", "off"])));
+    case "picture_export":
+      return onCanvas(args, () => canvasAgent.pictureExport(args.id));
     case "picture_screenshot":
       return blockScreenshot(args, "picture", "画面块");
     case "scene_screenshot":
@@ -1017,7 +1264,7 @@ async function dispatch(name, args) {
     case "gen_run":
       /* wait / timeout 也走 pick：wait:false 是「只起一轮就回」，不能当成没给 */
       return onCanvas(args, () =>
-        canvasAgent.genRun(args.id, pick(args, [...GEN_KEYS, "wait", "timeout"])),
+        canvasAgent.genRun(args.id, pick(args, [...GEN_KEYS, "wait", "timeout", "refine"]), args.mask || ""),
       );
     case "gen_cancel":
       return onCanvas(args, () => canvasAgent.genCancel());

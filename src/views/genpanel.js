@@ -50,14 +50,25 @@ export function isGenBusy() {
 function hintText(run, item, mode) {
   /* 放大这一路引擎不报进度，一张整跑完才回来，所以只有「在等」这一句 */
   const isUpscale = mode === "upscale";
+  const upscaleRefine = isUpscale && Boolean(item.refine);
   if (run.phase === "loading") return isUpscale ? "放大中…" : "载入权重…";
-  if (run.phase === "running") return isUpscale ? "放大中…" : `第 ${run.step} / ${run.steps} 步`;
+  if (run.phase === "running") {
+    /* 补细节是一块一块补的，报片数比报「放大中」有用 */
+    if (isUpscale) return upscaleRefine ? `补细节 ${run.step} / ${run.steps} 片` : "放大中…";
+    return `第 ${run.step} / ${run.steps} 步`;
+  }
   if (run.phase === "failed") return run.error || "出图失败";
   if (run.phase === "canceled") return "已取消";
   /* 秒数只在刚出完这一张时报；重开画布接回来的那张没跑过，别报个 0.0 秒 */
   if (run.imageUrl && run.seconds) return `${run.seconds.toFixed(1)} 秒`;
   /* 放大不读提示词，那句「写下提示词」在这儿是瞎指 */
-  if (isUpscale || run.imageUrl || run.previewUrl || item.prompt) return "";
+  if (isUpscale && !upscaleRefine) return "";
+  if (run.imageUrl || run.previewUrl || item.prompt) return "";
+  if (upscaleRefine) return "点开始，放大后自动把细节补一遍";
+  /* 局部重绘：底图到位了先让人涂，一句顶用的话比「写下提示词」实在 */
+  if (mode === "inpaint") {
+    return item.prompt ? "在预览上涂出要重绘的地方，点开始" : "连一张图进来，涂出要重绘的地方";
+  }
   return "写下提示词，点开始";
 }
 
@@ -72,9 +83,6 @@ export function syncGen(el, item, feed) {
   const hint = el.querySelector(".canvas-gen-hint");
   const modeLabel = el.querySelector(".canvas-gen-mode-label");
   const controls = el.querySelector(".canvas-gen-controls");
-  const sizeLabel = el.querySelector(".canvas-gen-size .canvas-gen-select-label");
-  const styleLabel = el.querySelector(".canvas-gen-style .canvas-gen-select-label");
-  const shotsLabel = el.querySelector(".canvas-gen-shots .canvas-gen-select-label");
   const feedLine = el.querySelector(".canvas-gen-feed");
   const prompt = el.querySelector(".canvas-gen-prompt");
   const runButton = el.querySelector(".canvas-gen-run");
@@ -110,8 +118,10 @@ export function syncGen(el, item, feed) {
   }
 
   const busy = run.phase === "loading" || run.phase === "running";
+  /* 局部重绘还没出图时取景窗垫连线来的底图，好让人对着它涂遮罩 */
+  const baseUrl = mode === "inpaint" ? info?.baseUrl || "" : "";
   /* 逐步预览先垫上，成品到了才换下来——两张都不在的时候这块是空的 */
-  const shown = run.imageUrl || run.previewUrl;
+  const shown = run.imageUrl || run.previewUrl || baseUrl;
   image.hidden = !shown;
   if (shown && image.getAttribute("src") !== shown) image.setAttribute("src", shown);
   /* 预览帧本来就一两百像素，按自身尺寸摆就是张邮票漂在空取景窗里；拉满这一格
@@ -119,25 +129,37 @@ export function syncGen(el, item, feed) {
   image.classList.toggle("is-preview", Boolean(shown) && !run.imageUrl);
   el.classList.toggle("has-image", Boolean(shown));
 
+  const maskCanvas = el.querySelector(".canvas-gen-mask");
+  if (maskCanvas) maskCanvas.hidden = mode !== "inpaint";
+  /* 涂抹 / 清除只在局部重绘时出现；涂抹按钮亮着说明现在鼠标在涂、不在拖块 */
+  const brushButton = el.querySelector(".canvas-gen-brush");
+  const clearButton = el.querySelector(".canvas-gen-clear");
+  if (brushButton) {
+    brushButton.hidden = mode !== "inpaint";
+    brushButton.classList.toggle(
+      "is-active",
+      mode === "inpaint" && Boolean(maskCanvas?.classList.contains("is-active")),
+    );
+  }
+  if (clearButton) clearButton.hidden = mode !== "inpaint";
   const text = hintText(run, item, mode);
   hint.hidden = !text;
   hint.textContent = text;
   hint.classList.toggle("is-error", run.phase === "failed");
 
-  /* 参数行：放大这一档不读尺寸、风格和张数，整行撤掉；锁住的块不给动 */
+  /* 参数行：放大这一档没有可看的参数，整行撤掉 */
   if (controls) controls.hidden = mode === "upscale";
-  for (const button of [
-    el.querySelector(".canvas-gen-size"),
-    el.querySelector(".canvas-gen-style"),
-    el.querySelector(".canvas-gen-shots"),
-  ]) {
-    if (button) button.disabled = Boolean(item.locked);
-  }
-  if (sizeLabel) sizeLabel.textContent = `${item.imageW}×${item.imageH}`;
-  if (styleLabel) styleLabel.textContent = item.style || "无风格";
-  if (shotsLabel) shotsLabel.textContent = `${item.shots || 1} 张`;
-  /* 放大这一档一个字都不读，提示词框就整个撤掉（取景窗自己会长回来占这块） */
+  /* 放大不读提示词，补细节也走内置那句；提示框整档都不摆 */
+  const refineOn = mode === "upscale" && Boolean(item.refine);
+  const promptWrap = el.querySelector(".canvas-gen-prompt-wrap");
+  if (promptWrap) promptWrap.hidden = mode === "upscale";
   prompt.hidden = mode === "upscale";
+  /* 补细节开关只在放大那档出现 */
+  const refineButton = el.querySelector(".canvas-gen-refine");
+  if (refineButton) {
+    refineButton.hidden = mode !== "upscale";
+    refineButton.classList.toggle("is-active", mode === "upscale" && Boolean(item.refine));
+  }
   /* 正在打字的时候不拿块上的值去盖光标 */
   if (document.activeElement !== prompt && prompt.value !== item.prompt) {
     prompt.value = item.prompt || "";

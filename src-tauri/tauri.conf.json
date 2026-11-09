@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "无限空间",
+  "productName": "无限画布",
   "mainBinaryName": "inspace",
   "version": "0.1.0",
   "identifier": "com.inspace.app",
@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "无限空间",
+        "title": "无限画布",
         "width": 1280,
         "height": 800,
         "minWidth": 1000,
@@ -36,6 +36,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "resources/cuda/cudart64_12.dll": "cudart64_12.dll",
+      "resources/cuda/cublas64_12.dll": "cublas64_12.dll",
+      "resources/cuda/cublasLt64_12.dll": "cublasLt64_12.dll"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

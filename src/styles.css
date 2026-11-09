@@ -82,6 +82,11 @@ button {
   text-overflow: ellipsis;
 }
 
+/* F10 收起软件头部：标题栏不占位，画布/设置直接顶到窗口上沿 */
+body.is-titlebar-hidden .titlebar {
+  display: none;
+}
+
 .titlebar-right {
   display: flex;
   align-items: stretch;
@@ -131,6 +136,7 @@ button {
 
 /* ---------- 外壳 ---------- */
 .shell {
+  position: relative;
   flex: 1 1 auto;
   display: flex;
   min-height: 0;
@@ -161,24 +167,78 @@ button {
   background: color-mix(in srgb, var(--fg) 10%, transparent);
 }
 
-/* ---------- 设置页 ---------- */
+/* ---------- 设置弹层 ---------- */
 .settings-page {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 18px 24px 40px;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 28px;
+}
+
+.settings-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 12, 18, 0.38);
+}
+
+.settings-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(860px, 100%);
+  max-height: 100%;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+/* 打开时由程序把焦点收进弹层（为了不再留在齿轮上），这层壳自己不要画焦点框 */
+.settings-dialog:focus {
+  outline: none;
 }
 
 .settings-head {
   display: flex;
   align-items: center;
-  height: 22px;
-  margin-bottom: 14px;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  padding: 14px 16px 12px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 28%, transparent);
+}
+
+.settings-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings-close:hover,
+.settings-close:focus-visible {
+  border-color: var(--line);
+  color: var(--fg);
+}
+
+.settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 20px;
 }
 
 .settings-card {
-  max-width: 760px;
   margin-bottom: 14px;
   padding: 18px 20px 16px;
   border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
@@ -501,6 +561,64 @@ button {
   background: color-mix(in srgb, var(--fg) 16%, transparent);
 }
 
+/* 快捷键说明：只读清单，宽的时候两列排开；每一行右边是按键胶囊 */
+.settings-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px 32px;
+  margin-top: 16px;
+}
+
+.settings-shortcut-heading {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 30px;
+  padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+  font-size: 12.5px;
+}
+
+.settings-shortcut-heading + .settings-shortcut-row {
+  border-top: none;
+}
+
+.settings-keys {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.settings-keys kbd {
+  min-width: 20px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.settings-key-sep {
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 /* ---------- 右键菜单 ---------- */
 .ctx-menu {
   position: fixed;
@@ -527,7 +645,8 @@ button {
   cursor: pointer;
 }
 
-.ctx-menu button:hover {
+.ctx-menu button:hover,
+.ctx-menu button.is-open {
   background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
 
@@ -563,7 +682,7 @@ button {
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--fg) 35%, transparent);
+  border: 1.5px solid var(--muted);
   background: var(--menu-icon-color, transparent);
 }
 
@@ -795,16 +914,19 @@ button {
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  border: 2px solid var(--fg);
   border-radius: 4px;
-  /* 棋盘格衬底，半透明色才看得出实际效果 */
-  background-image: repeating-conic-gradient(#e6e6e6 0% 25%, #ffffff 0% 50%);
-  background-size: 6px 6px;
+  /* 当前色压在最上层，棋盘格垫底：不透明色盖住格子，半透明才透出来 */
+  background-image:
+    linear-gradient(var(--chip-color, transparent), var(--chip-color, transparent)),
+    repeating-conic-gradient(#e6e6e6 0% 25%, #ffffff 0% 50%);
+  background-size: 100% 100%, 6px 6px;
 }
 
 .color-pop-hex {
   flex: 1 1 auto;
-  min-width: 0;
+  /* 九位色值（#rrggbbaa）要能完整看见 */
+  min-width: 84px;
   height: 24px;
   padding: 0 8px;
   border: 1px solid var(--line);
@@ -820,23 +942,31 @@ button {
   border-color: var(--accent);
 }
 
+/* 预设色点：九列均分整行，铺满不留右侧空档 */
 .color-pop-presets {
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 5px;
   margin-top: 10px;
 }
 
-.color-pop-preset {
-  width: 20px;
-  height: 20px;
+/* 带上 .color-pop 前缀：右键菜单里还有一条 .ctx-menu button 的通用规则，
+   会把色点撑满整行、抹掉边框，这里必须比它更具体才压得住 */
+.color-pop .color-pop-preset {
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--fg) 28%, transparent);
+  /* 边框要压得住白块：不然白色预设跟浅色面板糊成一片，看不出那儿有个色点 */
+  /* 2px 主文字色：这颗点只 16px，浅色描边白块会跟面板底糊成一片 */
+  border: 2px solid var(--fg);
   border-radius: 4px;
   cursor: pointer;
 }
 
-.color-pop-preset:hover {
-  border-color: #ffffff;
+.color-pop .color-pop-preset:hover {
+  border-color: var(--fg);
 }
 
 /* ---------- 自定义确认框（替换系统 confirm，风格与菜单/取色盘一致） ---------- */
@@ -1154,7 +1284,7 @@ button {
   position: relative;
   width: 54px;
   height: 28px;
-  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  border: 1px solid var(--muted);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -1174,6 +1304,7 @@ button {
   width: 9px;
   height: 9px;
   border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--muted);
 }
 
 /* 宇宙主题的预览缩略：一小片深空，几点星，一颗行星 */
@@ -1551,7 +1682,7 @@ button {
   width: 14px;
   height: 14px;
   border-radius: 4px;
-  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  border: 1.5px solid var(--muted);
   background: conic-gradient(
     #e5484d,
     #f08c00,
@@ -1731,8 +1862,8 @@ button {
   outline: none;
 }
 
-/* 连线端口：一个框装四个圈，框画在块自己身上（inset 由 JS 补），所以块被压在下面时端口也一起被压住。
-   框本身不吃指针，只有圆圈可点。 */
+/* 连线端口：块身上只留一个 10px 的透明热区；看得见的圆点画在屏幕层的
+   .canvas-port-visual-layer 里，不跟相机缩放走，也不会被缩放糊成横条。 */
 .canvas-port-box {
   position: absolute;
   z-index: 2;
@@ -1741,13 +1872,12 @@ button {
 
 .canvas-port {
   position: absolute;
-  /* 块所在的 world 被相机缩放了，乘回倒数才在屏幕上保持 10px 一圈 */
+  /* 热区在屏幕上是 10px；world 被相机缩放了，乘回倒数保持手感不变 */
   width: calc(10px * var(--canvas-inv, 1));
   height: calc(10px * var(--canvas-inv, 1));
-  border: calc(1px * var(--canvas-inv, 1)) solid var(--accent);
-  border-radius: 50%;
-  background: var(--surface);
-  box-shadow: 0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
+  border: none;
+  background: transparent;
+  box-shadow: none;
   transform: translate(-50%, -50%);
   pointer-events: auto;
   cursor: crosshair;
@@ -1773,26 +1903,35 @@ button {
   top: 50%;
 }
 
-/* 选中态端口圈：块进了选中集合，四边这四颗就变大、涂实心，外头再饶一道淡光。
-   描边和柔光彻底废掉之后，「这块被选中」全靠它说事，单选多选一个样。 */
-.canvas-port[data-sel] {
-  width: calc(13px * var(--canvas-inv, 1));
-  height: calc(13px * var(--canvas-inv, 1));
-  border-color: var(--surface);
-  background: var(--accent);
-  box-shadow:
-    0 0 0 calc(2px * var(--canvas-inv, 1))
-      color-mix(in srgb, var(--accent) 32%, transparent),
-    0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
-}
-
 /* 只当记号、不吃鼠标：换到画框/划线工具、以及拖块拖连线的这一会儿 */
 .canvas-port[data-inert] {
   pointer-events: none;
 }
 
-.canvas-port:hover {
+/* 端口的视觉层：屏幕坐标、不缩放，1px 就是真的 1px */
+.canvas-port-visual-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-port-dot {
+  position: absolute;
+  box-sizing: border-box;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   background: var(--accent);
+  transform: translate(-50%, -50%);
+}
+
+/* 选中态：大一号，外加一道真正的 1px 浅描边和柔光 */
+.canvas-port-dot[data-sel] {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
 }
 
 .canvas-item.is-connect-target {
@@ -1811,8 +1950,28 @@ button {
   box-sizing: border-box;
 }
 
+/* 落图抓屏时藏掉不属于面板内容的记号：容器虚线、锁点、画面工具条、鸟瞰窗 */
+body.is-screen-capturing .canvas-item.is-container {
+  outline: none !important;
+}
+
+body.is-screen-capturing .canvas-lock-layer,
+body.is-screen-capturing .canvas-picture-tools,
+body.is-screen-capturing .canvas-minimap,
+body.is-screen-capturing .canvas-port-visual-layer,
+body.is-screen-capturing .canvas-port,
+body.is-screen-capturing .canvas-sel-box,
+body.is-screen-capturing .canvas-port-box {
+  display: none !important;
+}
+
 /* 分组容器：只是一层虚线框，不吃布局、不改块自己的边框。
    框里完全装下的块，在拖动这个框的时候会跟着走。 */
+/* 相机只渲染视野附近的块；离得远的先不挂出来 */
+.canvas-item.is-culled {
+  display: none;
+}
+
 .canvas-item.is-container {
   outline: 1px dashed color-mix(in srgb, var(--accent) 46%, transparent);
   outline-offset: 4px;
@@ -1822,10 +1981,11 @@ button {
   outline-color: color-mix(in srgb, var(--accent) 78%, transparent);
 }
 
-/* 锁住的块：右上角一枚小锁，所有块统一；不动块自己的边框、底色和圆角。
-   锁图标不吃指针。块自己拖不动，但按住它可以拖整张画布，
-   所以光标给「可抓」而不是普通箭头。内部自带 cursor: move 的拖动头（如电子书头部）
-   也一并改过来，免得指着它还以为能挪这块。 */
+/* 锁住的块：右上角一枚实心小圆点，所有块统一；不动块自己的边框、底色和圆角。
+   悬停或选中时块本身不出现任何选中记号，只让这颗点变色。
+   圆点外面套了 22px 的透明热区，双击热区解除锁定；块自己拖不动，
+   但按住它可以拖整张画布，所以光标给「可抓」而不是普通箭头。内部自带
+   cursor: move 的拖动头（如电子书头部）也一并改过来，免得指着它还以为能挪这块。 */
 .canvas-item.is-locked,
 .canvas-item.is-locked .canvas-ebook-head {
   cursor: grab;
@@ -1837,18 +1997,81 @@ button {
   cursor: grabbing;
 }
 
-.canvas-item.is-locked::after {
-  content: "";
+.canvas-lock-dot {
   position: absolute;
-  top: 5px;
-  right: 5px;
+  top: var(--lock-inset, 0px);
+  right: var(--lock-inset, 0px);
+  z-index: 3;
+  display: none;
+  /* 只留热区；看得见的圆点由屏幕层的 .canvas-lock-visual 画 */
+  width: calc(3px + 19px * var(--canvas-inv, 1));
+  height: calc(3px + 19px * var(--canvas-inv, 1));
+  cursor: pointer;
+}
+
+.canvas-item.is-locked .canvas-lock-dot {
+  display: block;
+}
+
+/* 锁点视觉层：屏幕坐标，圆是真正的圆，不受相机缩放栅格化影响 */
+.canvas-lock-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-lock-visual {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--fg) 62%, transparent);
+  transition: background-color 0.12s ease;
+}
+
+.canvas-lock-visual.is-active {
+  background: var(--accent);
+}
+
+/* 线/箭头的端点圈视觉层：屏幕坐标，圆是真正的圆；块里的同类元素只留热区 */
+.canvas-handle-visual-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-handle-visual {
+  position: absolute;
   width: 13px;
   height: 13px;
-  background: color-mix(in srgb, var(--fg) 62%, transparent);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm3 8H9V7a3 3 0 0 1 6 0v3z'/%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm3 8H9V7a3 3 0 0 1 6 0v3z'/%3E%3C/svg%3E") center / contain no-repeat;
-  filter: drop-shadow(0 0 1.5px var(--surface));
-  pointer-events: none;
+  border: 1px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent),
+    0 1px 3px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%);
+}
+
+/* 线/箭头端点原来的视觉收掉，只保留 13px 热区 */
+.canvas-handle-point.canvas-handle-hit {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 锁住的文字块悬停也不变色；有边框的保持它自己的边框色 */
+.canvas-item-text.is-locked:hover {
+  border-color: transparent;
+}
+
+.canvas-item-text.is-locked.is-bordered:hover {
+  border-color: var(--text-border, color-mix(in srgb, var(--fg) 65%, transparent));
+}
+
+.canvas-item.is-container.is-locked:hover {
+  outline-color: color-mix(in srgb, var(--accent) 46%, transparent);
 }
 
 .canvas-item-rect,
@@ -1862,6 +2085,8 @@ button {
 }
 
 .canvas-item-text {
+  display: flex;
+  flex-direction: column;
   padding: 4px 6px;
   border: 1px dashed transparent;
   border-radius: 10px;
@@ -1889,6 +2114,7 @@ button {
 }
 
 .canvas-text-body {
+  width: 100%;
   min-width: 1px;
   min-height: 21px;
   outline: none;
@@ -1984,6 +2210,22 @@ button {
   background: color-mix(in srgb, var(--surface-2) 70%, var(--bg));
 }
 
+/* 局部重绘的遮罩层：黑底白笔，白的地方出图时会被重画 */
+.canvas-gen-mask {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  opacity: 0.66;
+  /* 只有涂抹模式开着才吃鼠标，否则这一层让开、面板照常能拖 */
+  pointer-events: none;
+}
+
+.canvas-gen-mask.is-active {
+  pointer-events: auto;
+}
+
 .canvas-gen-image {
   display: block;
   max-width: 100%;
@@ -2034,7 +2276,7 @@ button {
 }
 
 /* 档位一行：纯文字说「这张怎么出」，规格跟下面「开始/落块」同一档 */
-/* 参数行：档位三个字 + 尺寸、风格、张数三颗小下拉，排成一行 */
+/* 参数行：只报档位几个字 */
 .canvas-gen-mode-label {
   font-size: 12.5px;
   line-height: 1;
@@ -2053,43 +2295,57 @@ button {
   display: none;
 }
 
-.canvas-gen-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    background-color 0.12s ease,
-    border-color 0.12s ease;
-}
-
-.canvas-gen-select:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-}
-
-.canvas-gen-select:disabled {
-  opacity: 0.32;
-  cursor: default;
-}
-
-.canvas-gen-select-arrow {
-  opacity: 0.55;
-}
-
 /* 进料提示：接了几张输入图、这一张按哪档走。只在真接了图（或明写了要图）时出现 */
 .canvas-gen-feed {
   margin: 0;
   font-size: 11px;
   line-height: 15px;
   color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-gen-prompt-wrap {
+  position: relative;
+}
+
+/* 涂抹、清除、补细节和开始、落块排一行，规格一致 */
+.canvas-gen-brush,
+.canvas-gen-clear,
+.canvas-gen-refine {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.canvas-gen-brush:hover:not(:disabled),
+.canvas-gen-clear:hover:not(:disabled),
+.canvas-gen-refine:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.canvas-gen-brush:disabled,
+.canvas-gen-clear:disabled,
+.canvas-gen-refine:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 涂抹 / 补细节亮着 = 这一档开着；再点一下关掉 */
+.canvas-gen-brush.is-active,
+.canvas-gen-refine.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 .canvas-gen-prompt {
@@ -2105,8 +2361,9 @@ button {
   font-size: 12.5px;
   line-height: 18px;
   resize: none;
-  overflow: auto;
-  scrollbar-width: thin;
+  /* 高度由 JS 按内容撑开，永远不出滚动条 */
+  overflow: hidden;
+  scrollbar-width: none;
   scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
 }
 
@@ -2231,6 +2488,19 @@ button {
   height: 15px;
   border-radius: 50%;
   background: var(--picture-ink, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent);
+}
+
+/* 纸色：方形色块，透明时露出棋盘格，一眼看出「没有底色」。
+   类名别和按钮本身撞（按钮也是 canvas-picture-paper），不然 30px 按钮会被压成 15px */
+.canvas-picture-paper-swatch {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  background-image:
+    linear-gradient(var(--picture-paper, transparent), var(--picture-paper, transparent)),
+    repeating-conic-gradient(#e6e6e6 0% 25%, #ffffff 0% 50%);
+  background-size: 100% 100%, 5px 5px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent);
 }
 
@@ -3849,6 +4119,80 @@ button {
   transform-origin: 0 0;
 }
 
+/* Alt 测距：临时量尺，画在块之上、顶栏之下，不吃指针 */
+.canvas-measure-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-measure-line {
+  position: absolute;
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.canvas-measure-h {
+  height: 1px;
+}
+
+.canvas-measure-v {
+  width: 1px;
+}
+
+.canvas-measure-h::before,
+.canvas-measure-h::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: var(--accent);
+}
+
+.canvas-measure-h::before {
+  left: 0;
+}
+
+.canvas-measure-h::after {
+  right: 0;
+}
+
+.canvas-measure-v::before,
+.canvas-measure-v::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.canvas-measure-v::before {
+  top: 0;
+}
+
+.canvas-measure-v::after {
+  bottom: 0;
+}
+
+.canvas-measure-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  /* 贴着数字的小底片：不带边框/阴影，内边距只留 1px，
+     15px 的窄缝里也放得下 */
+  padding: 0 1px;
+  border: none;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--fg);
+  font-size: 10.5px;
+  line-height: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .canvas-handle {
   position: absolute;
   width: calc(10px * var(--canvas-inv, 1));
@@ -4004,6 +4348,14 @@ button {
   margin-left: auto;
 }
 
+/* F9 收起顶栏三组浮层：画布名、工具条、缩放 + 导出 */
+.canvas-page.is-chrome-hidden .canvas-name,
+.canvas-page.is-chrome-hidden .canvas-tools,
+.canvas-page.is-chrome-hidden .canvas-zoom,
+.canvas-page.is-chrome-hidden .canvas-actions {
+  display: none;
+}
+
 .canvas-name {
   display: inline-flex;
   align-items: center;
@@ -4139,6 +4491,7 @@ button {
   color: var(--fg);
 }
 
+.canvas-page.no-canvas .canvas-name,
 .canvas-page.no-canvas .canvas-tools,
 .canvas-page.no-canvas .canvas-zoom,
 .canvas-page.no-canvas .canvas-actions {
@@ -4534,25 +4887,6 @@ button {
 .canvas-toast.is-on {
   opacity: 1;
   transform: translate(-50%, 0);
-}
-
-/* 取色盘：无填充 */
-.color-pop-none {
-  flex: 0 0 auto;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.color-pop-none:hover {
-  border-color: var(--fg);
-  color: var(--fg);
 }
 
 /* ---------- Agent 演示光带 ---------- */

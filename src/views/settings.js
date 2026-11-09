@@ -43,11 +43,19 @@ function showStatus(message) {
   }, 3000);
 }
 
+/* 设置是浮在画布上的弹层：关掉就是回画布，和右上角齿轮走同一条路由 */
+function closeSettings() {
+  window.dispatchEvent(new CustomEvent("inspace:route", { detail: "canvas" }));
+}
+
 function setBusy(busy) {
   for (const button of [ui.pick, ui.reveal, ui.reset]) button.disabled = busy;
 }
 
 export function initSettings() {
+  ui.page = document.querySelector("#settings-view");
+  ui.scrim = document.querySelector("#settings-scrim");
+  ui.close = document.querySelector("#settings-close");
   ui.path = document.querySelector("#settings-data-path");
   ui.pick = document.querySelector("#settings-data-pick");
   ui.reveal = document.querySelector("#settings-data-reveal");
@@ -91,6 +99,22 @@ export function initSettings() {
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
   ui.reset.addEventListener("click", reset);
+  ui.close.addEventListener("click", closeSettings);
+  ui.scrim.addEventListener("click", closeSettings);
+  document.addEventListener("keydown", (event) => {
+    if (!ui.page || ui.page.hidden) return;
+    if (event.key !== "Escape" || event.repeat) return;
+    const target = event.target;
+    /* 输入框里的 Esc 归它自己（取消编辑），不连设置弹层一起关 */
+    if (
+      target &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    closeSettings();
+  });
   ui.ffmpegReveal.addEventListener("click", revealFfmpegDir);
   ui.ffmpegRecheck.addEventListener("click", refreshFfmpeg);
   ui.mcpCopy.addEventListener("click", copyMcpConfig);

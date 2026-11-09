@@ -104,8 +104,9 @@ export const SCENE_MAX_POLY_POINTS = 200;
    面板上只摆提示词框和一颗开始，其余参数走默认，agent 想改直接写块字段。 */
 export const GEN_MIN_WIDTH = 320;
 export const GEN_MIN_HEIGHT = 360;
-export const GEN_DEFAULT_WIDTH = 420;
-export const GEN_DEFAULT_HEIGHT = 560;
+/* 新建就用最小尺寸：无限画布上先占一小块，要大的自己拉 */
+export const GEN_DEFAULT_WIDTH = GEN_MIN_WIDTH;
+export const GEN_DEFAULT_HEIGHT = GEN_MIN_HEIGHT;
 /* 提示词给到 4000 字：够写一整段画面描述，又不至于把这份内容文件当笔记使 */
 export const GEN_TEXT_MAX = 4000;
 export const GEN_IMAGE_MIN = 256;
@@ -122,7 +123,7 @@ export const GEN_CFG_DEFAULT = 6.0;
 /* 出图那一档：auto 是「看连线自己定」——没接图就文生图，接一张当底图，接多张当参考。
    明写 t2i / i2i / edit 才能盖掉这个推断（画风锚点那种「只有一张但它是参考图」就得明写）。
    upscale 不参与推断：它不扩散、不读提示词，只有明选才有。 */
-export const GEN_MODES = ["auto", "t2i", "i2i", "edit", "upscale"];
+export const GEN_MODES = ["auto", "t2i", "i2i", "edit", "upscale", "inpaint"];
 export const GEN_MODE_DEFAULT = "auto";
 export const GEN_MODE_LABELS = {
   auto: "自动",
@@ -130,6 +131,7 @@ export const GEN_MODE_LABELS = {
   i2i: "图生图",
   edit: "参考图编辑",
   upscale: "高清放大",
+  inpaint: "局部重绘",
 };
 /* 图生图改多少：0 原样、1 全改。默认跟上游 sd_img_gen_params_init 的 0.75 一致 */
 export const GEN_STRENGTH_MIN = 0;
@@ -138,35 +140,6 @@ export const GEN_STRENGTH_DEFAULT = 0.75;
 /* 面板上的尺寸：常用比例、手机、电脑、证件照各给几档。
    像素一律取引擎要求的 32 倍数、不超过 2048，所以常见分辨率都取最接近的合法值
    （1080→1088 这种）；证件照给的是比例和出图尺寸，打印前再缩到具体毫米对应像素。 */
-export const GEN_SIZE_CHOICES = [
-  { group: "常用", w: 1024, h: 1024, label: "1:1" },
-  { group: "常用", w: 768, h: 1024, label: "3:4" },
-  { group: "常用", w: 1024, h: 768, label: "4:3" },
-  { group: "常用", w: 576, h: 1024, label: "9:16" },
-  { group: "常用", w: 1024, h: 576, label: "16:9" },
-  { group: "手机", w: 1088, h: 1920, label: "手机 9:16" },
-  { group: "手机", w: 768, h: 1664, label: "全面屏 9:19.5" },
-  { group: "电脑", w: 1920, h: 1088, label: "电脑 16:9" },
-  { group: "电脑", w: 1536, h: 960, label: "电脑 16:10" },
-  { group: "电脑", w: 2048, h: 864, label: "带鱼屏 21:9" },
-  { group: "证件照", w: 1024, h: 1440, label: "一寸" },
-  { group: "证件照", w: 896, h: 1152, label: "小二寸" },
-];
-/* 风格：引擎没有风格参数，选中后把前缀句拼在提示词前面。空前缀就是不加。
-   存的是 label，出图时再查前缀——以后改文案，老块也不会突然换风格。 */
-export const GEN_STYLE_CHOICES = [
-  { label: "无风格", prefix: "" },
-  { label: "写实摄影", prefix: "写实摄影风格，真实照片质感，" },
-  { label: "电影感", prefix: "电影感，宽银幕构图，低饱和光影，" },
-  { label: "动漫", prefix: "日系动漫风格，干净线条，平涂上色，" },
-  { label: "水彩", prefix: "水彩画风格，柔和晕染，留白，" },
-  { label: "油画", prefix: "油画风格，厚涂笔触，" },
-  { label: "3D 渲染", prefix: "3D 渲染风格，柔和材质与体积光，" },
-  { label: "国风", prefix: "中国画风格，工笔淡彩，" },
-  { label: "赛博朋克", prefix: "赛博朋克风格，霓虹冷光，高对比，" },
-];
-/* 一次点开始跑几张：引擎一次一张，多张排队跑，前几张自动落成图片块 */
-export const GEN_SHOTS_CHOICES = [1, 2, 4];
 /* 每类面板拖角缩放的地板：拉到这里就不动了，免得块缩成看不见内容的一小坨 */
 export const AUDIO_MIN_WIDTH = 160;
 export const AUDIO_MIN_HEIGHT = 64;
@@ -259,7 +232,8 @@ export function normalizeItem(raw) {
 function normalizeBlock(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.id !== "string") return null;
   const type = raw.type;
-  const base = { id: raw.id, type };
+  /* seq 是画布内的固定编号：右下角坐标条和 agent 对块说话都靠它 */
+  const base = { id: raw.id, type, seq: Number.isFinite(raw.seq) ? Math.trunc(raw.seq) : 0 };
   if (type === "connector") {
     const from = normalizeEnd(raw.from);
     const to = normalizeEnd(raw.to);
@@ -322,6 +296,8 @@ function normalizeBlock(raw) {
       bordered: raw.bordered === true,
       borderWidth: Math.min(BORDER_MAX_WIDTH, Math.max(0, Math.round(num(raw.borderWidth, BORDER_DEFAULT_WIDTH)))),
       radius: Math.max(0, Math.round(num(raw.radius, TEXT_DEFAULT_RADIUS))),
+      align: ["left", "center", "right"].includes(raw.align) ? raw.align : "left",
+      vAlign: ["top", "middle", "bottom"].includes(raw.vAlign) ? raw.vAlign : "top",
       z: layerOf(raw),
     };
   }
@@ -521,11 +497,12 @@ function normalizeBlock(raw) {
       cfg: clamp(num(raw.cfg, GEN_CFG_DEFAULT), GEN_CFG_MIN, GEN_CFG_MAX),
       /* -1 在引擎里是「每张换一个」的哨兵；认不出别的数一律退回它 */
       seed: Number.isFinite(raw.seed) && raw.seed >= 0 ? Math.trunc(raw.seed) : -1,
+      /* 取景窗自己的高度：提示词框变高时块跟着长，这一截不动 */
+      stageH: Number.isFinite(raw.stageH) ? Math.max(0, Math.round(raw.stageH)) : 0,
       mode: GEN_MODES.includes(raw.mode) ? raw.mode : GEN_MODE_DEFAULT,
       strength: clamp(num(raw.strength, GEN_STRENGTH_DEFAULT), GEN_STRENGTH_MIN, GEN_STRENGTH_MAX),
-      /* 风格存 label；认不出的（比如以后删掉的风格）按无风格算 */
-      style: GEN_STYLE_CHOICES.some((one) => one.label === raw.style) ? raw.style : "",
-      shots: GEN_SHOTS_CHOICES.includes(Number(raw.shots)) ? Number(raw.shots) : 1,
+      /* 高清放大后要不要再补一遍低强度重绘（长出纹理） */
+      refine: raw.refine === true,
       /* 最近那一张，记的是 <画布>/images/ 里的相对路径；还没出过图是空串 */
       src: typeof raw.src === "string" ? raw.src : "",
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
@@ -614,6 +591,9 @@ export function makeText(x, y, w = TEXT_DEFAULT_WIDTH, minH = 0) {
     bordered: true,
     borderWidth: BORDER_DEFAULT_WIDTH,
     radius: TEXT_DEFAULT_RADIUS,
+    /* 文字块的对齐：水平左/中/右，垂直顶/中/底（垂直要块被拉高才看得出来） */
+    align: "left",
+    vAlign: "top",
   };
 }
 
@@ -848,6 +828,8 @@ export function makeGen(x, y, w = GEN_DEFAULT_WIDTH, h = GEN_DEFAULT_HEIGHT) {
     y,
     w,
     h,
+    stageH: 0,
+    refine: false,
     prompt: "",
     negative: "",
     imageW: GEN_IMAGE_DEFAULT,
@@ -2235,7 +2217,13 @@ export function itemBounds(item, el) {
       h: Math.abs(item.y2 - item.y),
     };
   }
-  const h = item.type === "text" ? (el ? el.offsetHeight : item.h || 24) : item.h;
+  /* 视口裁剪藏起来的块量不到 offsetHeight，退回最后记下的高度 */
+  const h =
+    item.type === "text"
+      ? el && !el.classList.contains("is-culled")
+        ? el.offsetHeight
+        : item.h || 24
+      : item.h;
   return { x: item.x, y: item.y, w: item.w, h };
 }
 
@@ -2623,35 +2611,48 @@ export function createItemElement(item, mediaSrc, options = {}) {
     image.alt = "";
     const hint = document.createElement("p");
     hint.className = "canvas-gen-hint";
-    stage.append(image, hint);
+    /* 局部重绘的遮罩层：白色笔迹是「这里要重画」，叠在底图上 */
+    const maskCanvas = document.createElement("canvas");
+    maskCanvas.className = "canvas-gen-mask";
+    maskCanvas.hidden = true;
+    stage.append(image, maskCanvas, hint);
     const bar = document.createElement("div");
     bar.className = "canvas-gen-bar";
-    /* 一行参数：档位是纯文字（哪一档在建块时由入口定下），后面跟尺寸、风格、张数三颗小下拉 */
+    /* 一行参数：只报档位纯文字，尺寸/步数/种子都由 agent 改块上的字段 */
     const controls = document.createElement("div");
     controls.className = "canvas-gen-controls";
     const modeLabel = document.createElement("span");
     modeLabel.className = "canvas-gen-mode-label";
     controls.append(modeLabel);
-    for (const cls of ["canvas-gen-size", "canvas-gen-style", "canvas-gen-shots"]) {
-      const select = document.createElement("button");
-      select.type = "button";
-      select.className = `canvas-gen-select ${cls}`;
-      const label = document.createElement("span");
-      label.className = "canvas-gen-select-label";
-      select.append(label, chevronSvg("M3.8 6.2 8 10.4l4.2-4.2", "canvas-gen-select-arrow"));
-      controls.append(select);
-    }
     /* 这一行只报「这张会怎么出」：接了几张输入图、走的哪一档。没接图就不占地方 */
     const feed = document.createElement("p");
     feed.className = "canvas-gen-feed";
     feed.hidden = true;
+    const promptWrap = document.createElement("div");
+    promptWrap.className = "canvas-gen-prompt-wrap";
     const prompt = document.createElement("textarea");
     prompt.className = "canvas-gen-prompt";
     prompt.placeholder = "写下你想看的东西";
     prompt.rows = 3;
     prompt.spellcheck = false;
+    promptWrap.append(prompt);
     const actions = document.createElement("div");
     actions.className = "canvas-gen-actions";
+    const brush = document.createElement("button");
+    brush.type = "button";
+    brush.className = "canvas-gen-brush";
+    brush.textContent = "涂抹";
+    brush.title = "开启后在预览上涂要重绘的地方；再点一下就能拖动面板";
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "canvas-gen-clear";
+    clear.textContent = "清除";
+    clear.title = "把涂过的遮罩清空，重新涂";
+    const refine = document.createElement("button");
+    refine.type = "button";
+    refine.className = "canvas-gen-refine";
+    refine.textContent = "补细节";
+    refine.title = "放大后再按提示词低强度重绘一遍，把纹理长回来";
     const run = document.createElement("button");
     run.type = "button";
     run.className = "canvas-gen-run";
@@ -2659,14 +2660,22 @@ export function createItemElement(item, mediaSrc, options = {}) {
     place.type = "button";
     place.className = "canvas-gen-place";
     place.textContent = "落块";
-    actions.append(run, place);
-    bar.append(controls, feed, prompt, actions);
+    actions.append(brush, clear, refine, run, place);
+    bar.append(controls, feed, promptWrap, actions);
     card.append(stage, bar);
     el.append(card);
   } else if (item.type === "file") {
     el.append(createFileCard(item, options));
   } else if (item.type === "ebook") {
     el.append(createEbookCard(item, options));
+  }
+
+  if (item.type !== "connector") {
+    const lockDot = document.createElement("span");
+    lockDot.className = "canvas-lock-dot";
+    lockDot.title = "双击解除锁定";
+    lockDot.setAttribute("aria-label", "双击解除锁定");
+    el.append(lockDot);
   }
 
   syncItemElement(el, item);
@@ -6210,6 +6219,9 @@ function syncSceneElement(el, item) {
 
 export function syncItemElement(el, item) {
   el.classList.toggle("is-locked", Boolean(item.locked));
+  /* 锁点跟着块的圆角往里收：圆角越大，点离角越远，免得落进圆角缺口被边框压住。
+     值是世界坐标，跟着相机一起缩放。 */
+  el.style.setProperty("--lock-inset", `${Number.isFinite(item.radius) ? Math.max(0, item.radius) : 0}px`);
   el.style.left = `${item.x}px`;
   el.style.top = `${item.y}px`;
 
@@ -6240,6 +6252,9 @@ export function syncItemElement(el, item) {
     el.style.fontSize = `${item.fontSize}px`;
     el.style.color = item.color || "";
     el.style.background = item.fillColor || "transparent";
+    el.style.textAlign = item.align || "left";
+    el.style.justifyContent =
+      item.vAlign === "middle" ? "center" : item.vAlign === "bottom" ? "flex-end" : "flex-start";
     if (item.borderColor) el.style.setProperty("--text-border", item.borderColor);
     else el.style.removeProperty("--text-border");
     el.classList.toggle("is-bordered", Boolean(item.bordered));

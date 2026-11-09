@@ -134,6 +134,8 @@ export const imageData = (id, src, linked) =>
   invoke("canvas_image_data", { id, src, linked: Boolean(linked) });
 export const exportSave = (name, ext, data) => invoke("canvas_export_save", { name, ext, data });
 export const openExport = (path) => invoke("canvas_open_export", { path });
+/* 落图抓屏：抓窗口客户区当前画面，返回 PNG data URL；和屏幕像素一致 */
+export const captureViewport = () => invoke("webview_capture");
 /* 分段导出：先选一次文件夹，之后一张一张写进去，不弹 N 个保存框 */
 export const exportPickDir = () => invoke("canvas_export_pick_dir");
 export const exportWrite = (dir, name, ext, data) =>

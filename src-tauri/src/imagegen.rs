@@ -43,6 +43,10 @@ const UPSCALE_SUB: &str = "upscale";
 const DEFAULT_UPSCALER: &str = "RealESRGAN_x4plus.pth";
 /// 分块边长（输入侧像素）。整张一次过装不下：864×1152→3456×4608 那一版图要 26 GB
 /// 显存，引擎干净失败；512 分块同一张 9.8 秒出，反复跑也不坏。
+/// 补细节默认用这一句：用户不用写，只想让整张图更细腻
+const REFINE_PROMPT: &str =
+    "全图每一处细节都更细腻丰富，纹理清晰，材质真实，边缘干净，色彩层次自然";
+
 const UPSCALE_TILE: i32 = 512;
 /// 档位存 SQLite 用的键：存的就是模型目录里的纯文件名
 const DIT_KEY: &str = "gen_dit";
@@ -310,7 +314,7 @@ pub struct GenModels {
     pub tiers: Vec<TierRow>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenRequest {
     /// 出图结果按这个块 id 路由事件
@@ -340,6 +344,15 @@ pub struct GenRequest {
     /// 图生图改多少（0 原样 1 全改）。不给吃上游默认 0.75。
     #[serde(default)]
     pub strength: Option<f32>,
+    /// 局部重绘的遮罩：PNG 的 base64，白=重绘、黑=保留，尺寸会自动缩到底图。
+    #[serde(default)]
+    pub mask: Option<String>,
+    /// 高清放大后要不要再补一遍低强度重绘（长出原图没有的纹理）
+    #[serde(default)]
+    pub refine: Option<bool>,
+    /// 补细节那一步的改动幅度，默认 0.25；0 等于不补，太大就改了原图
+    #[serde(default)]
+    pub refine_strength: Option<f32>,
 }
 
 /// 输入图的三种吃法，外加一条完全不碰扩散模型的放大路。
@@ -352,6 +365,8 @@ enum Mode {
     Reference,
     /// 纯 ESRGAN 前向，输出 4×。不吃提示词、不载入那 12 GB 权重
     Upscale,
+    /// 局部重绘：一张底图 + 一张遮罩，只有白的地方按提示词重画
+    Inpaint,
 }
 
 impl Mode {
@@ -361,6 +376,7 @@ impl Mode {
             "i2i" | "image" => Mode::Image,
             "edit" | "reference" => Mode::Reference,
             "upscale" => Mode::Upscale,
+            "inpaint" | "redraw" => Mode::Inpaint,
             _ if count == 0 => Mode::Text,
             _ if count == 1 => Mode::Image,
             _ => Mode::Reference,
@@ -1257,8 +1273,275 @@ fn upscale_job(
     block: String,
 ) {
     let started = Instant::now();
-    let outcome = upscale_run(&model, &req);
+    eprintln!("[gen] upscale refine={:?} prompt={:?}", req.refine, req.prompt.trim());
+    let outcome = if req.refine == Some(true) {
+        refine_then_upscale(&core, &app, &block, &req, &model)
+    } else {
+        upscale_run(&model, &req)
+    };
     finish(&core, &app, block, outcome, started.elapsed().as_secs_f32());
+}
+
+/// 切片重绘：先把整张图 ESRGAN 放大，再切成带重叠的块，每块低强度重绘补细节，
+/// 最后按羽化权重把重叠区融合回去——ComfyUI 那种切片放大的做法。
+fn refine_then_upscale(
+    core: &GenCore,
+    app: &tauri::AppHandle,
+    block: &str,
+    req: &GenRequest,
+    model: &Path,
+) -> Result<Out, String> {
+    let mut up_req = req.clone();
+    up_req.refine = None;
+    let big = upscale_run(model, &up_req)?;
+    let prompt = if req.prompt.trim().is_empty() {
+        REFINE_PROMPT.to_string()
+    } else {
+        req.prompt.clone()
+    };
+    let strength = req.refine_strength.unwrap_or(0.25).clamp(0.05, 0.6);
+    /* 2048 的图切 3×3 共九块、每块约 810，重叠 128；更大的图再密一格 */
+    let count = if big.width.max(big.height) > 2600 { 4 } else { 3 };
+    let overlap = 128u32;
+    let xs = axis_spans(big.width, count, overlap);
+    let ys = axis_spans(big.height, count, overlap);
+    let total = (xs.len() * ys.len()) as i32;
+    let mut index = 0i32;
+    /* 累加缓冲：每块结果按羽化权重往里加权，最后归一化 */
+    let channels = big.channel.max(1) as usize;
+    let mut acc = vec![0f32; big.pixels.len()];
+    let mut weights = vec![0f32; (big.width * big.height) as usize];
+    for (yi, &(ty, th)) in ys.iter().enumerate() {
+        for (xi, &(tx, tw)) in xs.iter().enumerate() {
+            if core.cancel.load(Ordering::Relaxed) {
+                return Err("已取消".to_string());
+            }
+            index += 1;
+            let _ = (index, total);
+            let tile = Tile {
+                x: tx,
+                y: ty,
+                w: tw,
+                h: th,
+            };
+            let png = tile_png_base64(&big, &tile)?;
+            let mut sub = req.clone();
+            sub.mode = Some("i2i".to_string());
+            sub.prompt = prompt.clone();
+            sub.images = vec![png];
+            sub.width = Some(tw as i32);
+            sub.height = Some(th as i32);
+            sub.strength = Some(strength);
+            sub.refine = None;
+            let ctx = {
+                let mut engine = core.lock();
+                ensure_ctx(core, &mut engine)?
+            };
+            let done = generate(Ctx(ctx), &sub)?;
+            blend_tile(&mut acc, &mut weights, &big, &tile, &done, overlap, channels);
+            /* 每补完一片就报进度、发一张「到目前为止」的缩略图：
+               用户能看着画面一块块清晰起来，而不是对着「放大中…」干等 */
+            let _ = app.emit(
+                "gen-progress",
+                ProgressEvent {
+                    block: block.to_string(),
+                    step: index,
+                    steps: total,
+                    seconds: 0.0,
+                },
+            );
+            let mut preview = big.clone();
+            paint_tile(&mut preview, &tile, &done);
+            if let Ok(data_url) = thumb_data_url(&preview, 640) {
+                let _ = app.emit(
+                    "gen-preview",
+                    PreviewEvent {
+                        block: block.to_string(),
+                        step: index,
+                        steps: total,
+                        data_url,
+                    },
+                );
+            }
+            let _ = (yi, xi);
+        }
+    }
+    normalize_tiles(acc, weights, &big)
+}
+
+/// 预览用：把一片结果直接盖进大图（不做羽化，缩略图上够看）
+fn paint_tile(big: &mut Out, tile: &Tile, done: &Out) {
+    if done.width != tile.w || done.height != tile.h {
+        return;
+    }
+    let dst_ch = big.channel.max(1) as usize;
+    let src_ch = done.channel.max(1) as usize;
+    for y in 0..tile.h {
+        for x in 0..tile.w {
+            let at = ((tile.y + y) * big.width + tile.x + x) as usize * dst_ch;
+            let src = (y * tile.w + x) as usize * src_ch;
+            for c in 0..dst_ch {
+                if c < src_ch {
+                    big.pixels[at + c] = done.pixels[src + c];
+                }
+            }
+        }
+    }
+}
+
+/// 缩略成小图当预览：整张 2048 的 PNG 有几 MB，推给前端太重
+fn thumb_data_url(out: &Out, max_side: u32) -> Result<String, String> {
+    let dynamic = match out.channel {
+        3 => image::RgbImage::from_raw(out.width, out.height, out.pixels.clone())
+            .map(image::DynamicImage::ImageRgb8),
+        4 => image::RgbaImage::from_raw(out.width, out.height, out.pixels.clone())
+            .map(image::DynamicImage::ImageRgba8),
+        other => return Err(format!("预览图的通道数不对：{other}")),
+    };
+    let image = dynamic.ok_or_else(|| "预览图的像素尺寸对不上".to_string())?;
+    let thumb = image.resize(max_side, max_side, image::imageops::FilterType::Triangle);
+    let mut png = Vec::new();
+    thumb
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|e| format!("预览图编码失败：{e}"))?;
+    Ok(format!("data:image/png;base64,{}", BASE64.encode(&png)))
+}
+
+struct Tile {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+/// 一根轴上的切片：count 格均分，格子之间各让出 overlap，边上的格子贴住图边
+fn axis_spans(total: u32, count: u32, overlap: u32) -> Vec<(u32, u32)> {
+    let count = count.max(1);
+    let base = total.div_ceil(count);
+    let mut out = Vec::new();
+    for i in 0..count {
+        let start = if i == 0 { 0 } else { i * base - overlap.min(i * base) };
+        let end = if i + 1 == count {
+            total
+        } else {
+            ((i + 1) * base + overlap).min(total)
+        };
+        if end > start {
+            out.push((start, end - start));
+        }
+    }
+    if out.is_empty() {
+        out.push((0, total.max(1)));
+    }
+    out
+}
+
+/// 从大图里抠一块编成 PNG base64，给重绘当输入
+fn tile_png_base64(big: &Out, tile: &Tile) -> Result<String, String> {
+    let channels = big.channel.max(1) as usize;
+    let mut pixels = Vec::with_capacity((tile.w * tile.h) as usize * channels);
+    for y in 0..tile.h {
+        let row = ((tile.y + y) * big.width + tile.x) as usize * channels;
+        let end = row + tile.w as usize * channels;
+        pixels.extend_from_slice(&big.pixels[row..end]);
+    }
+    let out = Out {
+        pixels,
+        width: tile.w,
+        height: tile.h,
+        channel: big.channel,
+    };
+    out_to_png_base64(&out)
+}
+
+/// 把一块重绘结果按羽化权重累加回大图
+fn blend_tile(
+    acc: &mut [f32],
+    weights: &mut [f32],
+    big: &Out,
+    tile: &Tile,
+    done: &Out,
+    overlap: u32,
+    channels: usize,
+) {
+    if done.width != tile.w || done.height != tile.h {
+        return;
+    }
+    /* 重绘结果可能是 3 通道、放大图是 4 通道（或反过来）：按各自的步长取，
+       少了 alpha 就补不透明。混着读就是一道道竖条纹 */
+    let src_channels = done.channel.max(1) as usize;
+    let left_edge = tile.x == 0;
+    let right_edge = tile.x + tile.w == big.width;
+    let top_edge = tile.y == 0;
+    let bottom_edge = tile.y + tile.h == big.height;
+    let feather = |at: u32, total: u32, edge: bool| -> f32 {
+        if edge || total <= 1 {
+            return 1.0;
+        }
+        let d = at.min(total - 1 - at);
+        (d as f32 / overlap.max(1) as f32).min(1.0)
+    };
+    for y in 0..tile.h {
+        let wy = feather(y, tile.h, top_edge) * feather(tile.h - 1 - y, tile.h, bottom_edge);
+        for x in 0..tile.w {
+            let wx = feather(x, tile.w, left_edge) * feather(tile.w - 1 - x, tile.w, right_edge);
+            let w = wx * wy;
+            if w <= 0.0 {
+                continue;
+            }
+            let at = ((tile.y + y) * big.width + tile.x + x) as usize;
+            let src = (y * tile.w + x) as usize * src_channels;
+            let dst = at * channels;
+            for c in 0..channels {
+                let value = if c < src_channels {
+                    done.pixels[src + c]
+                } else {
+                    255
+                };
+                acc[dst + c] += value as f32 * w;
+            }
+            weights[at] += w;
+        }
+    }
+}
+
+fn normalize_tiles(acc: Vec<f32>, weights: Vec<f32>, big: &Out) -> Result<Out, String> {
+    let mut pixels = vec![0u8; big.pixels.len()];
+    let channels = big.channel.max(1) as usize;
+    for at in 0..weights.len() {
+        let w = weights[at];
+        if w <= 0.0 {
+            pixels[at * channels..(at + 1) * channels]
+                .copy_from_slice(&big.pixels[at * channels..(at + 1) * channels]);
+            continue;
+        }
+        for c in 0..channels {
+            pixels[at * channels + c] = (acc[at * channels + c] / w).clamp(0.0, 255.0) as u8;
+        }
+    }
+    Ok(Out {
+        pixels,
+        width: big.width,
+        height: big.height,
+        channel: big.channel,
+    })
+}
+
+/// 把引擎结果编成 PNG base64，给补细节那一步当输入图
+fn out_to_png_base64(out: &Out) -> Result<String, String> {
+    let dynamic = match out.channel {
+        3 => image::RgbImage::from_raw(out.width, out.height, out.pixels.clone())
+            .map(image::DynamicImage::ImageRgb8),
+        4 => image::RgbaImage::from_raw(out.width, out.height, out.pixels.clone())
+            .map(image::DynamicImage::ImageRgba8),
+        other => return Err(format!("放大结果的通道数不对：{other}")),
+    };
+    let image = dynamic.ok_or_else(|| "放大结果的像素尺寸对不上".to_string())?;
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|e| format!("放大结果转 PNG 失败：{e}"))?;
+    Ok(BASE64.encode(&png))
 }
 
 /// 一次 ESRGAN 前向。ctx 现建现放：认过一次 0.1 秒，比那 12 GB 权重便宜得多，
@@ -1331,6 +1614,7 @@ fn read_back(
     }
 }
 
+#[derive(Clone)]
 struct Out {
     pixels: Vec<u8>,
     width: u32,
@@ -1357,6 +1641,11 @@ fn generate(ctx: Ctx, req: &GenRequest) -> Result<Out, String> {
         return Err("这一档要输入图，但一块连过来的图都没有".to_string());
     }
     let strength = req.strength.unwrap_or(DEFAULT_STRENGTH).clamp(0.0, 1.0);
+    /* 遮罩和输入图一样得活过 generate_image：raw.data 指着它的堆内存 */
+    let mask: Option<InputImage> = match req.mask.as_deref() {
+        Some(text) if !text.trim().is_empty() => Some(decode_input(text)?),
+        _ => None,
+    };
     /* 引擎吃的是 sd_image_t 数组，指针是「借」过去的：数组本体必须活过 generate_image。
        所以在这儿就地摊平，不能等进了 match 分支再临时造一个——出分支就散架，
        引擎读到的是一堆已经还给系统的内存（实测报 empty image in array）。 */
@@ -1389,6 +1678,15 @@ fn generate(ctx: Ctx, req: &GenRequest) -> Result<Out, String> {
             Mode::Reference => {
                 params.ref_images = ref_images.as_ptr() as *mut sd::sd_image_t;
                 params.ref_images_count = ref_images.len() as _;
+            }
+            /* 局部重绘：底图 + 遮罩，白的地方按提示词重画 */
+            Mode::Inpaint => {
+                let mask = mask
+                    .as_ref()
+                    .ok_or_else(|| "局部重绘要先在预览上涂出要重绘的区域".to_string())?;
+                params.init_image = inputs[0].raw;
+                params.mask_image = mask.raw;
+                params.strength = strength;
             }
             /* 放大那一档在 begin() 就分岔走了，压根不会带着它走到这儿来碰扩散参数 */
             Mode::Upscale => unreachable!("高清放大不走扩散"),

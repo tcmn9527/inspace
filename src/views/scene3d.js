@@ -169,8 +169,9 @@ function fitCamera(item, box) {
 
 /* 当前有效机位：块上没定过机位时，返回的是渲染器自动框出来的那一份。
    画布内拖动转视角要在这个基础上接着转，不能从零开始。 */
-export function sceneCameraState(item) {
-  const box = contentBox(item.parts || [], item.light);
+export function sceneCameraState(item, view) {
+  const state = view?.__scene;
+  const box = state ? contentBoxWithModels(item, state.modelRects) : contentBox(item.parts || [], item.light);
   const cam = fitCamera(item, box);
   return {
     azim: item.camera?.azim ?? 180,
@@ -267,17 +268,19 @@ export function contentBox(parts, light) {
 
 /* 模型件的真实包围盒覆盖掉归一化时给的估算尺寸，再按普通件算一遍总框 */
 function contentBoxWithModels(item, rects) {
-  if (!rects.size) return contentBox(item.parts, item.light);
-  const parts = item.parts.map((part, k) => {
+  if (!rects?.size) return contentBox(item.parts || [], item.light);
+  const parts = (item.parts || []).map((part, k) => {
     const rect = rects.get(k);
     if (!rect) return part;
     return {
       ...part,
       x: (rect.x0 + rect.x1) / 2,
       y: (rect.y0 + rect.y1) / 2,
+      z: rect.z0 ?? part.z,
       w: Math.max(1, rect.x1 - rect.x0),
       d: Math.max(1, rect.y1 - rect.y0),
-      h: Math.max(1, rect.top - part.z),
+      h: Math.max(1, rect.top - (rect.z0 ?? part.z)),
+      points: undefined,
       rotate: 0,
     };
   });
@@ -372,6 +375,290 @@ export function roofGeometry(THREE, part) {
 /* 一件东西的几何：box 走共用单位立方体（在 rebuildParts 里），其余都是自己挤一份 */
 export function partGeometry(THREE, part) {
   return part.op === "roof" ? roofGeometry(THREE, part) : polyGeometry(THREE, part);
+}
+
+// 先框世界 AABB 再投影会高估旋转墙面上的尺寸，所以直接投影实际几何。
+function updateSceneMatrices(state) {
+  state.scene.updateMatrixWorld(true);
+  state.camera.updateMatrixWorld(true);
+}
+
+function geometryBounds(state, object, frame = null) {
+  const { THREE } = state;
+  const bounds = new THREE.Box3();
+  const point = new THREE.Vector3();
+  const instance = new THREE.Matrix4();
+  const matrix = new THREE.Matrix4();
+  object.traverseVisible((node) => {
+    if (!node.isMesh || !node.geometry) return;
+    const geometry = node.geometry;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const box = geometry.boundingBox;
+    if (!box || box.isEmpty()) return;
+    const count = node.isInstancedMesh ? node.count : 1;
+    for (let i = 0; i < count; i += 1) {
+      matrix.copy(node.matrixWorld);
+      if (node.isInstancedMesh) {
+        node.getMatrixAt(i, instance);
+        matrix.multiply(instance);
+      }
+      for (let k = 0; k < 8; k += 1) {
+        point.set(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z);
+        point.applyMatrix4(matrix);
+        if (frame) {
+          point.sub(frame.origin);
+          point.set(point.dot(frame.u), point.dot(frame.v), point.dot(frame.n));
+        }
+        if (Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z)) bounds.expandByPoint(point);
+      }
+    }
+  });
+  return bounds;
+}
+
+function sceneBounds(box) {
+  return { x0: box.min.x, x1: box.max.x, y0: -box.max.z, y1: -box.min.z, z0: box.min.y, z1: box.max.y };
+}
+
+const scenePoint = (point) => ({ x: point.x, y: -point.z, z: point.y });
+const furnitureIndices = (indices) => [...new Set(Array.from(indices || [], Number))];
+
+function furnitureParts(state, indices) {
+  if (!state) throw new Error("三维场景尚未就绪，无法移动家具");
+  const list = furnitureIndices(indices);
+  if (!list.length) throw new Error("没有选中要移动的家具零件");
+  return list.map((index) => {
+    const object = state.meshMap.get(String(index));
+    if (!Number.isInteger(index) || index < 0 || !object || object.parent !== state.root) {
+      throw new Error(`家具零件 ${index} 不在当前场景中`);
+    }
+    if (object.__model && !object.__loaded) {
+      const why = modelCache.get(object.__src)?.error;
+      throw new Error(`家具零件 ${index} 的模型${why ? `加载失败：${why}` : "尚未加载完成"}，无法移动`);
+    }
+    return { index, object };
+  });
+}
+
+function surfaceFrame(THREE, surface) {
+  if (!surface || !["floor", "wall"].includes(surface.kind)) throw new Error("家具需要有效的地面或墙面");
+  const [x, y, z, w, h, rotate] = [surface.x ?? 0, surface.y ?? 0, surface.z ?? 0, surface.w, surface.h, surface.rotate ?? 0].map(Number);
+  if (![x, y, z, w, h, rotate].every(Number.isFinite) || w <= 0 || h <= 0) throw new Error("附着面的位置、角度或尺寸无效");
+  const angle = (rotate * Math.PI) / 180;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const floor = surface.kind === "floor";
+  return {
+    origin: new THREE.Vector3(...toWorld(x, y, z)),
+    u: new THREE.Vector3(c, 0, -s),
+    v: floor ? new THREE.Vector3(-s, 0, -c) : new THREE.Vector3(0, 1, 0),
+    n: floor ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(s, 0, c),
+    u0: -w / 2, u1: w / 2,
+    v0: floor ? -h / 2 : 0, v1: floor ? h / 2 : h,
+  };
+}
+
+function furnitureBounds(state, parts, frame) {
+  updateSceneMatrices(state);
+  const bounds = new state.THREE.Box3();
+  for (const { index, object } of parts) {
+    const box = geometryBounds(state, object, frame);
+    if (box.isEmpty()) throw new Error(`家具零件 ${index} 没有可用的真实几何，无法移动`);
+    bounds.union(box);
+  }
+  return bounds;
+}
+
+/* bounds 是附着面坐标的初始 AABB，返回场景坐标增量，不改动任何 part。 */
+function furnitureDelta(bounds, frame, du, dv) {
+  if (!Number.isFinite(du) || !Number.isFinite(dv)) throw new Error("家具移动距离必须是有限数值");
+  const u0 = frame.u0 - bounds.min.x;
+  const u1 = frame.u1 - bounds.max.x;
+  const v0 = frame.v0 - bounds.min.y;
+  const v1 = frame.v1 - bounds.max.y;
+  const epsilon = 1e-6;
+  if (u0 > u1 + epsilon || v0 > v1 + epsilon) throw new Error("家具组的真实尺寸超出附着面边界，无法放入；请调整家具或附着面尺寸");
+  const u = u0 > u1 ? (u0 + u1) / 2 : Math.max(u0, Math.min(u1, du));
+  const v = v0 > v1 ? (v0 + v1) / 2 : Math.max(v0, Math.min(v1, dv));
+  const delta = frame.u.clone().multiplyScalar(u).addScaledVector(frame.v, v).addScaledVector(frame.n, -bounds.min.z);
+  return { ...scenePoint(delta), clamped: Math.abs(u - du) > epsilon || Math.abs(v - dv) > epsilon };
+}
+
+export function sceneFurnitureMoveDelta(view, indices, surface, du, dv) {
+  const state = view?.__scene;
+  const parts = furnitureParts(state, indices);
+  const frame = surfaceFrame(state.THREE, surface);
+  return furnitureDelta(furnitureBounds(state, parts, frame), frame, du, dv);
+}
+
+function sceneRay(view, state, clientX, clientY) {
+  if (!state || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+  const rect = view.getBoundingClientRect();
+  if (!(rect.width > 0 && rect.height > 0)) return null;
+  updateSceneMatrices(state);
+  const raycaster = new state.THREE.Raycaster();
+  raycaster.setFromCamera(new state.THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, 1 - ((clientY - rect.top) / rect.height) * 2), state.camera);
+  return raycaster;
+}
+
+function objectVisible(object) {
+  for (let node = object; node; node = node.parent) if (!node.visible) return false;
+  return true;
+}
+
+function sceneHit(state, raycaster) {
+  /* 先取整个 root 的最近命中，再判断属于哪个 part；绝不只对家具做射线。 */
+  const hit = raycaster.intersectObject(state.root, true).find((one) => objectVisible(one.object));
+  if (!hit) return null;
+  for (let node = hit.object; node && node !== state.root; node = node.parent) {
+    if (Number.isInteger(node.__sceneIndex)) return { index: node.__sceneIndex, point: hit.point };
+  }
+  return null;
+}
+
+export function scenePick(view, clientX, clientY) {
+  const state = view?.__scene;
+  const raycaster = sceneRay(view, state, clientX, clientY);
+  const hit = raycaster && sceneHit(state, raycaster);
+  return hit ? { index: hit.index, point: scenePoint(hit.point) } : null;
+}
+
+function dragIntersection(THREE, ray, plane) {
+  const denominator = plane.normal.dot(ray.direction);
+  if (Math.abs(denominator) < 1e-6) return null;
+  const distance = -plane.distanceToPoint(ray.origin) / denominator;
+  if (!Number.isFinite(distance) || distance < 0) return null;
+  const point = ray.at(distance, new THREE.Vector3());
+  return [point.x, point.y, point.z].every(Number.isFinite) ? point : null;
+}
+
+export function beginSceneFurnitureDrag(view, indices, surface, clientX, clientY) {
+  const state = view?.__scene;
+  const parts = furnitureParts(state, indices);
+  const frame = surfaceFrame(state.THREE, surface);
+  const bounds = furnitureBounds(state, parts, frame);
+  furnitureDelta(bounds, frame, 0, 0); // 起拖前就报告放不下，而不是移动一帧后才失败。
+  const raycaster = sceneRay(view, state, clientX, clientY);
+  const hit = raycaster && sceneHit(state, raycaster);
+  if (!hit || !parts.some((part) => part.index === hit.index)) return null;
+  /* 穿过抓取点而非贴面原点，鼠标抓在柜门/桌面上也不会起拖跳动。 */
+  const plane = new state.THREE.Plane().setFromNormalAndCoplanarPoint(frame.n, hit.point);
+  const startPoint = dragIntersection(state.THREE, raycaster.ray, plane);
+  return startPoint ? { state, indices: parts.map((part) => part.index), parts, frame, bounds, plane, startPoint } : null;
+}
+
+export function sceneFurnitureDragDelta(view, drag, clientX, clientY) {
+  const state = view?.__scene;
+  if (!drag || !state || drag.state !== state) return null;
+  const parts = furnitureParts(state, drag.indices);
+  if (parts.some((part, k) => part.object !== drag.parts[k].object)) return null;
+  const raycaster = sceneRay(view, state, clientX, clientY);
+  const point = raycaster && dragIntersection(state.THREE, raycaster.ray, drag.plane);
+  if (!point) return null;
+  point.sub(drag.startPoint);
+  return furnitureDelta(drag.bounds, drag.frame, point.dot(drag.frame.u), point.dot(drag.frame.v));
+}
+
+/* 裁掉近/远平面外的盒边再投影，避免背后的角点透视翻转把选框撑满视口。 */
+function projectedBox(state, box) {
+  if (box.isEmpty()) return null;
+  const { THREE, camera } = state;
+  const corners = [];
+  for (let k = 0; k < 8; k += 1) {
+    corners.push(new THREE.Vector3(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).applyMatrix4(camera.matrixWorldInverse));
+  }
+  const near = -camera.near;
+  const far = -camera.far;
+  const points = corners.filter((point) => point.z <= near && point.z >= far);
+  for (let k = 0; k < 8; k += 1) {
+    for (const bit of [1, 2, 4]) {
+      if (k & bit) continue;
+      const a = corners[k];
+      const b = corners[k | bit];
+      for (const z of [near, far]) {
+        if ((a.z < z && b.z > z) || (a.z > z && b.z < z)) points.push(a.clone().lerp(b, (z - a.z) / (b.z - a.z)));
+      }
+    }
+  }
+  const screen = new THREE.Box2();
+  for (const point of points) {
+    const p = point.clone().applyMatrix4(camera.projectionMatrix);
+    if (Number.isFinite(p.x) && Number.isFinite(p.y)) screen.expandByPoint(new THREE.Vector2(p.x, p.y));
+  }
+  if (screen.isEmpty() || screen.max.x < -1 || screen.min.x > 1 || screen.max.y < -1 || screen.min.y > 1) return null;
+  const left = (Math.max(-1, screen.min.x) + 1) / 2;
+  const right = (Math.min(1, screen.max.x) + 1) / 2;
+  const top = (1 - Math.min(1, screen.max.y)) / 2;
+  const bottom = (1 - Math.max(-1, screen.min.y)) / 2;
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+function updateFurnitureSelection(view, state) {
+  const selection = view.__sceneSelection;
+  if (!selection) return;
+  const { element, indices } = selection;
+  element.hidden = true;
+  if (!state || !indices.length) return;
+  const rect = view.getBoundingClientRect();
+  if (!(rect.width > 0 && rect.height > 0)) return;
+  updateSceneMatrices(state);
+  const box = new state.THREE.Box3();
+  for (const index of indices) {
+    const object = state.meshMap.get(String(index));
+    if (!object || (object.__model && !object.__loaded) || !objectVisible(object)) continue;
+    box.union(geometryBounds(state, object));
+  }
+  const screen = projectedBox(state, box);
+  if (!screen) return;
+  element.style.left = `${screen.left * 100}%`;
+  element.style.top = `${screen.top * 100}%`;
+  element.style.width = `${screen.width * 100}%`;
+  element.style.height = `${screen.height * 100}%`;
+  element.hidden = false;
+}
+
+export function setSceneFurnitureSelection(view, indices = []) {
+  if (!view) return;
+  let selection = view.__sceneSelection;
+  if (!selection) {
+    const element = document.createElement("div");
+    element.className = "canvas-scene-selection";
+    element.style.position = "absolute";
+    element.style.pointerEvents = "none";
+    element.setAttribute("aria-hidden", "true");
+    view.append(element);
+    selection = view.__sceneSelection = { element, indices: [] };
+  }
+  selection.indices = furnitureIndices(indices).filter((index) => Number.isInteger(index) && index >= 0);
+  updateFurnitureSelection(view, view.__scene);
+}
+
+export function sceneFurnitureInspect(view) {
+  const state = view?.__scene;
+  if (!state) return { ready: false, parts: [] };
+  updateSceneMatrices(state);
+  const rect = view.getBoundingClientRect();
+  const parts = (state.item?.parts || []).map((part, index) => {
+    const object = state.meshMap.get(String(index));
+    const result = { index, loaded: false, screen: { x: 0, y: 0, visible: false }, bounds: null };
+    if (!object || (object.__model && !object.__loaded)) return result;
+    const box = geometryBounds(state, object);
+    if (box.isEmpty()) return result;
+    result.loaded = true;
+    result.bounds = sceneBounds(box);
+    const center = box.getCenter(new state.THREE.Vector3()).applyMatrix4(state.camera.matrixWorldInverse);
+    const inDepth = center.z <= -state.camera.near && center.z >= -state.camera.far;
+    center.applyMatrix4(state.camera.projectionMatrix);
+    if (Number.isFinite(center.x) && Number.isFinite(center.y) && Number.isFinite(center.z)) {
+      result.screen = {
+        x: rect.left + ((center.x + 1) / 2) * rect.width,
+        y: rect.top + ((1 - center.y) / 2) * rect.height,
+        visible: objectVisible(object) && rect.width > 0 && rect.height > 0 && inDepth && Math.abs(center.x) <= 1 && Math.abs(center.y) <= 1,
+      };
+    }
+    return result;
+  });
+  return { ready: parts.every((part) => part.loaded), parts };
 }
 
 function build(view, item, THREE) {
@@ -470,21 +757,8 @@ function rebuildParts(state, item) {
         meshMap.set(id, group);
         startModelLoad(state, group, part);
       }
+      group.__sceneIndex = k;
       applyModelTransform(group, part);
-      if (group.__loaded && group.__size) {
-        state.modelRects.set(
-          k,
-          partRect({
-            x: part.x,
-            y: part.y,
-            z: part.z,
-            w: group.__size.w,
-            d: group.__size.d,
-            h: group.__size.h,
-            rotate: part.rotate,
-          }),
-        );
-      }
       return;
     }
     /* box 是单位立方体撑出来的，不用挤；poly / roof 各挤一份真几何 */
@@ -509,6 +783,7 @@ function rebuildParts(state, item) {
       root.add(mesh);
       meshMap.set(id, mesh);
     }
+    mesh.__sceneIndex = k;
     /* 挤出来的几何已经按真实尺寸立好了（底面在自己本地的 y=0），所以只把它「放」到落点上；
        box 是单位立方体，得靠 scale 撑出体型、再抬到身体中心。 */
     const [wx, wy, wz] = baked ? toWorld(part.x, part.y, part.z) : toWorld(part.x, part.y, part.z + part.h / 2);
@@ -524,6 +799,14 @@ function rebuildParts(state, item) {
     if (seen.has(id)) continue;
     freeMesh(state, mesh);
     meshMap.delete(id);
+  }
+  updateSceneMatrices(state);
+  for (const [id, group] of meshMap) {
+    if (!group.__model || !group.__loaded) continue;
+    const bounds = geometryBounds(state, group);
+    if (bounds.isEmpty()) continue;
+    const rect = sceneBounds(bounds);
+    state.modelRects.set(Number(id), { ...rect, top: rect.z1 });
   }
 }
 
@@ -794,9 +1077,12 @@ function render(view, state, item) {
   renderer.setPixelRatio(dpr() * cameraScale);
   renderer.setSize(item.w, item.h, false);
   renderer.render(state.scene, camera);
+  updateFurnitureSelection(view, state);
 }
 
 export function disposeScene(view) {
+  view?.__sceneSelection?.element.remove();
+  if (view) delete view.__sceneSelection;
   const state = view?.__scene;
   if (!state) return;
   owners.delete(view);

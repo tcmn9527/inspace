@@ -262,7 +262,7 @@ function normalizeBlock(raw) {
   /* seq 是画布内的固定编号：右下角坐标条和 agent 对块说话都靠它 */
   const base = { id: raw.id, type, seq: Number.isFinite(raw.seq) ? Math.trunc(raw.seq) : 0 };
   /* 客户版隐藏：所有能出现在页面上的块都认，连线不参与 */
-  if (raw.internal === true && type !== "connector") base.internal = true;
+  if (type !== "connector") base.internal = raw.internal !== false;
   if (type === "connector") {
     const from = normalizeEnd(raw.from);
     const to = normalizeEnd(raw.to);
@@ -497,6 +497,7 @@ function normalizeBlock(raw) {
       w: Math.max(SCENE_MIN_WIDTH, num(raw.w, SCENE_DEFAULT_WIDTH)),
       h: Math.max(SCENE_MIN_HEIGHT, num(raw.h, SCENE_DEFAULT_HEIGHT)),
       parts,
+      surfaces: normalizeSceneSurfaces(raw.surfaces).surfaces,
       /* 机位写歪了当「没定过」：让渲染器按内容自己框一个，比拿一堆 NaN 去摆相机好 */
       camera: normalizeSceneCamera(raw.camera),
       /* 没挂光就是平光：和画面块同一个约定，坏数据不许把整块判死 */
@@ -568,7 +569,6 @@ function normalizeBlock(raw) {
         d: Math.max(0, num(dims.d, 0)),
         h: Math.max(0, num(dims.h, 0)),
       },
-      internal: raw.internal === true,
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
       fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
       borderWidth: Math.min(
@@ -587,7 +587,6 @@ function normalizeBlock(raw) {
       w: Math.max(QUOTE_MIN_WIDTH, num(raw.w, QUOTE_DEFAULT_WIDTH)),
       h: Math.max(QUOTE_MIN_HEIGHT, num(raw.h, QUOTE_DEFAULT_HEIGHT)),
       title: typeof raw.title === "string" && raw.title.trim() ? raw.title : "家具清单",
-      internal: raw.internal === true,
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
       fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
       borderWidth: Math.min(
@@ -638,7 +637,6 @@ function normalizeBlock(raw) {
       ratio,
       order: Math.max(0, Math.trunc(num(raw.order, 0))),
       fillColor: typeof raw.fillColor === "string" && raw.fillColor ? raw.fillColor : "#ffffff",
-      internal: raw.internal === true,
       z: layerOf(raw),
     };
   }
@@ -677,6 +675,7 @@ export function toPersisted(item) {
 export function makeBox(type, x1, y1, x2, y2) {
   return {
     id: newId(),
+    internal: true,
     type,
     x: Math.min(x1, x2),
     y: Math.min(y1, y2),
@@ -692,6 +691,7 @@ export function makeBox(type, x1, y1, x2, y2) {
 export function makeLine(type, x1, y1, x2, y2) {
   return {
     id: newId(),
+    internal: true,
     type,
     x: x1,
     y: y1,
@@ -705,6 +705,7 @@ export function makeLine(type, x1, y1, x2, y2) {
 export function makeText(x, y, w = TEXT_DEFAULT_WIDTH, minH = 0) {
   return {
     id: newId(),
+    internal: true,
     type: "text",
     x,
     y,
@@ -729,6 +730,7 @@ export function makeText(x, y, w = TEXT_DEFAULT_WIDTH, minH = 0) {
 export function makeImage(x, y, w, h, src, linked = false) {
   return {
     id: newId(),
+    internal: true,
     type: "image",
     x,
     y,
@@ -746,6 +748,7 @@ export function makeImage(x, y, w, h, src, linked = false) {
 export function makeProduct(x, y, name = "未命名产品", src = "") {
   return {
     id: newId(),
+    internal: true,
     type: "product",
     x,
     y,
@@ -762,7 +765,6 @@ export function makeProduct(x, y, name = "未命名产品", src = "") {
     src,
     model: "",
     dims: { w: 0, d: 0, h: 0 },
-    internal: false,
     borderColor: "",
     fillColor: "",
     borderWidth: CARD_DEFAULT_BORDER_WIDTH,
@@ -773,13 +775,13 @@ export function makeProduct(x, y, name = "未命名产品", src = "") {
 export function makeQuote(x, y, title = "家具清单") {
   return {
     id: newId(),
+    internal: true,
     type: "quote",
     x,
     y,
     w: QUOTE_DEFAULT_WIDTH,
     h: QUOTE_DEFAULT_HEIGHT,
     title,
-    internal: false,
     borderColor: "",
     fillColor: "",
     borderWidth: CARD_DEFAULT_BORDER_WIDTH,
@@ -792,6 +794,7 @@ export function makePage(x, y, ratio = "a4", title = "未命名页", order = 0) 
   const preset = PAGE_RATIOS[ratio] || PAGE_RATIOS.a4;
   return {
     id: newId(),
+    internal: true,
     type: "page",
     x,
     y,
@@ -801,7 +804,6 @@ export function makePage(x, y, ratio = "a4", title = "未命名页", order = 0) 
     ratio: PAGE_RATIOS[ratio] ? ratio : "a4",
     order: Math.max(0, Math.trunc(Number(order) || 0)),
     fillColor: "#ffffff",
-    internal: false,
     /* 页框永远垫在内容底下：新建时给负层，后来的块自然盖在它上面 */
     z: -1,
   };
@@ -811,6 +813,7 @@ export function makePage(x, y, ratio = "a4", title = "未命名页", order = 0) 
 export function makePlan(x, y, src, imageW, imageH) {
   return {
     id: newId(),
+    internal: true,
     type: "plan",
     x,
     y,
@@ -833,6 +836,7 @@ export function makePlan(x, y, src, imageW, imageH) {
 export function makeAudio(x, y, name, src, linked = false) {
   return {
     id: newId(),
+    internal: true,
     type: "audio",
     x,
     y,
@@ -850,6 +854,7 @@ export function makeAudio(x, y, name, src, linked = false) {
 export function makeVideo(x, y, name, src, linked) {
   return {
     id: newId(),
+    internal: true,
     type: "video",
     x,
     y,
@@ -869,6 +874,7 @@ export function makeVideo(x, y, name, src, linked) {
 export function makePicture(x, y, w = PICTURE_DEFAULT_WIDTH, h = PICTURE_DEFAULT_HEIGHT) {
   return {
     id: newId(),
+    internal: true,
     type: "picture",
     x,
     y,
@@ -923,7 +929,11 @@ function normalizeScenePart(raw) {
     return { why: `op「${String(raw.op).slice(0, 12)}」不认：现在只有 "box"（长方体）、"poly"（底面轮廓 + h 挤成真棱柱）、"roof"（底面轮廓 + h 立成屋顶）和 "model"（模型库里的 GLB）` };
   }
   /* 落点：永远指底面那个中心点，h 从这儿往上立起来。轮廓里的点相对它，rotate 绕它转。 */
-  const foot = { x: num(raw.x), y: num(raw.y), z: Math.max(0, num(raw.z)) };
+  const foot = {
+    x: num(raw.x), y: num(raw.y), z: Math.max(0, num(raw.z)),
+    group: typeof raw.group === "string" ? raw.group.trim().slice(0, 128) : "",
+    surface: typeof raw.surface === "string" ? raw.surface.trim().slice(0, 128) : "",
+  };
   const rotate = Number(raw.rotate);
   if (raw.op === "model") {
     const src = typeof raw.src === "string" ? raw.src.trim() : "";
@@ -1003,6 +1013,30 @@ function normalizeScenePart(raw) {
   return { part: { op: "roof", ...foot, w: got.w, d: got.d, ridge, ...body } };
 }
 
+export function normalizeSceneSurfaces(value) {
+  const surfaces = [];
+  const dropped = [];
+  const ids = new Set();
+  for (const [at, raw] of (Array.isArray(value) ? value : []).entries()) {
+    const id = typeof raw?.id === "string" ? raw.id.trim().slice(0, 128) : "";
+    const kind = raw?.kind;
+    const w = Number(raw?.w);
+    const h = Number(raw?.h);
+    const coordinates = [raw?.x ?? 0, raw?.y ?? 0, raw?.z ?? 0, raw?.rotate ?? 0].map(Number);
+    if (!id || ids.has(id) || !["floor", "wall"].includes(kind) ||
+        !(w > 0 && w <= SCENE_MAX_SIZE && h > 0 && h <= SCENE_MAX_SIZE) ||
+        !coordinates.every(Number.isFinite) || coordinates[2] < 0) {
+      dropped.push({ at, why: "附着面需要唯一 id、floor/wall 类型、有效坐标和正数 w/h，z 不能低于地面" });
+      continue;
+    }
+    const [x, y, z, rotate] = coordinates;
+    ids.add(id);
+    surfaces.push({ id, name: typeof raw.name === "string" ? raw.name.slice(0, 128) : id,
+      kind, x, y, z, w, h, rotate: ((rotate % 360) + 360) % 360 });
+  }
+  return { surfaces, dropped };
+}
+
 export function normalizeSceneParts(value) {
   const list = Array.isArray(value) ? value : [];
   const parts = [];
@@ -1034,7 +1068,7 @@ export function normalizeSceneCamera(value) {
     dist: clamp(dist, 1, SCENE_MAX_SIZE * 4),
     tx: num(value.tx),
     ty: num(value.ty),
-    tz: Math.max(0, num(value.tz)),
+    tz: num(value.tz),
     fov: clamp(num(value.fov, 45), 8, 100),
   };
 }
@@ -1122,12 +1156,14 @@ function normalizePlanAreas(raw) {
 export function makeScene(x, y, w = SCENE_DEFAULT_WIDTH, h = SCENE_DEFAULT_HEIGHT) {
   return {
     id: newId(),
+    internal: true,
     type: "scene",
     x,
     y,
     w,
     h,
     parts: [],
+    surfaces: [],
     camera: null,
     light: null,
     groundColor: "",
@@ -1147,6 +1183,7 @@ export function snapGenSize(value) {
 export function makeGen(x, y, w = GEN_DEFAULT_WIDTH, h = GEN_DEFAULT_HEIGHT) {
   return {
     id: newId(),
+    internal: true,
     type: "gen",
     x,
     y,
@@ -2445,6 +2482,7 @@ export function normalizePictureSymbols(raw) {
 export function makeNote(x, y, path, name, source, link = {}) {
   return {
     id: newId(),
+    internal: true,
     type: "note",
     x,
     y,
@@ -2482,6 +2520,7 @@ export function makeFile(x, y, info) {
   const size = fileBlockSize(info);
   return {
     id: newId(),
+    internal: true,
     type: "file",
     x,
     y,
@@ -2505,6 +2544,7 @@ export function makeFile(x, y, info) {
 export function makeEbook(x, y, name, src, linked = false) {
   return {
     id: newId(),
+    internal: true,
     type: "ebook",
     x,
     y,
@@ -2923,12 +2963,6 @@ export function createItemElement(item, mediaSrc, options = {}) {
     view.append(hint);
     card.append(view);
     el.append(card);
-    /* 画面里拖是转视角，块本身靠这颗小把手拖 */
-    const grip = document.createElement("span");
-    grip.className = "canvas-scene-grip";
-    grip.textContent = "场景";
-    grip.title = "拖动这里移动场景；在画面里拖动是转视角，滚轮推拉";
-    el.append(grip);
   } else if (item.type === "gen") {
     /* 上面是取景窗、下面是提示词和一颗开始。出图要几十秒，这一上半截就是给「等」留的。 */
     const card = document.createElement("div");

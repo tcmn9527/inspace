@@ -18,7 +18,11 @@ import { confirmDialog, choiceDialog, promptDialog, progressDialog, CLOSE_X_SVG 
 import { createMarkdownEditor } from "./markdown-editor.js";
 import { openMenu, closeMenu, isMenuOpen } from "./menu.js";
 import { renderMarkdown } from "./markdown.js";
-import { disposeScene, setSceneCameraScale, setSceneAssetProvider, contentBox, sceneCameraState } from "./scene3d.js";
+import {
+  disposeScene, setSceneCameraScale, setSceneAssetProvider, contentBox, sceneCameraState,
+  scenePick, sceneFurnitureMoveDelta, beginSceneFurnitureDrag, sceneFurnitureDragDelta,
+  setSceneFurnitureSelection, sceneFurnitureInspect,
+} from "./scene3d.js";
 import {
   dropGenRun,
   genBusyId,
@@ -127,6 +131,7 @@ import {
   normalizePictureSymbols,
   normalizeSceneCamera,
   normalizeSceneParts,
+  normalizeSceneSurfaces,
   pictureCmdHit,
   pictureImageSrc,
   pictureLayerCensus,
@@ -4005,6 +4010,7 @@ function itemMenuEntries(item, x, y, depth = 0) {
       onClick: () => setConnectorBend(item, !item.bend),
     });
   } else if (item.type === "picture") {
+    entries.push(...pictureMenuEntries(item));
     entries.push({ label: "落图", onClick: () => void exportPictureImage(item.id) });
   } else if (item.type === "image") {
     entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
@@ -4130,6 +4136,10 @@ function itemMenuEntries(item, x, y, depth = 0) {
     entries.push({ label: "设为第几页…", onClick: () => setPageOrderFlow(item) });
   } else if (item.type === "scene") {
     entries.push({
+      label: scenePlacementActive(item) ? "退出家具摆放" : "摆放家具",
+      onClick: () => setScenePlacementMode(item, !scenePlacementActive(item)),
+    });
+    entries.push({
       label: "重置视角",
       onClick: () => {
         item.camera = null;
@@ -4176,12 +4186,6 @@ function itemMenuEntries(item, x, y, depth = 0) {
   if (PROP_KIND[item.type]) {
     entries.push({ label: "属性", onClick: () => openItemProps(item) });
   }
-  if (item.type !== "connector") {
-    entries.push({
-      label: item.internal ? "客户版：隐藏中 ✓" : "客户版隐藏",
-      onClick: () => toggleClientVisibility(item),
-    });
-  }
   if (entries.length) entries.push("-");
   /* 锁定贴着删除放，都在分隔线下面 */
   if (item.type !== "connector") {
@@ -4191,16 +4195,32 @@ function itemMenuEntries(item, x, y, depth = 0) {
   return entries;
 }
 
-/* 属性卡：这块是什么、文件躺在哪儿。笔记只报「笔记」，媒体和文件类带上绝对路径；
+/* 属性卡：每块都能说清自己是什么、怎么用；落在磁盘上的那种再报绝对路径。
    路径整段可选中、长路径换行显示，不拿省略号把中间藏掉。 */
 const PROP_KIND = {
-  note: "笔记",
-  image: "图片",
-  audio: "音乐",
-  video: "视频",
-  file: "文件",
-  ebook: "电子书",
+  text: { name: "文字", hint: "画布上的文字，双击就地编辑，可调字号、对齐与边框。" },
+  rect: { name: "矩形", hint: "可设边框和底色的矩形，也能编成容器框住一组内容。" },
+  ellipse: { name: "椭圆", hint: "可设边框和底色的椭圆。" },
+  line: { name: "直线", hint: "按住 Shift 拖端点会吸到 45° 倍数。" },
+  arrow: { name: "箭头", hint: "带箭头的线，按住 Shift 拖端点会吸到 45° 倍数。" },
+  connector: { name: "连线", hint: "连接两块面板的线，可改线型、箭头和折点。" },
+  note: { name: "笔记", hint: "Markdown 笔记卡，双击进入编辑。" },
+  picture: { name: "画面（矢量）", hint: "矢量画面：绘制指令、素材和手绘笔画都在这块里。" },
+  scene: { name: "场景（真 3D）", hint: "真 3D 场景：可摆家具、调光与机位，Ctrl 转、Shift 平移。" },
+  gen: { name: "生图面板", hint: "提示词 + 开始，出图参数由 agent 调。" },
+  product: { name: "产品卡", hint: "一件家具 / 材料：名称、价格、数量和真实尺寸。" },
+  quote: { name: "清单", hint: "汇总画布内所有产品卡的金额，可导 CSV / XLSX。" },
+  plan: { name: "户型图", hint: "两点定标后能量面积、摆家具脚印和 3D 机位。" },
+  page: { name: "提案页", hint: "提案页框：按页导出客户版 PDF / 网页。" },
+  image: { name: "图片", hint: "静态图片，可双击看大图。" },
+  audio: { name: "音乐", hint: "音频面板，可播放和调音量。" },
+  video: { name: "视频", hint: "视频面板，可播放和全屏。" },
+  file: { name: "文件", hint: "文件面板，双击用系统默认程序打开。" },
+  ebook: { name: "电子书", hint: "分章阅读的电子书面板。" },
 };
+
+/* 真正落在磁盘上的面板才报路径：文字、图形、卡片这些没有自己的文件 */
+const PROP_PATH_TYPES = new Set(["note", "image", "audio", "video", "file", "ebook"]);
 
 async function openItemProps(item) {
   if (!current || !PROP_KIND[item.type]) return;
@@ -4210,7 +4230,8 @@ async function openItemProps(item) {
 }
 
 function showPropsCard(item) {
-  const path = absolutePathOf(item, current?.meta.path || "");
+  const kind = PROP_KIND[item.type];
+  const path = PROP_PATH_TYPES.has(item.type) ? absolutePathOf(item, current?.meta.path || "") : "";
   return new Promise((resolve) => {
     const mask = document.createElement("div");
     mask.className = "dialog-mask";
@@ -4219,14 +4240,17 @@ function showPropsCard(item) {
         <p class="dialog-title">属性</p>
         <button class="dialog-close" type="button" aria-label="关闭">${CLOSE_X_SVG}</button>
         <p class="dialog-message props-kind"></p>
+        <p class="dialog-message props-hint"></p>
         <p class="dialog-message props-path" hidden></p>
       </div>
     `;
     const dialog = mask.querySelector(".dialog");
     const kindEl = mask.querySelector(".props-kind");
+    const hintEl = mask.querySelector(".props-hint");
     const pathEl = mask.querySelector(".props-path");
     const closeBtn = mask.querySelector(".dialog-close");
-    kindEl.textContent = PROP_KIND[item.type];
+    kindEl.textContent = kind?.name || item.type;
+    hintEl.textContent = kind?.hint || "";
     if (path) {
       pathEl.textContent = path;
       pathEl.hidden = false;
@@ -4274,7 +4298,7 @@ function setLockedMany(ids, locked) {
     item.locked = locked;
     const el = itemEls.get(item.id);
     if (el) syncItemElement(el, item);
-    /* 画面块的锁还要收掉那条工具条：锁上的画不供笔 */
+    /* 画面块的锁还要收回十字光标：锁上的画不供笔 */
     if (item.type === "picture") refreshPictureChrome(item.id);
   }
   updateSelection();
@@ -5408,33 +5432,16 @@ function setupGenEvents() {
   });
 }
 
-/* ---------- 画面块：块内工具条与手绘 ----------
+/* ---------- 画面块：右键菜单控件与手绘 ----------
    笔的状态长在块自己身上，不占画布工具栏那套一次性工具态：
    在画面里涂一笔，不该把「选择」的蓝色从工具栏上挤走。
    一块一套笔，撤销重做只退这块画过的笔画。 */
 
-const PICTURE_TOOL_LABELS = {
-  select: "选择：这一笔完了，挪块缩放回到平常用法",
-  pen: "笔：一路等宽",
-  brush: "毛笔：走得快细、停住粗",
-  eraser: "橡皮：碰到哪笔擦哪笔，一擦一整条",
-  color: "墨色",
-  width: "笔宽",
-  undo: "撤掉这一步笔画",
-  redo: "把这一步笔画放回来",
-  paper: "纸色：画面底色",
-};
-
-/* 图形跟画布工具栏那套一个画法：currentColor 描边、不填色、不加装饰 */
-const PICTURE_TOOL_ICONS = {
-  select:
-    '<path d="M6.4 3.4l7.2 7.2-3.1.4 1.7 3.6-1.6.7-1.7-3.6-2.2 2.2z" fill="currentColor" stroke="none"/>',
-  pen: '<path d="M4.6 15.4l1-3.2 6.7-6.7 2.2 2.2-6.7 6.7z"/><path d="M12.6 5.2l2.2 2.2"/>',
-  brush:
-    '<path d="M4.2 16c3.3-.4 6.2-2.2 8.3-5.1 1.6-2.2 2.8-4.5 2.8-4.5s1 2.5-.6 5.1C12.8 14.7 9.2 16.4 4.2 16.4z" fill="currentColor" stroke="none"/>',
-  eraser: '<path d="M5.4 14.4l6-6 3.4 3.4-4.2 4.2H6.6z"/><path d="M9.4 17.4h6.4"/>',
-  undo: '<path d="M8.4 6.6L4.8 10l3.6 3.4"/><path d="M4.8 10h8a3 3 0 0 1 0 6h-2"/>',
-  redo: '<path d="M11.6 6.6L15.2 10l-3.6 3.4"/><path d="M15.2 10h-8a3 3 0 0 0 0 6h2"/>',
+const PICTURE_TOOL_NAMES = {
+  select: "选择",
+  pen: "笔 · 等宽",
+  brush: "毛笔 · 提按",
+  eraser: "橡皮",
 };
 
 const PICTURE_INK_COLORS = ["#1f1f1f", "#a83232", "#1d5c8c", "#2f6b3a", "#8a5a00", "#5a3d7a"];
@@ -5472,21 +5479,69 @@ function paintingTarget() {
   return findItem(id)?.type === "picture" ? id : null;
 }
 
-function pictureButton(kind, title, onClick) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `canvas-picture-btn canvas-picture-${kind}`;
-  button.dataset.paint = kind;
-  button.title = title;
-  button.innerHTML = `<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">${
-    PICTURE_TOOL_ICONS[kind] || ""
-  }</svg>`;
-  button.addEventListener("click", (e) => {
-    /* 这一按是弹色板/笔宽菜单，不能让 document 上「点外部关面板」的监听当场把它关掉 */
-    e.stopPropagation();
-    onClick(e, button);
-  });
-  return button;
+/* 画面块的手绘控件全在右键菜单里：块身上不再挂常驻工具条，
+   只留一个 is-painting 的十字光标提示「这一下是落墨不是挪块」。 */
+function pictureMenuEntries(item) {
+  const editor = pictureEditorOf(item.id);
+  const entries = [
+    {
+      label: "画笔",
+      children: Object.entries(PICTURE_TOOL_NAMES).map(([kind, label]) => ({
+        label: `${label}${editor.tool === kind ? " ✓" : ""}`,
+        onClick: () => setPictureTool(item.id, kind),
+      })),
+    },
+    {
+      label: "墨色",
+      colorPicker: {
+        get value() {
+          return pictureEditorOf(item.id).color;
+        },
+        seed: PICTURE_INK_COLORS[0],
+        presets: PICTURE_INK_COLORS,
+        allowAlpha: false,
+        onChange: (color) => {
+          if (color) pictureEditorOf(item.id).color = color;
+        },
+      },
+    },
+    {
+      label: "笔宽",
+      children: PICTURE_WIDTH_STEPS.map((size) => ({
+        label: `${size}${editor.size === size ? " ✓" : ""}`,
+        trailing: `<svg viewBox="0 0 20 14" width="20" height="14" aria-hidden="true"><path d="M3 7h14" stroke="currentColor" stroke-width="${Math.min(size, 12)}" stroke-linecap="round"/></svg>`,
+        onClick: () => {
+          pictureEditorOf(item.id).size = size;
+        },
+      })),
+    },
+    {
+      label: "纸色",
+      colorPicker: {
+        get value() {
+          return findItem(item.id)?.paperColor || "";
+        },
+        seed: "#ffffff",
+        presets: PRESETS,
+        allowAlpha: true,
+        onChange: (color) => applyPicturePaper(item.id, color),
+        onDone: (color) => applyPicturePaper(item.id, color),
+      },
+    },
+    { label: "撤销笔画", disabled: !editor.undo.length, onClick: () => pictureStepMove(item.id, "undo") },
+    { label: "重做笔画", disabled: !editor.redo.length, onClick: () => pictureStepMove(item.id, "redo") },
+  ];
+  return entries;
+}
+
+/* 纸色：画面块的底色。选全透明就存空串，卡片背景交回 transparent */
+function applyPicturePaper(id, color) {
+  const now = findItem(id);
+  if (!now || now.locked) return;
+  now.paperColor = color && !String(color).endsWith("00") ? color : "";
+  const el = itemEls.get(id);
+  if (el) syncItemElement(el, now);
+  scheduleItemsSave();
 }
 
 /* 把这块画面落成一张图片块：渲染成 PNG 存进画布 images/，在它右边摆一块独立的图片面板。
@@ -5607,52 +5662,17 @@ async function dropRegionImage(id) {
   }
 }
 
-/* 工具条挂在块元素里，靠 --canvas-inv 反缩放：块缩到很小也点得着，
-   跟选中框、缩放手柄同一个脾气（transform-origin 定在贴块的那条边） */
+/* 画面区自己收按下：笔要在这儿落墨，不能让这一下冒到舞台上去挪整块。
+   控件都在右键菜单（pictureMenuEntries），块身上只留十字光标这一个状态提示。 */
 function attachPictureTools(el, item) {
-  const bar = document.createElement("div");
-  bar.className = "canvas-picture-tools";
-  /* 工具条上的按下不能变成拖整块：整条在 pointerdown 上截住 */
-  bar.addEventListener("pointerdown", (e) => e.stopPropagation());
-  for (const kind of ["select", "pen", "brush", "eraser"]) {
-    bar.append(pictureButton(kind, PICTURE_TOOL_LABELS[kind], () => setPictureTool(item.id, kind)));
-  }
-  const ink = pictureButton("color", PICTURE_TOOL_LABELS.color, (e, button) => openPictureInk(item.id, button));
-  ink.innerHTML = '<span class="canvas-picture-ink"></span>';
-  const paper = pictureButton("paper", PICTURE_TOOL_LABELS.paper, (e, button) => openPicturePaper(item.id, button));
-  paper.innerHTML = '<span class="canvas-picture-paper-swatch"></span>';
-  const width = pictureButton("width", PICTURE_TOOL_LABELS.width, (e, button) => openPictureWidth(item.id, button));
-  width.innerHTML = '<span class="canvas-picture-width"></span>';
-  bar.append(ink, paper, width);
-  bar.append(
-    pictureButton("undo", PICTURE_TOOL_LABELS.undo, () => pictureStepMove(item.id, "undo")),
-    pictureButton("redo", PICTURE_TOOL_LABELS.redo, () => pictureStepMove(item.id, "redo")),
-  );
-  el.append(bar);
-  /* 画面区自己收按下：笔要在这儿落墨，不能让这一下冒到舞台上去挪整块 */
   el.querySelector(".canvas-picture-svg")?.addEventListener("pointerdown", (e) => onPicturePointerDown(e, item.id));
   syncPictureChrome(el, item);
 }
 
 function syncPictureChrome(el, item) {
-  const bar = el.querySelector(".canvas-picture-tools");
-  if (!bar) return;
   const editor = pictureEditorOf(item.id);
   /* 锁住的块不供笔：能选、能右键解锁，但不让人往一块钉死的画上落墨 */
-  bar.classList.toggle("is-hidden", Boolean(item.locked));
-  el.classList.toggle("is-painting", editor.tool !== "select");
-  for (const button of bar.querySelectorAll(".canvas-picture-btn")) {
-    const kind = button.dataset.paint;
-    button.classList.toggle("is-active", kind === editor.tool);
-    if (kind === "undo") button.disabled = !editor.undo.length;
-    if (kind === "redo") button.disabled = !editor.redo.length;
-  }
-  const ink = bar.querySelector(".canvas-picture-ink");
-  if (ink) ink.style.setProperty("--picture-ink", editor.color);
-  const paper = bar.querySelector(".canvas-picture-paper-swatch");
-  if (paper) paper.style.setProperty("--picture-paper", item.paperColor || "transparent");
-  const width = bar.querySelector(".canvas-picture-width");
-  if (width) width.textContent = String(editor.size);
+  el.classList.toggle("is-painting", editor.tool !== "select" && !item.locked);
 }
 
 function refreshPictureChrome(id) {
@@ -5664,75 +5684,11 @@ function refreshPictureChrome(id) {
 function setPictureTool(id, kind) {
   const item = findItem(id);
   if (!item || item.type !== "picture") return;
+  if (item.locked && kind !== "select") return;
   pictureEditorOf(id).tool = kind;
   /* 拿起笔就把这块选中：看得见边界才知道笔落在哪儿 */
   if (kind !== "select" && !selectedIds.has(id)) select(id);
   refreshPictureChrome(id);
-}
-
-function openPictureInk(id, button) {
-  const rect = button.getBoundingClientRect();
-  const editor = pictureEditorOf(id);
-  openColorPicker({
-    x: rect.right + 6,
-    y: rect.top,
-    value: editor.color,
-    presets: PICTURE_INK_COLORS,
-    /* 色点当场跟着动，不用等面板收起 */
-    onChange: (color) => {
-      if (!color) return;
-      editor.color = color;
-      refreshPictureChrome(id);
-    },
-    onDone: (color) => {
-      if (color) editor.color = color;
-      refreshPictureChrome(id);
-    },
-  });
-}
-
-/* 纸色：画面块的底色。选全透明就存空串，卡片背景交回 transparent */
-function openPicturePaper(id, button) {
-  const item = findItem(id);
-  if (!item) return;
-  const rect = button.getBoundingClientRect();
-  const apply = (color) => {
-    const now = findItem(id);
-    if (!now) return;
-    now.paperColor = color && !String(color).endsWith("00") ? color : "";
-    const el = itemEls.get(id);
-    if (el) syncItemElement(el, now);
-    refreshPictureChrome(id);
-    scheduleItemsSave();
-  };
-  openColorPicker({
-    x: rect.right + 6,
-    y: rect.top,
-    value: item.paperColor || "",
-    seed: "#ffffff",
-    presets: PRESETS,
-    allowAlpha: true,
-    onChange: apply,
-    onDone: apply,
-  });
-}
-
-function openPictureWidth(id, button) {
-  const rect = button.getBoundingClientRect();
-  const editor = pictureEditorOf(id);
-  /* 行尾那根线按这个宽度画，看着就知道落笔多粗；前面的数字是精确值 */
-  openMenu(
-    rect.right + 6,
-    rect.top - 4,
-    PICTURE_WIDTH_STEPS.map((size) => ({
-      label: `${size}`,
-      trailing: `<svg viewBox="0 0 20 14" width="20" height="14" aria-hidden="true"><path d="M3 7h14" stroke="currentColor" stroke-width="${Math.min(size, 12)}" stroke-linecap="round"/></svg>`,
-      onClick: () => {
-        editor.size = size;
-        refreshPictureChrome(id);
-      },
-    })),
-  );
 }
 
 /* ---------- 块内那层笔画栈 ---------- */
@@ -7043,7 +6999,43 @@ function startProductFieldEdit(itemId, field, fieldEl) {
   );
 }
 
-/* 场景块：画面里拖是转视角、滚轮推拉；块本身靠上沿那颗「场景」把手拖 */
+function scenePlacementActive(item) {
+  return Boolean(itemEls.get(item.id)?.querySelector(".canvas-scene-card.is-placing"));
+}
+
+function setScenePlacementMode(item, enabled) {
+  if (item.type !== "scene") throw new Error("要选择场景块");
+  if (enabled && item.locked) throw new Error("场景已锁定，请先解锁");
+  const el = itemEls.get(item.id);
+  const card = el?.querySelector(".canvas-scene-card");
+  if (!card) throw new Error("场景还没显示出来");
+  card.classList.toggle("is-placing", enabled);
+  if (!enabled) setSceneFurnitureSelection(card.querySelector(".canvas-scene-view"), []);
+  return { id: item.id, placement: enabled };
+}
+
+function sceneFurnitureGroup(item, index) {
+  if (!Number.isInteger(index) || index < 0 || index >= item.parts.length) throw new Error("家具零件序号无效");
+  const part = item.parts[index];
+  if (!part.surface) return null;
+  const surface = item.surfaces.find((one) => one.id === part.surface);
+  if (!surface) throw new Error(`找不到附着面 ${part.surface}`);
+  const indices = part.group
+    ? item.parts.flatMap((one, at) => one.group === part.group ? [at] : [])
+    : [index];
+  if (indices.some((at) => item.parts[at].surface !== part.surface)) throw new Error("同一件家具必须绑定同一附着面");
+  return { indices, surface, group: part.group || String(index) };
+}
+
+function moveSceneFurnitureParts(item, origins, delta) {
+  for (const origin of origins) {
+    const part = item.parts[origin.index];
+    part.x = origin.x + delta.x;
+    part.y = origin.y + delta.y;
+    part.z = origin.z + delta.z;
+  }
+}
+
 function attachSceneControls(el, item) {
   const card = el.querySelector(".canvas-scene-card");
   if (!card) return;
@@ -7058,23 +7050,84 @@ function attachSceneControls(el, item) {
   };
   card.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || item.locked) return;
+    /* 普通左键不碰内部：交回舞台，和别的块一样拖整块 / 点选 */
+    if (!event.ctrlKey && !event.shiftKey && !scenePlacementActive(item)) return;
     event.preventDefault();
     event.stopPropagation();
     select(item.id);
+    dropTool();
+    if (!event.ctrlKey && !event.shiftKey) {
+      const view = card.querySelector(".canvas-scene-view");
+      try {
+        const hit = scenePick(view, event.clientX, event.clientY);
+        const furniture = hit ? sceneFurnitureGroup(item, hit.index) : null;
+        setSceneFurnitureSelection(view, furniture?.indices || []);
+        if (!furniture) return;
+        const movement = beginSceneFurnitureDrag(view, furniture.indices, furniture.surface, event.clientX, event.clientY);
+        if (!movement) return;
+        item.camera = normalizeSceneCamera(sceneCameraState(item, view));
+        const origins = furniture.indices.map((index) => ({ index, ...item.parts[index] }));
+        let moved = false;
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+          window.removeEventListener("pointercancel", up);
+          window.removeEventListener("blur", up);
+          if (moved) persistScene(item);
+          scheduleItemsSave();
+        };
+        const move = (e) => {
+          if (e.pointerId !== event.pointerId) return;
+          if (!card.isConnected || item.locked || !scenePlacementActive(item)) { up(); return; }
+          const delta = sceneFurnitureDragDelta(view, movement, e.clientX, e.clientY);
+          if (!delta) return;
+          moveSceneFurnitureParts(item, origins, delta);
+          moved = true;
+          renderSoon();
+        };
+        if (event.isTrusted) card.setPointerCapture(event.pointerId);
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
+        window.addEventListener("blur", up);
+      } catch (error) {
+        showError(error);
+      }
+      return;
+    }
     const base = sceneCameraState(item);
-    const drag = { x: event.clientX, y: event.clientY, azim: base.azim, elev: base.elev };
-    card.classList.add("is-orbiting");
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const panning = event.shiftKey;
+    const interactionClass = panning ? "is-panning" : "is-orbiting";
+    const unitsPerPixel = (2 * base.dist * Math.tan((base.fov * Math.PI) / 360)) / card.getBoundingClientRect().height;
+    const azim = (base.azim * Math.PI) / 180;
+    const elev = (base.elev * Math.PI) / 180;
+    card.classList.add(interactionClass);
     const move = (e) => {
-      const next = sceneCameraState(item);
-      item.camera = normalizeSceneCamera({
-        ...next,
-        azim: drag.azim - (e.clientX - drag.x) * 0.35,
-        elev: Math.max(2, Math.min(88, drag.elev + (e.clientY - drag.y) * 0.25)),
-      });
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (panning) {
+        const right = dx * unitsPerPixel;
+        const down = dy * unitsPerPixel;
+        // 相机目标沿屏幕右轴反向、上轴正向移动，模型才会跟随鼠标。
+        item.camera = normalizeSceneCamera({
+          ...base,
+          tx: base.tx + right * Math.cos(azim) - down * Math.sin(azim) * Math.sin(elev),
+          ty: base.ty - right * Math.sin(azim) - down * Math.cos(azim) * Math.sin(elev),
+          tz: base.tz + down * Math.cos(elev),
+        });
+      } else {
+        item.camera = normalizeSceneCamera({
+          ...base,
+          azim: base.azim - dx * 0.35,
+          elev: base.elev + dy * 0.25,
+        });
+      }
       renderSoon();
     };
     const up = () => {
-      card.classList.remove("is-orbiting");
+      card.classList.remove(interactionClass);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
@@ -7934,6 +7987,19 @@ function onKeyDown(e) {
     return;
   }
   if (e.key === "Escape") {
+    /* 手里捏着笔时 Esc 先把笔放下，回到挪块缩放 */
+    const painting = paintingTarget();
+    if (painting) {
+      e.preventDefault();
+      setPictureTool(painting, "select");
+      return;
+    }
+    const placing = current.items.find((item) => item.type === "scene" && scenePlacementActive(item));
+    if (placing) {
+      e.preventDefault();
+      setScenePlacementMode(placing, false);
+      return;
+    }
     /* 鸟瞰窗的选中态最轻，Esc 先退它，再退工具/块选中 */
     if (blurMinimapFocus()) return;
     if (tool !== "select") setTool("select");
@@ -8036,7 +8102,7 @@ function agentSummary(item) {
     z: Number.isFinite(item.z) ? item.z : null,
     locked: Boolean(item.locked),
   };
-  if (item.type !== "connector") Object.assign(base, agentBounds(item));
+  if (item.type !== "connector") Object.assign(base, agentBounds(item), { internal: item.internal });
   if (item.type === "connector") {
     return {
       ...base,
@@ -8097,6 +8163,8 @@ function agentSummary(item) {
       ...base,
       /* 件数报成一个数，和画面块报 cmds 条数同一个口径：整份 parts 塞进摘要会把 space_scene 撑爆 */
       parts: Array.isArray(item.parts) ? item.parts.length : 0,
+      surfaces: item.surfaces,
+      placement: scenePlacementActive(item),
       camera: item.camera || null,
       light: item.light || null,
       groundColor: item.groundColor || "",
@@ -8119,7 +8187,6 @@ function agentSummary(item) {
       src: item.src,
       model: item.model,
       dims: item.dims,
-      internal: Boolean(item.internal),
       borderColor: item.borderColor,
       fillColor: item.fillColor,
       borderWidth: item.borderWidth,
@@ -8133,7 +8200,6 @@ function agentSummary(item) {
       title: item.title,
       count: products.length,
       total: products.reduce((sum, one) => sum + one.price * one.qty, 0),
-      internal: Boolean(item.internal),
       borderColor: item.borderColor,
       fillColor: item.fillColor,
       borderWidth: item.borderWidth,
@@ -8161,7 +8227,6 @@ function agentSummary(item) {
       title: item.title,
       ratio: item.ratio,
       order: item.order,
-      internal: Boolean(item.internal),
     };
   }
   if (item.type === "gen") {
@@ -8576,6 +8641,89 @@ function applyProductFields(item, spec = {}) {
 
 /* ---------- 3D 房间壳 / 灯光 / 机位 ---------- */
 
+function sceneSurfacesOf(value) {
+  if (!Array.isArray(value)) throw new Error("附着面必须是数组");
+  const result = normalizeSceneSurfaces(value);
+  if (result.dropped.length) throw new Error(result.dropped[0].why);
+  return result.surfaces;
+}
+
+function editableScene(id) {
+  const item = agentRequireItem(id);
+  if (item.type !== "scene") throw new Error("id 要传场景块");
+  if (item.locked) throw new Error("场景已锁定，请先解锁");
+  return item;
+}
+
+function sceneView(item) {
+  return itemEls.get(item.id)?.querySelector(".canvas-scene-view");
+}
+
+function saveSceneFurniture(item, indices, delta) {
+  const view = sceneView(item);
+  item.camera = normalizeSceneCamera(sceneCameraState(item, view));
+  moveSceneFurnitureParts(item, indices.map((index) => ({ index, ...item.parts[index] })), delta);
+  persistScene(item);
+  scheduleItemsSave();
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  if (scenePlacementActive(item)) setSceneFurnitureSelection(view, indices);
+  return { id: item.id, clamped: delta.clamped,
+    parts: indices.map((index) => ({ index, x: item.parts[index].x, y: item.parts[index].y, z: item.parts[index].z })) };
+}
+
+function agentSceneGet({ id }) {
+  const item = agentRequireItem(id);
+  if (item.type !== "scene") throw new Error("id 要传场景块");
+  return { ...agentSummary(item), parts: item.parts.map((part, index) => ({ ...part, index })),
+    rendering: sceneFurnitureInspect(sceneView(item)) };
+}
+
+function agentSceneSurfaceSet({ id, surface }) {
+  const item = editableScene(id);
+  const [next] = sceneSurfacesOf([surface]);
+  const old = item.surfaces.find((one) => one.id === next.id);
+  if (old && item.parts.some((part) => part.surface === old.id) &&
+      ["kind", "x", "y", "z", "w", "h", "rotate"].some((key) => old[key] !== next[key])) {
+    throw new Error("这个面已有家具，请先解除绑定再修改附着面");
+  }
+  item.surfaces = [...item.surfaces.filter((one) => one.id !== next.id), next];
+  scheduleItemsSave();
+  return { id, surface: next };
+}
+
+function agentSceneFurnitureBind(spec) {
+  const item = editableScene(spec.id);
+  if (!Array.isArray(spec.parts) || !spec.parts.length || spec.parts.some((index) =>
+      !Number.isInteger(index) || index < 0 || index >= item.parts.length)) throw new Error("parts 要传有效的零件序号数组");
+  const indices = [...new Set(spec.parts)];
+  const surfaceId = String(spec.surface || "").trim();
+  if (!surfaceId) {
+    for (const index of indices) { item.parts[index].group = ""; item.parts[index].surface = ""; }
+    setSceneFurnitureSelection(sceneView(item), []);
+    persistScene(item);
+    return { id: item.id, parts: indices, unbound: true };
+  }
+  const surface = item.surfaces.find((one) => one.id === surfaceId);
+  if (!surface) throw new Error(`找不到附着面 ${surfaceId}`);
+  const group = String(spec.group || newId()).trim().slice(0, 128);
+  if (!group || item.parts.some((part, index) => part.group === group && !indices.includes(index))) {
+    throw new Error("家具组名为空或已被其他零件占用，请把整件家具的零件一起绑定");
+  }
+  const delta = sceneFurnitureMoveDelta(sceneView(item), indices, surface, 0, 0);
+  for (const index of indices) { item.parts[index].group = group; item.parts[index].surface = surfaceId; }
+  return { ...saveSceneFurniture(item, indices, delta), group, surface: surfaceId };
+}
+
+function agentSceneFurnitureMove({ id, part, du = 0, dv = 0 }) {
+  const item = editableScene(id);
+  if (!Number.isFinite(du) || !Number.isFinite(dv)) throw new Error("du / dv 要传有限数值");
+  const furniture = sceneFurnitureGroup(item, part);
+  if (!furniture) throw new Error("这件物体还没绑定附着面，不能移动");
+  const delta = sceneFurnitureMoveDelta(sceneView(item), furniture.indices, furniture.surface, du, dv);
+  return saveSceneFurniture(item, furniture.indices, delta);
+}
+
 const SCENE_LIGHT_PRESETS = {
   /* 白天：太阳高、天光足，颜色尽量保持固有色 */
   day: { angle: 35, elev: 52, k: 0.55, lit: "#fff4e2", dark: "#dbe7f2" },
@@ -8616,12 +8764,22 @@ function roomShellParts(preset, options = {}) {
     { op: "box", x: winX + winW / 2 + 6, y: winY + 1, z: winZ, w: 12, d: 4, h: winH, color: frame, name: "窗框" },
   ];
   if (spec.rug) {
-    parts.push({ op: "box", x: 0, y: -d * 0.06, z: 1, w: w * 0.56, d: d * 0.48, h: 1.4, color: "#c9b9a6", name: "地毯" });
+    parts.push({ op: "box", x: 0, y: -d * 0.06, z: 2, w: w * 0.56, d: d * 0.48, h: 1.4, color: "#c9b9a6", name: "地毯", group: "rug", surface: "floor" });
   }
   if (spec.console) {
-    parts.push({ op: "box", x: w * 0.22, y: d / 2 - t - 22, z: 0, w: 180, d: 38, h: 46, color: "#8a6f55", name: "边柜" });
+    parts.push({ op: "box", x: w * 0.22, y: d / 2 - t - 22, z: 2, w: 180, d: 38, h: 46, color: "#8a6f55", name: "边柜", group: "console", surface: "floor" });
   }
   return parts;
+}
+
+function roomShellSurfaces(parts) {
+  const floor = parts[0];
+  const wall = parts[1];
+  return sceneSurfacesOf([
+    { id: "floor", name: "房间地面", kind: "floor", x: 6, y: -6, z: floor.h, w: floor.w - 12, h: floor.d - 12 },
+    { id: "back-wall", name: "背景墙", kind: "wall", x: 0, y: floor.d / 2 - 12, z: floor.h, w: floor.w - 24, h: wall.h - floor.h },
+    { id: "left-wall", name: "侧墙", kind: "wall", x: -floor.w / 2 + 12, y: -6, z: floor.h, w: floor.d - 12, h: wall.h - floor.h, rotate: 90 },
+  ]);
 }
 
 function sceneLightOf(preset) {
@@ -8638,6 +8796,8 @@ function agentSceneRoomShell(spec = {}) {
   const got = normalizeSceneParts(roomShellParts(preset, { wallColor: spec.wallColor, floorColor: spec.floorColor }));
   if (got.dropped.length) throw new Error(got.dropped[0].why);
   item.parts = got.parts;
+  item.surfaces = roomShellSurfaces(got.parts);
+  setSceneFurnitureSelection(sceneView(item), []);
   item.light = sceneLightOf("day");
   item.camera = null;
   persistScene(item);
@@ -8703,13 +8863,25 @@ async function placeProductInScene(product, scene, options = {}) {
   if (!models.some((one) => one.name === product.model)) {
     throw new Error(`模型库里没有 ${product.model}，去设置页「3D 模型库」导入`);
   }
+  let floors = scene.surfaces.filter((one) => one.kind === "floor");
+  if (!scene.parts.length && !floors.length && !options.surface) {
+    const [floor] = sceneSurfacesOf([{ id: "ground", name: "地面", kind: "floor", w: 1000, h: 1000 }]);
+    scene.surfaces.push(floor);
+    floors = [floor];
+  }
+  const surface = options.surface
+    ? floors.find((one) => one.id === options.surface)
+    : floors.length === 1 ? floors[0] : null;
+  if (!surface) throw new Error("请先配置地面附着面；多个地面时用 surface 指定放入哪个区域");
   const dims = product.dims || {};
   const part = {
     op: "model",
+    group: newId(),
+    surface: surface.id,
     src: product.model,
-    x: Number.isFinite(Number(options.x)) ? Number(options.x) : 0,
-    y: Number.isFinite(Number(options.y)) ? Number(options.y) : 0,
-    z: 0,
+    x: Number.isFinite(Number(options.x)) ? Number(options.x) : surface.x,
+    y: Number.isFinite(Number(options.y)) ? Number(options.y) : surface.y,
+    z: surface.z,
     rotate: Number.isFinite(Number(options.rotate)) ? Number(options.rotate) : 0,
     w: dims.w > 0 ? dims.w / 10 : 0,
     d: dims.d > 0 ? dims.d / 10 : 0,
@@ -9159,12 +9331,6 @@ function setPageOrderFlow(item) {
   })();
 }
 
-function toggleClientVisibility(item) {
-  item.internal = !item.internal;
-  scheduleItemsSave();
-  showToast(item.internal ? "这块不会出现在客户版里" : "这块会出现在客户版里");
-}
-
 /* 客户版要藏的东西：内部块，以及挂在内部块上的连线 */
 function clientHiddenIds() {
   if (!current) return { ids: [], connectors: [] };
@@ -9196,7 +9362,7 @@ async function runClientPdf() {
   const allPages = pageItems();
   const pages = allPages.filter((page) => !page.internal);
   if (!pages.length) {
-    showToast("还没有提案页：先建几块 page（agent 可以 block_create type:\"page\"）");
+    showToast("没有客户版可见的提案页：请让 agent 指定要导出的页面");
     return;
   }
   exporting = true;
@@ -9421,7 +9587,7 @@ async function exportClientWebTo(dir, root) {
   if (!current) throw new Error("先打开一个画布");
   const allPages = pageItems();
   const pages = allPages.filter((page) => !page.internal);
-  if (!pages.length) throw new Error("还没有提案页：先建几块 page");
+  if (!pages.length) throw new Error("没有客户版可见的提案页，请先将要导出的页面设为 internal:false");
   const canvasId = current.meta.id;
   const hidden = clientHiddenIds();
   const pageIds = allPages.map((page) => page.id);
@@ -9463,7 +9629,7 @@ async function exportClientWebTo(dir, root) {
 async function runClientWeb() {
   if (!current || exporting) return;
   if (!pageItems().some((page) => !page.internal)) {
-    showToast("还没有提案页：先建几块 page（agent 可以 block_create type:\"page\"）");
+    showToast("没有客户版可见的提案页：请让 agent 指定要导出的页面");
     return;
   }
   exporting = true;
@@ -9492,7 +9658,7 @@ async function exportClientPdfTo(dir, fileName) {
   if (!current) throw new Error("先打开一个画布");
   const allPages = pageItems();
   const pages = allPages.filter((page) => !page.internal);
-  if (!pages.length) throw new Error("还没有提案页");
+  if (!pages.length) throw new Error("没有客户版可见的提案页，请先将要导出的页面设为 internal:false");
   const hidden = clientHiddenIds();
   const pageIds = allPages.map((page) => page.id);
   const payload = pages.map((page) => ({
@@ -9601,6 +9767,7 @@ function agentProposalTemplate(spec = {}) {
       const got = normalizeSceneParts(roomShellParts(topic.scene));
       if (got.dropped.length) throw new Error(got.dropped[0].why);
       scene.parts = got.parts;
+      scene.surfaces = roomShellSurfaces(got.parts);
       scene.light = sceneLightOf("day");
       placeBlock(scene);
       persistScene(scene);
@@ -9634,6 +9801,7 @@ async function agentPageDuplicate(spec = {}) {
   const copy = makePage(copyX, page.y, page.ratio, `${page.title} 副本`, nextOrder);
   copy.w = page.w;
   copy.h = page.h;
+  copy.internal = page.internal;
   placeBlock(copy);
   const contained = current.items.filter((item) => blockCenterInsidePage(item, page));
   const created = [];
@@ -9659,6 +9827,7 @@ async function agentCreateBlock(spec = {}) {
   const locked = spec.locked === true;
   const withLock = (item) => {
     if (locked) item.locked = true;
+    if (spec.internal !== undefined) item.internal = spec.internal === true;
     return item;
   };
 
@@ -9757,6 +9926,7 @@ async function agentCreateBlock(spec = {}) {
     if (light.why) throw new Error(light.why);
     item.light = light.light;
     item.camera = normalizeSceneCamera(spec.camera);
+    if (spec.surfaces !== undefined) item.surfaces = sceneSurfacesOf(spec.surfaces);
     /* 一件东西写歪（尺寸不是正数、op 不认）整件丢掉并说清是第几件——
        静默少一栋楼，agent 下一轮根本不知道自己写错了 */
     rejectFatalDrop(parts.dropped);
@@ -9911,6 +10081,7 @@ async function agentCreateBlock(spec = {}) {
       if (spec.radius !== undefined) extra.radius = spec.radius;
     }
     if (locked) extra.locked = true;
+    if (spec.internal !== undefined) extra.internal = spec.internal === true;
     if (Object.keys(extra).length) return agentUpdateBlock(placed.id, extra);
     return placed;
   }
@@ -10215,7 +10386,12 @@ async function agentUpdateBlock(id, patch = {}) {
     item.light = got.light;
   }
   /* 场景块的三样：里面的东西、机位、地面色。光那一套字段和画面块共用同一个约定。 */
+  if (item.type === "scene" && patch.surfaces !== undefined) {
+    item.surfaces = sceneSurfacesOf(patch.surfaces);
+    setSceneFurnitureSelection(sceneView(item), []);
+  }
   if (item.type === "scene" && patch.parts !== undefined) {
+    setSceneFurnitureSelection(sceneView(item), []);
     const got = normalizeSceneParts(patch.parts);
     rejectFatalDrop(got.dropped);
     item.parts = got.parts;
@@ -11280,7 +11456,8 @@ export const canvasAgent = {
     };
   },
   /* 调试用：从视口坐标 (x,y) 拖 (dx,dy)，走 DOM 的 pointer 事件、不模拟鼠标 */
-  debugDrag: ({ x = 0, y = 0, dx = 0, dy = 0 } = {}) => {    const fire = (type, cx, cy) => {
+  debugDrag: ({ x = 0, y = 0, dx = 0, dy = 0, ctrl = false, shift = false } = {}) => {
+    const fire = (type, cx, cy) => {
       const target = document.elementFromPoint(cx, cy) || document.body;
       target.dispatchEvent(
         new PointerEvent(type, {
@@ -11293,6 +11470,8 @@ export const canvasAgent = {
           isPrimary: true,
           button: 0,
           buttons: type === "pointerup" ? 0 : 1,
+          ctrlKey: Boolean(ctrl),
+          shiftKey: Boolean(shift),
         }),
       );
     };
@@ -11447,6 +11626,11 @@ export const canvasAgent = {
   cameraResetZoom: agentResetZoom,
   cameraSet: agentSetCamera,
   scene: agentScene,
+  sceneGet: agentSceneGet,
+  sceneSurfaceSet: agentSceneSurfaceSet,
+  sceneFurnitureBind: agentSceneFurnitureBind,
+  sceneFurnitureMove: agentSceneFurnitureMove,
+  scenePlacementMode: ({ id, enabled }) => setScenePlacementMode(agentRequireItem(id), Boolean(enabled)),
   sceneRoomShell: agentSceneRoomShell,
   sceneLightPreset: agentSceneLightPreset,
   sceneCameraPreset: agentSceneCameraPreset,

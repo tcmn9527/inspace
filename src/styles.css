@@ -17,7 +17,7 @@
   --accent-fg: #0b0e14; /* 强调色上的文字 */
   --danger: #ff6b60; /* 危险操作 */
 
-  --titlebar-h: 45px;
+  --titlebar-h: 38px;
   --label-h: 36px; /* 标签行高 72 设计 px */
   --pad-x: 9px; /* 内容左边距 */
 
@@ -90,7 +90,7 @@ body.is-titlebar-hidden .titlebar {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
+  width: 38px;
   height: 100%;
   margin-right: auto;
   padding: 0;
@@ -119,7 +119,7 @@ body.is-titlebar-hidden .titlebar {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
+  width: 38px;
   height: 100%;
   border: none;
   border-radius: 0;
@@ -1064,6 +1064,20 @@ body.is-titlebar-hidden .titlebar {
 .dialog-close:hover {
   border-color: var(--line);
   color: var(--fg);
+}
+
+.dialog-props .props-kind {
+  margin-top: 4px;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dialog-props .props-hint {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 18px;
 }
 
 .props-path {
@@ -2168,14 +2182,12 @@ body.is-titlebar-hidden .titlebar {
   box-sizing: border-box;
 }
 
-/* 落图抓屏时藏掉不属于面板内容的记号：容器虚线、锁点、画面工具条、鸟瞰窗 */
+/* 落图抓屏时藏掉不属于面板内容的记号：容器虚线、锁点、鸟瞰窗 */
 body.is-screen-capturing .canvas-item.is-container {
   outline: none !important;
 }
 
 body.is-screen-capturing .canvas-lock-layer,
-body.is-screen-capturing .canvas-picture-tools,
-body.is-screen-capturing .canvas-scene-grip,
 body.is-screen-capturing .canvas-minimap,
 body.is-screen-capturing .canvas-port-visual-layer,
 body.is-screen-capturing .canvas-port,
@@ -2377,33 +2389,35 @@ body.is-screen-capturing .canvas-port-box {
   height: 100%;
   overflow: hidden;
   border-radius: inherit;
-  cursor: grab;
+  cursor: default;
 }
 
 .canvas-scene-card.is-orbiting {
   cursor: grabbing;
 }
 
-/* 转视角的把手：画面里拖是转相机，块本身靠这颗拖 */
-.canvas-scene-grip {
-  position: absolute;
-  left: 0;
-  bottom: 100%;
-  margin-bottom: 4px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
+.canvas-scene-card.is-panning,
+.canvas-scene-card.is-placing {
   cursor: move;
-  user-select: none;
-  z-index: 4;
 }
 
-.canvas-item-scene:hover .canvas-scene-grip {
-  color: var(--fg);
+/* 摆放模式没有标题 chip 了，用一圈内描边告诉用户「现在左键拖的是家具」 */
+.canvas-scene-card.is-placing {
+  box-shadow: inset 0 0 0 2px var(--accent, #478ce0);
 }
+
+.canvas-scene-selection {
+  position: absolute;
+  border: 1px solid var(--accent, #478ce0);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #478ce0) 18%, transparent);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+body.is-screen-capturing .canvas-scene-selection {
+  visibility: hidden;
+}
+
 
 .canvas-scene-view {
   position: relative;
@@ -2667,86 +2681,6 @@ body.is-screen-capturing .canvas-port-box {
 .canvas-gen-place:disabled {
   opacity: 0.32;
   cursor: default;
-}
-
-/* 块左缘那条常驻工具条：笔、墨色、笔宽、笔画撤销都在这儿。
-   整条靠 scale(--canvas-inv) 抵消相机缩放，所以块缩到多小它都一样大、点得着，
-   transform-origin 定在贴块那一侧的右上角，缩放时那条边始终贴着块的左缘。 */
-.canvas-picture-tools {
-  position: absolute;
-  top: 0;
-  right: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
-  transform: scale(var(--canvas-inv, 1)) translateX(-6px);
-  transform-origin: 100% 0;
-}
-
-/* 锁住的块不供笔，整条工具条收起 */
-.canvas-picture-tools.is-hidden {
-  display: none;
-}
-
-.canvas-picture-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.canvas-picture-btn:hover {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
-}
-
-.canvas-picture-btn.is-active {
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-
-.canvas-picture-btn:disabled {
-  opacity: 0.32;
-  cursor: default;
-}
-
-.canvas-picture-btn:disabled:hover {
-  background: transparent;
-}
-
-/* 墨色就是按钮上那颗点，取色板里一动它跟着变；笔宽直接写数字 */
-.canvas-picture-ink {
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--picture-ink, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent);
-}
-
-/* 纸色：方形色块，透明时露出棋盘格，一眼看出「没有底色」。
-   类名别和按钮本身撞（按钮也是 canvas-picture-paper），不然 30px 按钮会被压成 15px */
-.canvas-picture-paper-swatch {
-  width: 15px;
-  height: 15px;
-  border-radius: 4px;
-  background-image:
-    linear-gradient(var(--picture-paper, transparent), var(--picture-paper, transparent)),
-    repeating-conic-gradient(#e6e6e6 0% 25%, #ffffff 0% 50%);
-  background-size: 100% 100%, 5px 5px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 30%, transparent);
 }
 
 /* 落笔时指针换成十字，一眼看出这一下是画还是挪块 */
@@ -4970,8 +4904,8 @@ body.is-screen-capturing .canvas-port-box {
   display: flex;
   align-items: stretch;
   align-self: stretch;
-  gap: 8px;
-  margin-right: 12px;
+  gap: 6px;
+  margin-right: 8px;
 }
 
 /* 组与组之间一条短竖线：工具条 | 缩放 | 导出 | 窗口按钮 */
@@ -4982,17 +4916,17 @@ body.is-screen-capturing .canvas-port-box {
   flex: 0 0 auto;
   align-self: center;
   width: 1px;
-  height: 18px;
+  height: 14px;
   background: color-mix(in srgb, var(--fg) 16%, transparent);
 }
 
 .canvas-zoom::before,
 .canvas-actions::before {
-  margin-right: 7px;
+  margin-right: 6px;
 }
 
 .titlebar-right::before {
-  margin-right: 10px;
+  margin-right: 8px;
 }
 
 .canvas-tools {
@@ -5004,7 +4938,7 @@ body.is-screen-capturing .canvas-port-box {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
+  width: 38px;
   padding: 0;
   border: none;
   border-radius: 0;
@@ -5026,9 +4960,21 @@ body.is-screen-capturing .canvas-port-box {
 .canvas-tool-menu {
   width: auto;
   gap: 3px;
-  padding: 0 6px 0 7px;
-  font-size: 11.5px;
+  padding: 0 5px 0 6px;
+  font-size: 11px;
   white-space: nowrap;
+}
+
+/* 标题栏矮下来了，图形跟着收一号：内联 17px 的 svg 在这里统一压到 15 */
+.canvas-tool svg {
+  width: 15px;
+  height: 15px;
+}
+
+.caption-theme svg,
+#settings-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .canvas-tool-menu::after {
@@ -5045,13 +4991,13 @@ body.is-screen-capturing .canvas-port-box {
 }
 
 .canvas-zoom-btn {
-  min-width: 46px;
-  padding: 0 6px;
+  min-width: 38px;
+  padding: 0 5px;
   border: none;
   border-radius: 0;
   background: transparent;
   color: inherit;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -5060,14 +5006,14 @@ body.is-screen-capturing .canvas-port-box {
 }
 
 .canvas-zoom-value {
-  width: 46px;
+  width: 38px;
   padding: 0 2px;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: center;
   cursor: text;
@@ -5100,7 +5046,7 @@ body.is-screen-capturing .canvas-port-box {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
+  width: 38px;
   padding: 0;
   border: none;
   border-radius: 0;
@@ -5127,7 +5073,7 @@ body.is-screen-capturing .canvas-port-box {
 .canvas-search {
   position: absolute;
   z-index: 6;
-  top: 58px;
+  top: 50px;
   left: 50%;
   display: flex;
   flex-direction: column;

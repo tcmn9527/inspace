@@ -207,9 +207,28 @@ const SCENE_PARTS = {
     "墙和顶是两件东西，别指望一件自带屋顶：墙 {op:\"box\",z:26,h:170} 立到 196，顶就写 {op:\"roof\",z:196,h:130}；出檐不靠参数，让顶的 w,d 各比墙宽出一圈就行（宽 100 的墙给宽 160 的顶，檐口探出去 30）。" +
     "模型件写 {op:\"model\",x,y,z,src,w,d,h,rotate,scale,name}：src 只写模型库（数据根 library/models）里的 .glb 文件名，w/d/h 是期望的真实尺寸（厘米，按 w 等比缩放；没给 w 就按 h，默认 80cm）。产品卡落场景请用 scene_place_product，别手拼。" +
     "实体件还能带 tex（场景块所在画布 images/ 里的图片路径）和 texRepeat（每格多少厘米，默认 100）当材质贴图；把产品卡图片套到墙/地上用 scene_apply_material。" +
+    "可选 group（家具组 id）和 surface（附着面 id）：同组零件一起移动，未绑定 surface 的固定。请先 scene_surface_set 定义承载面，再 scene_furniture_bind 绑定并贴面；scene_get 读完整零件和真实包围盒。" +
     "落点 (x,y) 永远是底面那个中心，rotate 绕它转。" +
     "影子不用你画也不用来这儿要：块上有 light 就有一盏真的太阳，几何自己把影子落到地上，没光就是平光。",
   items: { type: "object" },
+};
+
+const SCENE_SURFACE = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "附着面的唯一 id" },
+    name: { type: "string", description: "显示名称" },
+    kind: { type: "string", enum: ["floor", "wall"] },
+    x: { type: "number" }, y: { type: "number" }, z: { type: "number" },
+    w: { type: "number", description: "平面宽度（厘米）" },
+    h: { type: "number", description: "地面深度 / 墙面高度（厘米）" },
+    rotate: { type: "number", description: "平面水平宽轴相对场景 x 轴的角度；墙面 0 朝 -y，90 朝 +x" },
+  },
+  required: ["id", "kind", "w", "h"],
+};
+const SCENE_SURFACES = {
+  type: "array", items: SCENE_SURFACE,
+  description: "家具附着面。地面 x/y 是中心、z 是顶面；墙 x/y 是宽度中点、z 是底边。家具只能在整个组仍留在面内的范围移动。",
 };
 
 const SCENE_CAMERA = {
@@ -497,6 +516,8 @@ const TOOL_DEFS = [
       y: { type: "number", description: "起点 y" },
       dx: { type: "number", description: "横向拖多少" },
       dy: { type: "number", description: "纵向拖多少" },
+      ctrl: { type: "boolean", description: "按住 Ctrl 拖动" },
+      shift: { type: "boolean", description: "按住 Shift 拖动" },
     },
     ["x", "y"],
   ),
@@ -568,7 +589,7 @@ const TOOL_DEFS = [
       description: "产品卡：真实尺寸（毫米，宽×深×高），给户型脚印和 3D 用",
       properties: { w: { type: "number" }, d: { type: "number" }, h: { type: "number" } },
     },
-    internal: { type: "boolean", description: "内部块：客户版导出时隐藏（P4 用）" },
+    internal: { type: "boolean", description: "客户版隐藏，默认 true；设为 false 才包含在客户版导出中（提案页也需设为 false）" },
     title: { type: "string", description: "清单块的标题；提案页也用它当页名" },
     ratio: { type: "string", enum: ["a4", "a4l", "16:9", "4:3"], description: "提案页比例，默认 a4（竖）" },
     order: { type: "number", description: "提案页的页序，从 1 开始" },
@@ -598,6 +619,7 @@ const TOOL_DEFS = [
     symbols: PICTURE_SYMBOLS,
     light: PICTURE_LIGHT,
     parts: SCENE_PARTS,
+    surfaces: SCENE_SURFACES,
     camera: SCENE_CAMERA,
     groundColor: { type: "string", description: "场景块的地面颜色，如 #9a917d；空串用默认那档灰" },
     ...GEN_PROPS,
@@ -660,7 +682,7 @@ const TOOL_DEFS = [
       description: "产品卡：真实尺寸（毫米，宽×深×高）",
       properties: { w: { type: "number" }, d: { type: "number" }, h: { type: "number" } },
     },
-    internal: { type: "boolean", description: "内部块：客户版导出时隐藏" },
+    internal: { type: "boolean", description: "客户版隐藏，默认 true；false 为明确包含在客户版导出中" },
     title: { type: "string", description: "清单块的标题；提案页也用它当页名" },
     ratio: { type: "string", enum: ["a4", "a4l", "16:9", "4:3"], description: "提案页比例（改它会按比例重设页框大小）" },
     order: { type: "number", description: "提案页的页序，从 1 开始" },
@@ -674,6 +696,7 @@ const TOOL_DEFS = [
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"] },
     paperColor: { type: "string", description: "画面块的画纸底色，如 #f5efdf；空串是透明" },
     parts: SCENE_PARTS,
+    surfaces: SCENE_SURFACES,
     camera: SCENE_CAMERA,
     groundColor: { type: "string", description: "场景块的地面颜色，如 #9a917d；空串用默认那档灰" },
     hidden: {
@@ -744,7 +767,7 @@ const TOOL_DEFS = [
   def("picture_get", "读一块画面的全部绘制指令和素材表：每条带号 i、类型和几何，symbols 是这块已经定义过的素材。改某一条之前先调它拿号，picture_screenshot 上看到的东西在这里都能按号对上。", {
     id: ID,
   }, ["id"]),
-  def("picture_draw", "往画面块里画矢量指令。mode=replace（默认）整幅换掉、append 追加、delete 按 ids 删掉那几条。画歪了别整幅重画：picture_screenshot 看一眼，再 delete 那几条重新 append。字段写坏（颜色、半径、朝向词）不会报错、那一条整条丢掉并在返回的 dropped 里给出 at 和 why，条数对不上就是被丢了；但名字写错是致命的——素材名、变体名、图层名、tile / 剪刀点的素材名，只要一个对不上，这一笔请求整个失败并把这块现有的名字列回来，别指望少几条还能悄悄画完。用户自己在块左缘工具条上手绘的笔迹也是 op:stroke 的点串，要洗画就按号 delete 掉那几笔、换成精确指令。要重复摆同一个东西（人、船、瓦）就先用 symbols 定义一次、再摆 use，别把同一段几何重算几十遍。要照着已有的画就垫一张位图当底：{op:\"image\",path:\"C:\\\\某处\\\\参考图.png\"}，应用会把它拷进这个画布、照原图量好尺寸，再配 opacity 压淡、filter 去色；参考图也是一条指令，橡皮擦和按号 delete 都删得掉。笔画想带飞白就给那条 stroke 加 grain（0~1，0.5 上下最像写干了）：一笔会自己散成几根丝，中间露纸、末端分叉，不用你算丝。要遮、要裁就给那条加 clip（剪刀，形状里面才画得出来）或 mask（拿渐变当透镜子，做渐隐）；一百个窗就定义一个素材当剪刀，每个窗只写 ref 和落点。要把一幅画分开管就给指令起同一个 name 分层（远 / 中 / 近、城楼 / 河面），开关用 hidden 或 picture_layers，别为关一层把整幅 replace 一遍。明暗别自己心算：给块上挂一套光（picture_light），指令只声明那面朝哪个方向 face。", {
+  def("picture_draw", "往画面块里画矢量指令。mode=replace（默认）整幅换掉、append 追加、delete 按 ids 删掉那几条。画歪了别整幅重画：picture_screenshot 看一眼，再 delete 那几条重新 append。字段写坏（颜色、半径、朝向词）不会报错、那一条整条丢掉并在返回的 dropped 里给出 at 和 why，条数对不上就是被丢了；但名字写错是致命的——素材名、变体名、图层名、tile / 剪刀点的素材名，只要一个对不上，这一笔请求整个失败并把这块现有的名字列回来，别指望少几条还能悄悄画完。用户自己在右键菜单「画笔」里手绘的笔迹也是 op:stroke 的点串，要洗画就按号 delete 掉那几笔、换成精确指令。要重复摆同一个东西（人、船、瓦）就先用 symbols 定义一次、再摆 use，别把同一段几何重算几十遍。要照着已有的画就垫一张位图当底：{op:\"image\",path:\"C:\\\\某处\\\\参考图.png\"}，应用会把它拷进这个画布、照原图量好尺寸，再配 opacity 压淡、filter 去色；参考图也是一条指令，橡皮擦和按号 delete 都删得掉。笔画想带飞白就给那条 stroke 加 grain（0~1，0.5 上下最像写干了）：一笔会自己散成几根丝，中间露纸、末端分叉，不用你算丝。要遮、要裁就给那条加 clip（剪刀，形状里面才画得出来）或 mask（拿渐变当透镜子，做渐隐）；一百个窗就定义一个素材当剪刀，每个窗只写 ref 和落点。要把一幅画分开管就给指令起同一个 name 分层（远 / 中 / 近、城楼 / 河面），开关用 hidden 或 picture_layers，别为关一层把整幅 replace 一遍。明暗别自己心算：给块上挂一套光（picture_light），指令只声明那面朝哪个方向 face。", {
     id: ID,
     mode: { type: "string", enum: ["replace", "append", "delete"], description: "默认 replace" },
     cmds: PICTURE_CMDS,
@@ -766,6 +789,23 @@ const TOOL_DEFS = [
     id: ID,
     maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
   }, ["id"]),
+  def("scene_get", "读场景完整 parts（含序号、家具组、附着面）、surfaces 和真实几何/屏幕位置；GLB 未加载时 rendering.parts[].loaded=false，加载后才能绑定或移动。", { id: ID }, ["id"]),
+  def("scene_surface_set", "新建或更新一个明确的地面/墙面附着面。已有家具绑定的面不能改变几何，需先解除绑定；不会靠名字或画面自动猜面。", {
+    id: ID, surface: SCENE_SURFACE,
+  }, ["id", "surface"]),
+  def("scene_furniture_bind", "把若干零件绑定成一件家具并贴到指定附着面（超出边界会夹回；比面还大则报错）。桌面和桌腿要一起绑定，未绑定物体固定。surface 空串解除。", {
+    id: ID,
+    parts: { type: "array", items: { type: "integer", minimum: 0 }, minItems: 1, description: "scene_get 返回的零件序号" },
+    surface: { type: "string", description: "附着面 id；空串解除绑定" },
+    group: { type: "string", description: "家具组 id，省略自动生成" },
+  }, ["id", "parts", "surface"]),
+  def("scene_furniture_move", "沿附着面移动整件家具，和鼠标摆放共用约束。du 沿宽轴，dv 地面沿深轴/墙面向上（厘米）；整组不会脱离承载面或越出其边界，返回实际落点及 clamped。", {
+    id: ID, part: { type: "integer", minimum: 0, description: "家具任一零件序号" },
+    du: { type: "number" }, dv: { type: "number" },
+  }, ["id", "part"]),
+  def("scene_placement_mode", "进入/退出家具摆放模式：普通左键拖家具，Ctrl 旋转、Shift 平移视图不变。右键也可切换，Esc 退出；未绑定的墙体等固定结构不动。", {
+    id: ID, enabled: { type: "boolean" },
+  }, ["id", "enabled"]),
   def("scene_room_shell", "给一块场景铺房间壳：客厅 / 主卧 / 餐厅三种，含地板、背景墙、侧墙、窗、地毯和边柜。单位是厘米（客厅 6.2×5.2m、墙高 2.8m）。会替换场景里现有的 parts，然后按白天光、自动机位重排；摆好壳再用 scene_place_product 把产品卡里的 GLB 家具放进去。", {
     id: ID,
     preset: { type: "string", enum: ["living", "bedroom", "dining"], description: "房间类型，默认 living" },
@@ -785,6 +825,7 @@ const TOOL_DEFS = [
     product: ID,
     x: X,
     y: Y,
+    surface: { type: "string", description: "地面附着面 id；有多个地面时必填" },
     rotate: { type: "number", description: "绕落点转的角度，0~360" },
   }, ["scene", "product"]),
   def("scene_apply_material", "把一张产品卡的图片当材质贴到场景的某个实体面上：target 给件名（地板 / 背景墙 / 侧墙 / 边柜 / 地毯）或 parts 序号，repeat 是每格多少厘米（默认 100）。clear:true 去掉贴图回到纯色。模型件不能贴。", {
@@ -989,7 +1030,7 @@ const BLOCK_FIELDS = [
   "name", "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
   "cmds", "symbols", "paperColor", "hidden", "light",
-  "parts", "camera", "groundColor",
+  "parts", "surfaces", "camera", "groundColor",
   ...GEN_KEYS,
 ];
 
@@ -1328,7 +1369,14 @@ async function dispatch(name, args) {
     case "ui_menu_color":
       return onCanvas(args, () => canvasAgent.debugMenuColor({ id: args.id }));
     case "ui_drag":
-      return canvasAgent.debugDrag({ x: Number(args.x) || 0, y: Number(args.y) || 0, dx: Number(args.dx) || 0, dy: Number(args.dy) || 0 });
+      return canvasAgent.debugDrag({
+        x: Number(args.x) || 0,
+        y: Number(args.y) || 0,
+        dx: Number(args.dx) || 0,
+        dy: Number(args.dy) || 0,
+        ctrl: Boolean(args.ctrl),
+        shift: Boolean(args.shift),
+      });
     case "ui_click":
       return canvasAgent.debugClick({
         selector: args.selector,
@@ -1391,7 +1439,7 @@ async function dispatch(name, args) {
             "type", "x", "y", "w", "h", "text", "markdown", "name", "path", "mode", "as",
             "fontSize", "align", "vAlign", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
             "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
-            "paperColor", "cmds", "symbols", "light", "parts", "camera", "groundColor",
+            "paperColor", "cmds", "symbols", "light", "parts", "surfaces", "camera", "groundColor",
             ...GEN_KEYS,
             "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
           ]),
@@ -1448,6 +1496,19 @@ async function dispatch(name, args) {
       return blockScreenshot(args, "picture", "画面块");
     case "scene_screenshot":
       return blockScreenshot(args, "scene", "场景块");
+    case "scene_get":
+      return onCanvas(args, () => canvasAgent.sceneGet({ id: args.id }));
+    case "scene_surface_set":
+      return onCanvas(args, () => canvasAgent.sceneSurfaceSet(pick(args, ["id", "surface"])));
+    case "scene_furniture_bind":
+      return onCanvas(args, () => canvasAgent.sceneFurnitureBind(pick(args, ["id", "parts", "surface", "group"])));
+    case "scene_furniture_move":
+      return onCanvas(args, () => canvasAgent.sceneFurnitureMove(pick(args, ["id", "part", "du", "dv"])));
+    case "scene_placement_mode":
+      return onCanvas(args, () => {
+        canvasAgent.blockReveal(args.id);
+        return canvasAgent.scenePlacementMode(pick(args, ["id", "enabled"]));
+      });
     case "scene_room_shell":
       return onCanvas(args, () =>
         canvasAgent.sceneRoomShell(pick(args, ["id", "preset", "wallColor", "floorColor"])),
@@ -1458,7 +1519,7 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.sceneCameraPreset(pick(args, ["id", "preset"])));
     case "scene_place_product":
       return onCanvas(args, () =>
-        canvasAgent.scenePlaceProduct(pick(args, ["scene", "product", "x", "y", "rotate"])),
+        canvasAgent.scenePlaceProduct(pick(args, ["scene", "product", "x", "y", "rotate", "surface"])),
       );
     case "scene_apply_material":
       return onCanvas(args, () =>

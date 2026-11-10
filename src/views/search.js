@@ -8,6 +8,9 @@
  */
 
 import * as store from "./canvas-store.js";
+import { collectPictureImageSrcs } from "./canvas-items.js";
+
+const fileNameOf = (path) => String(path || "").split(/[\\/]/).pop() || "";
 
 const DEBOUNCE = 90;
 /* 本地和远程分开配份额：不然本地搜出几十条，别的画布永远挤不进来 */
@@ -60,19 +63,33 @@ function mark(text, query) {
   return `${head}<mark>${hit}</mark>${safe.slice(at + hit.length)}`;
 }
 
-/* 一块的「名字」和「正文」分开算：名字命中的排前面，正文命中的给一段上下文 */
+/* 一块的「名字」和「正文」分开算：名字命中的排前面，正文命中的给一段上下文。
+   文件类面板把原文件名和磁盘上的文件名都塞进正文：用户记得的是导入时那个名字，
+   而拷贝进画布后会改名，只搜路径是找不到的。 */
 function describeBlock(item) {
+  const name = item.name || "";
+  const file = fileNameOf(item.src);
   if (item.type === "text") return { title: item.text.split("\n")[0] || "文字", body: item.text };
-  if (item.type === "note") return { title: item.name || "笔记卡", body: item.source || "" };
+  if (item.type === "note") {
+    return {
+      title: name || "笔记卡",
+      body: [item.source, fileNameOf(item.path)].filter(Boolean).join(" "),
+    };
+  }
   if (item.type === "connector") return { title: item.label || "连线", body: item.label || "" };
-  if (item.type === "image") return { title: "图片", body: "" };
+  if (item.type === "image") return { title: name || "图片", body: file };
+  if (["audio", "video", "ebook", "file"].includes(item.type)) {
+    return { title: name || TYPE_LABEL[item.type], body: [file, item.ext].filter(Boolean).join(" ") };
+  }
   /* 面板能搜的就是那句提示词：出来的图还没变成文字 */
-  if (item.type === "gen") return { title: (item.prompt || "").split("\n")[0] || "生图面板", body: item.prompt || "" };
-  /* 材料卡：名字当标题，品牌/货号/规格/备注都进正文，搜「斯德哥尔摩」也能找到那张卡 */
+  if (item.type === "gen") {
+    return { title: (item.prompt || "").split("\n")[0] || "生图面板", body: [item.prompt || "", file].join(" ") };
+  }
+  /* 材料卡：名字当标题，品牌/货号/规格/备注和模型文件名都进正文，搜「斯德哥尔摩」也能找到那张卡 */
   if (item.type === "product") {
     return {
-      title: item.name || "材料卡",
-      body: [item.brand, item.sku, item.spec, item.note].filter(Boolean).join(" "),
+      title: name || "材料卡",
+      body: [item.brand, item.sku, item.spec, item.note, item.model].filter(Boolean).join(" "),
     };
   }
   if (item.type === "quote") return { title: item.title || "清单", body: item.title || "" };
@@ -80,13 +97,22 @@ function describeBlock(item) {
     const scale = item.calibration ? "已定标" : "未定标";
     return {
       title: "户型图",
-      body: `${scale} · 家具 ${(item.footprints || []).length} 件 · 机位 ${(item.cameras || []).length}`,
+      body: `${scale} · 家具 ${(item.footprints || []).length} 件 · 机位 ${(item.cameras || []).length} ${file}`,
     };
   }
   if (item.type === "page") {
     return { title: item.title || "提案页", body: `P${item.order || "?"} · ${item.ratio}` };
   }
-  return { title: item.name || TYPE_LABEL[item.type] || item.type, body: item.name || "" };
+  /* 画面里垫的位图、3D 场景里用的 GLB：搜文件名也要能找到这两类面板 */
+  if (item.type === "picture") {
+    const files = collectPictureImageSrcs(item.cmds, item.symbols).map((entry) => fileNameOf(entry.src)).filter(Boolean);
+    return { title: name || "画面", body: [...new Set(files)].join(" ") };
+  }
+  if (item.type === "scene") {
+    const models = (item.parts || []).filter((part) => part.op === "model").map((part) => fileNameOf(part.src));
+    return { title: name || "场景", body: [...new Set(models)].filter(Boolean).join(" ") };
+  }
+  return { title: name || TYPE_LABEL[item.type] || item.type, body: name };
 }
 
 export function initSearch({ getItems, getSpaceId, focusBlock, jumpToSpace }) {

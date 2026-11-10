@@ -6883,7 +6883,9 @@ async function addImageBlock(path, point, mode) {
   const fit = fitImageSize(size.width, size.height);
   const at = point || insertPoint(fit.w, fit.h);
   imageCache.set(src, url);
-  return placeBlock(makeImage(at.x, at.y, fit.w, fit.h, src, linked));
+  const item = makeImage(at.x, at.y, fit.w, fit.h, src, linked);
+  item.name = baseName(path);
+  return placeBlock(item);
 }
 
 /* ---------- 产品 / 材料卡与清单 ---------- */

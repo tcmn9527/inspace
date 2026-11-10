@@ -338,6 +338,8 @@ function normalizeBlock(raw) {
       w: Math.max(8, num(raw.w, 120)),
       h: Math.max(8, num(raw.h, 120)),
       src: typeof raw.src === "string" ? raw.src : "",
+      /* 导入时的原文件名：拷贝进画布会改名，搜索还得按用户记得的名字找得到 */
+      name: typeof raw.name === "string" ? raw.name : "",
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
       borderWidth: Math.min(BORDER_MAX_WIDTH, Math.max(0, Math.round(num(raw.borderWidth, BORDER_DEFAULT_WIDTH)))),
       radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),

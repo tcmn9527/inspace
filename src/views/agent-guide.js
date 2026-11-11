@@ -966,14 +966,14 @@ page_screenshot {id, maxSide} 按客户版规则整页渲染成 PNG：页框底�
 
 ### 按页导出 PDF
 client_pdf_export {dir, name}：把每页高清渲染成一张，按 order 拼成多页 PDF，写到 dir 下 <name>.pdf。
-dir 必须是已经存在的文件夹。界面那条在「导出 → 客户版（按页）→ 导出 PDF」，会弹保存框。
+dir 必须是已经存在的文件夹。界面上没有这个入口，只能走这个工具。
 
 ### 按页导出网页（3D 可转）
 client_web_export {dir, name}：在 dir 下新建 <name> 子文件夹：
 index.html + pages/page-01.png… + scene-viewer.js。
 客户双击 index.html 就能看；页面上场景块那块是可点的虚线热区，点开能拖着转、滚轮缩放。
 场景里的 GLB 模型和材质图都内嵌成 data URL，不依赖模型库和网络，整个文件夹可以直接发走。
-界面那条在「导出 → 客户版（按页）→ 导出网页（3D 可转）」，会弹选择文件夹的框。
+界面上没有这个入口，只能走这个工具。
 
 ### 注意
 - 页框尺寸大，画布上排页时留足间距；页名是唯一的拖动把手，页里的块可以正常点选。

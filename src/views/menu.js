@@ -256,6 +256,32 @@ function fill(container, items, closeAll, level) {
       container.append(sep);
       continue;
     }
+    /* 图标格：几枚只有图标的方块按钮（工具选择用），排成网格 */
+    if (item.grid) {
+      const grid = document.createElement("div");
+      grid.className = "menu-icon-grid";
+      for (const entry of item.grid) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "menu-grid-btn";
+        if (entry.active) button.classList.add("is-active");
+        button.title = entry.label;
+        button.setAttribute("aria-label", entry.label);
+        button.innerHTML = entry.icon;
+        button.addEventListener("mouseenter", () => {
+          cancelClose();
+          closeDeeper(level + 1);
+        });
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          closeAll();
+          entry.onClick();
+        });
+        grid.append(button);
+      }
+      container.append(grid);
+      continue;
+    }
     const button = document.createElement("button");
     button.type = "button";
     if (item.disabled) {

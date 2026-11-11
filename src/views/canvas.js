@@ -366,13 +366,6 @@ function openExportMenu() {
       { label: "导出为图片…", onClick: () => void openImageExportDialog() },
       { label: "导出为 PDF", onClick: () => void runExport("pdf") },
       { label: "导出为网页", onClick: () => void runExport("html") },
-      {
-        label: "客户版（按页）",
-        children: [
-          { label: "导出 PDF…", onClick: () => void runClientPdf() },
-          { label: "导出网页（3D 可转）…", onClick: () => void runClientWeb() },
-        ],
-      },
       { label: "导出公众号文章", onClick: () => void runExport("wechat") },
       { label: "导出今日头条文章", onClick: () => void runExport("toutiao") },
     ],
@@ -550,13 +543,11 @@ export function initCanvas() {
     guideLayer: document.querySelector("#canvas-guide-layer"),
     measureLayer: document.querySelector("#canvas-measure-layer"),
     portVisualLayer: document.querySelector("#canvas-port-visual-layer"),
-    lockLayer: document.querySelector("#canvas-lock-layer"),
     handleVisualLayer: document.querySelector("#canvas-handle-visual-layer"),
     metrics: document.querySelector("#canvas-metrics"),
     tools: document.querySelector("#canvas-tools"),
-    toolButtons: [...document.querySelectorAll(".canvas-tool[data-tool]")],
-    insertFile: document.querySelector("#canvas-insert-file"),
-    insertGen: document.querySelector("#canvas-insert-gen"),
+    toolMenu: document.querySelector("#canvas-tool-menu"),
+    toolIcon: document.querySelector("#canvas-tool-icon"),
     zoomValue: document.querySelector("#canvas-zoom-value"),
     zoomIn: document.querySelector("#canvas-zoom-in"),
     zoomOut: document.querySelector("#canvas-zoom-out"),
@@ -571,19 +562,15 @@ export function initCanvas() {
     copyCancel: document.querySelector("#canvas-copy-cancel"),
   };
 
-  ui.toolButtons.forEach((button) => {
-    button.addEventListener("click", () => setTool(button.dataset.tool));
-  });
-  /* 插入类按钮不在 toolButtons 里（它们不是一种画图工具），点一下仍然要把
-     武装着的工具交回第一个按钮，否则「文字」的蓝会一直留在原地 */
-  for (const button of [ui.insertFile, ui.insertGen]) {
-    button.addEventListener("click", dropTool);
-  }
-  ui.insertFile.addEventListener("click", insertFileFromPicker);
-  ui.insertGen.addEventListener("click", (event) => {
+  toolboxMarkup = ui.toolIcon.innerHTML;
+  ui.toolMenu.addEventListener("click", (event) => {
     /* 菜单在 document 上挂着「点外部就收起」：不挡住这一下，刚开的菜单会被当成外部点击 */
     event.stopPropagation();
-    openInsertGenMenu();
+    if (isMenuOpen("tools")) {
+      closeMenu();
+      return;
+    }
+    openToolMenu();
   });
   ui.copyCancel.addEventListener("click", () => {
     const job = copyTask?.job || audioFix?.job;
@@ -787,7 +774,6 @@ export function leaveCanvas() {
   blurMinimapFocus();
   setMeasureHeld(false);
   if (ui?.portVisualLayer) ui.portVisualLayer.textContent = "";
-  if (ui?.lockLayer) ui.lockLayer.textContent = "";
   if (ui?.handleVisualLayer) ui.handleVisualLayer.textContent = "";
   pauseMedia();
   /* 全屏壳躲在被隐藏的画布视图里时浏览器不会自己退，切走要手动收，
@@ -1072,39 +1058,6 @@ function showEmpty() {
 
 async function createFlow() {
   await createFlowIn(null);
-}
-
-async function renameFlow() {
-  if (!current) return;
-  const name = await promptDialog({
-    title: "重命名画布",
-    label: "画布名字",
-    value: current.meta.name,
-    okText: "重命名",
-  });
-  if (!name || name === current.meta.name) return;
-  if (editingId || edgeLabelEditor) commitEditing();
-  await flushBlockContents();
-  await flushItems();
-  await flushCamera();
-  try {
-    const meta = await store.renameCanvas(current.meta.id, name);
-    current.meta = meta;
-    localStorage.setItem(STORAGE_KEY, meta.id);
-    await loadList();
-    updateChrome();
-  } catch (error) {
-    showError(error);
-  }
-}
-
-async function revealFlow() {
-  if (!current) return;
-  try {
-    await store.revealCanvas(current.meta.id);
-  } catch (error) {
-    showError(error);
-  }
 }
 
 /* ---------- 左侧画布树 ---------- */
@@ -1494,13 +1447,78 @@ async function renameTreeGroup(id, name) {
 
 /* ---------- 工具与相机 ---------- */
 
+/* 手里端着哪个工具，标题栏那颗「工具」按钮就换成哪个工具的图标；
+   没端工具（选择态）时显示工具箱图标。图标与旧工具栏逐一对齐。 */
+const TOOL_ICONS = {
+  rect: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.5" y="4.5" width="13" height="11" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>',
+  ellipse: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.4" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>',
+  line: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16 16 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+  arrow:
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16 16 4M9.5 4H16v6.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  text: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13M10 4.5v11M7.2 15.5h5.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>',
+  picture:
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M5.2 13.4c1.6-3.4 3-1.2 4.3-3.1 1.2-1.8 2.5.9 4.2-1.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>',
+};
+const TOOL_LABELS = {
+  rect: "矩形",
+  ellipse: "圆形",
+  line: "直线",
+  arrow: "箭头",
+  text: "文字",
+  picture: "画图",
+};
+let toolboxMarkup = "";
+
+/* 工具下拉清单：标题栏工具按钮和画布空白处右键共用这一份。
+   六种画图工具排成两行图标格（标题栏里也是 15px 图标，这里放大到 17px）；
+   工具都是一次性的，用完自动回选择，所以不列「选择」。
+   插入文件和 AI 出图是动作，保持文字行。 */
+function toolMenuEntries() {
+  const entry = (name) => ({
+    label: TOOL_LABELS[name],
+    icon: TOOL_ICONS[name],
+    active: tool === name,
+    onClick: () => setTool(name),
+  });
+  return [
+    { grid: [entry("rect"), entry("ellipse"), entry("line"), entry("arrow"), entry("text"), entry("picture")] },
+    "-",
+    {
+      label: "插入文件…",
+      onClick: () => {
+        dropTool();
+        insertFileFromPicker();
+      },
+    },
+    {
+      label: "AI 出图",
+      children: [
+        { label: "文生图", onClick: () => armAndInsertGen("t2i") },
+        { label: "图生图", onClick: () => armAndInsertGen("i2i") },
+        { label: "图片局部重绘", onClick: () => armAndInsertGen("inpaint") },
+        { label: "图片高清放大", onClick: () => armAndInsertGen("upscale") },
+      ],
+    },
+  ];
+}
+
+function armAndInsertGen(mode) {
+  dropTool();
+  insertGenPanel(mode);
+}
+
+function openToolMenu() {
+  if (!current) return;
+  const rect = ui.toolMenu.getBoundingClientRect();
+  openMenu(rect.left, rect.bottom + 8, toolMenuEntries(), { kind: "tools" });
+}
+
 function setTool(name, keepSelection = false) {
   tool = name;
-  ui.toolButtons.forEach((button) => {
-    const activeButton = button.dataset.tool === name;
-    button.classList.toggle("is-active", activeButton);
-    button.setAttribute("aria-pressed", String(activeButton));
-  });
+  const armed = name !== "select";
+  ui.toolMenu?.classList.toggle("is-active", armed);
+  ui.toolMenu?.setAttribute("aria-pressed", String(armed));
+  if (ui.toolIcon) ui.toolIcon.innerHTML = (armed && TOOL_ICONS[name]) || toolboxMarkup;
   ui.stage.dataset.tool = name;
   if (name !== "select" && !keepSelection) select(null);
 }
@@ -1965,12 +1983,17 @@ function loneSelected() {
   return selectedIds.size === 1 ? [...selectedIds][0] : null;
 }
 
-/* 左下角坐标条：选中谁就报谁左上角的 X/Y，多选取整组的外接框左上角。
+/* 锁定的块在左下角信息条的 #N 前面挂一枚小锁；非锁定不挂 */
+const LOCK_BADGE_SVG = `<svg class="canvas-metrics-lock" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.3" y="5.3" width="7.4" height="5.4" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M4.1 5.3V4a1.9 1.9 0 0 1 3.8 0v1.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
+
+/* 左下角信息条：选中谁就报谁的 (X, Y) 和 [W, H]，多选取整组的外接框。
    连线没有自己的位置，单独选中它时这条不出现。 */
 function updateMetrics() {
   if (!ui?.metrics) return;
   let left = Infinity;
   let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
   for (const id of selectedIds) {
     const item = findItem(id);
     const el = itemEls.get(id);
@@ -1978,14 +2001,19 @@ function updateMetrics() {
     const bounds = itemBounds(item, el);
     left = Math.min(left, bounds.x);
     top = Math.min(top, bounds.y);
+    right = Math.max(right, bounds.x + bounds.w);
+    bottom = Math.max(bottom, bounds.y + bounds.h);
   }
   const shown = Number.isFinite(left);
   ui.metrics.hidden = !shown;
   if (!shown) return;
   const count = selectedIds.size > 1 ? ` · ${selectedIds.size} 块` : "";
   const single = selectedIds.size === 1 ? findItem([...selectedIds][0]) : null;
+  const lock = single?.locked ? LOCK_BADGE_SVG : "";
   const seq = single && single.type !== "connector" && single.seq ? `#${single.seq} · ` : "";
-  ui.metrics.textContent = `${seq}X ${Math.round(left)} · Y ${Math.round(top)}${count}`;
+  const pos = `(${Math.round(left)}, ${Math.round(top)})`;
+  const size = `[${Math.round(right - left)}, ${Math.round(bottom - top)}]`;
+  ui.metrics.innerHTML = `${lock}${seq}${pos} ${size}${count}`;
 }
 
 function updateSelection() {
@@ -1997,8 +2025,6 @@ function updateSelection() {
   updatePorts();
   updateMetrics();
   refreshMinimap();
-  /* 锁点不属于选中态，必须每轮都刷新：没有选中块时上面会提前返回 */
-  refreshLockDots();
   if (!selectedIds.size) return;
   /* 四角缩放把手和线的端点拖拽只给「就选了一个」：一堆块同时缩放没意义，把手糊成一片也没法点 */
   const lone = selectedIds.size === 1;
@@ -3350,34 +3376,6 @@ function setHoverId(id) {
   hoverId = id;
   if (id) itemEls.get(id)?.classList.add("is-hover");
   updatePorts();
-  refreshLockDots();
-}
-
-/* 锁点视觉画在屏幕层：位置取热区中心；大小随缩放温和变化，但永远是屏幕上的正圆。
-   热区还在块里，双击解锁不受影响。 */
-function refreshLockDots() {
-  const layer = ui?.lockLayer;
-  if (!layer) return;
-  layer.textContent = "";
-  if (!current || !active) return;
-  const stageRect = ui.stage.getBoundingClientRect();
-  const size = Math.max(4, 3 + 3 * current.camera.scale);
-  for (const item of current.items) {
-    if (!item.locked || item.type === "connector") continue;
-    const el = itemEls.get(item.id);
-    const hit = el?.querySelector(".canvas-lock-dot");
-    if (!hit) continue;
-    const rect = hit.getBoundingClientRect();
-    if (!rect.width) continue;
-    const dot = document.createElement("span");
-    dot.className = "canvas-lock-visual";
-    if (selectedIds.has(item.id) || el.classList.contains("is-hover")) dot.classList.add("is-active");
-    dot.style.left = `${Math.round(rect.left - stageRect.left + rect.width / 2)}px`;
-    dot.style.top = `${Math.round(rect.top - stageRect.top + rect.height / 2)}px`;
-    dot.style.width = `${size}px`;
-    dot.style.height = `${size}px`;
-    layer.append(dot);
-  }
 }
 
 function startConnect(e) {
@@ -4330,24 +4328,8 @@ function moveLayer(item, dir) {
 }
 
 function openBlankMenu(x, y) {
-  const entries = [{ label: "新建画布", onClick: createFlow }];
-  if (current) {
-    /* 刚复制过块才给这一条：空白处右键主要是画布级操作，粘不上去时不摆个死项 */
-    if (copiedBlocks) {
-      entries.push({ label: "粘贴", onClick: pasteCopiedBlocks });
-    }
-    entries.push({
-      label: "重置视图",
-      onClick: () => {
-        current.camera = { x: 0, y: 0, scale: 1 };
-        applyCamera();
-        scheduleCameraSave();
-      },
-    });
-    entries.push({ label: "重命名画布", onClick: renameFlow });
-    entries.push({ label: "在资源管理器中显示", onClick: revealFlow });
-  }
-  openMenu(x, y, entries);
+  /* 空白处右键和标题栏工具按钮弹同一个工具清单 */
+  openMenu(x, y, toolMenuEntries());
 }
 
 const FONT_SIZES = [12, 14, 16, 18, 20, 24, 32, 48];
@@ -5435,13 +5417,12 @@ function setupGenEvents() {
 /* ---------- 画面块：右键菜单控件与手绘 ----------
    笔的状态长在块自己身上，不占画布工具栏那套一次性工具态：
    在画面里涂一笔，不该把「选择」的蓝色从工具栏上挤走。
-   一块一套笔，撤销重做只退这块画过的笔画。 */
+   一块一套笔，撤销重做只退这块画过的笔画。
+   先开「编辑」才能落笔：默认非编辑态，拖块、点选都和平常一样。 */
 
-const PICTURE_TOOL_NAMES = {
-  select: "选择",
-  pen: "笔 · 等宽",
-  brush: "毛笔 · 提按",
-  eraser: "橡皮",
+const PICTURE_PEN_LABELS = {
+  pen: "钢笔",
+  brush: "毛笔",
 };
 
 const PICTURE_INK_COLORS = ["#1f1f1f", "#a83232", "#1d5c8c", "#2f6b3a", "#8a5a00", "#5a3d7a"];
@@ -5458,7 +5439,8 @@ function pictureEditorOf(id) {
   let editor = pictureEditors.get(id);
   if (!editor) {
     editor = {
-      tool: "select",
+      editing: false,
+      tool: "pen",
       color: PICTURE_INK_COLORS[0],
       size: PICTURE_WIDTH_STEPS[1],
       undo: [],
@@ -5469,13 +5451,13 @@ function pictureEditorOf(id) {
   return editor;
 }
 
-/* 手里正捏着笔的那一块：只认「单选 + 工具不是选择」。
+/* 手里正捏着笔的那一块：只认「单选 + 编辑态」。
    键盘的 Ctrl+Z 只在这一块里生效，退的是画过的笔画。 */
 function paintingTarget() {
   if (selectedIds.size !== 1) return null;
   const id = [...selectedIds][0];
   const editor = pictureEditors.get(id);
-  if (!editor || editor.tool === "select") return null;
+  if (!editor || !editor.editing) return null;
   return findItem(id)?.type === "picture" ? id : null;
 }
 
@@ -5483,13 +5465,29 @@ function paintingTarget() {
    只留一个 is-painting 的十字光标提示「这一下是落墨不是挪块」。 */
 function pictureMenuEntries(item) {
   const editor = pictureEditorOf(item.id);
+  const penEntry = (kind) => ({
+    label: `${PICTURE_PEN_LABELS[kind]}${editor.tool === kind ? " ✓" : ""}`,
+    onClick: () => setPictureTool(item.id, kind),
+  });
   const entries = [
     {
-      label: "画笔",
-      children: Object.entries(PICTURE_TOOL_NAMES).map(([kind, label]) => ({
-        label: `${label}${editor.tool === kind ? " ✓" : ""}`,
-        onClick: () => setPictureTool(item.id, kind),
+      label: `编辑${editor.editing ? " ✓" : ""}`,
+      onClick: () => setPictureEditing(item.id, !editor.editing),
+    },
+    { label: "画笔", children: [penEntry("pen"), penEntry("brush")] },
+    {
+      label: "笔宽",
+      children: PICTURE_WIDTH_STEPS.map((size) => ({
+        label: `${size}${editor.size === size ? " ✓" : ""}`,
+        trailing: `<svg viewBox="0 0 20 14" width="20" height="14" aria-hidden="true"><path d="M3 7h14" stroke="currentColor" stroke-width="${Math.min(size, 12)}" stroke-linecap="round"/></svg>`,
+        onClick: () => {
+          pictureEditorOf(item.id).size = size;
+        },
       })),
+    },
+    {
+      label: `橡皮${editor.tool === "eraser" ? " ✓" : ""}`,
+      onClick: () => setPictureTool(item.id, "eraser"),
     },
     {
       label: "墨色",
@@ -5504,16 +5502,6 @@ function pictureMenuEntries(item) {
           if (color) pictureEditorOf(item.id).color = color;
         },
       },
-    },
-    {
-      label: "笔宽",
-      children: PICTURE_WIDTH_STEPS.map((size) => ({
-        label: `${size}${editor.size === size ? " ✓" : ""}`,
-        trailing: `<svg viewBox="0 0 20 14" width="20" height="14" aria-hidden="true"><path d="M3 7h14" stroke="currentColor" stroke-width="${Math.min(size, 12)}" stroke-linecap="round"/></svg>`,
-        onClick: () => {
-          pictureEditorOf(item.id).size = size;
-        },
-      })),
     },
     {
       label: "纸色",
@@ -5672,7 +5660,7 @@ function attachPictureTools(el, item) {
 function syncPictureChrome(el, item) {
   const editor = pictureEditorOf(item.id);
   /* 锁住的块不供笔：能选、能右键解锁，但不让人往一块钉死的画上落墨 */
-  el.classList.toggle("is-painting", editor.tool !== "select" && !item.locked);
+  el.classList.toggle("is-painting", editor.editing && !item.locked);
 }
 
 function refreshPictureChrome(id) {
@@ -5681,13 +5669,23 @@ function refreshPictureChrome(id) {
   if (item && el) syncPictureChrome(el, item);
 }
 
+/* 点笔型只换笔，不顺手开编辑：编辑是总开关，开着才落得下去 */
 function setPictureTool(id, kind) {
   const item = findItem(id);
   if (!item || item.type !== "picture") return;
-  if (item.locked && kind !== "select") return;
+  if (item.locked) return;
   pictureEditorOf(id).tool = kind;
-  /* 拿起笔就把这块选中：看得见边界才知道笔落在哪儿 */
-  if (kind !== "select" && !selectedIds.has(id)) select(id);
+  refreshPictureChrome(id);
+}
+
+/* 编辑总开关：打开后块内按下就是落笔，关掉回到拖块/点选 */
+function setPictureEditing(id, on) {
+  const item = findItem(id);
+  if (!item || item.type !== "picture") return;
+  if (on && item.locked) return;
+  pictureEditorOf(id).editing = on;
+  /* 进入编辑就把这块选中：看得见边界才知道笔落在哪儿 */
+  if (on && !selectedIds.has(id)) select(id);
   refreshPictureChrome(id);
 }
 
@@ -5778,8 +5776,8 @@ function onPicturePointerDown(e, id) {
   const item = findItem(id);
   if (!item || item.type !== "picture" || item.locked) return;
   const editor = pictureEditorOf(id);
-  /* 选择态什么都不拦：这一下该冒到舞台上去选中、挪块 */
-  if (editor.tool === "select") return;
+  /* 非编辑态什么都不拦：这一下该冒到舞台上去选中、挪块 */
+  if (!editor.editing) return;
   /* 落笔先把上一次操作收尾：正编辑的文字、开着的菜单和色板。
      这一下按在画面里，svg 拦住了冒泡，那些「点外面就收起」的监听收不到，得自己关。
      色板要先关再取墨色——关的那一刻才落 onDone，新挑的颜色这时候才算进 editor。 */
@@ -6826,23 +6824,6 @@ async function pickAndInsert(pick) {
   }
 }
 
-/* 工具栏右端的「AI 出图」下拉：一列纯文字，点哪一项就摆一块对应档位的生图面板 */
-function openInsertGenMenu() {
-  if (!current) return;
-  const rect = ui.insertGen.getBoundingClientRect();
-  openMenu(
-    rect.left,
-    rect.bottom + 8,
-    [
-      { label: "文生图", onClick: () => insertGenPanel("t2i") },
-      { label: "图生图", onClick: () => insertGenPanel("i2i") },
-      { label: "图片局部重绘", onClick: () => insertGenPanel("inpaint") },
-      { label: "图片高清放大", onClick: () => insertGenPanel("upscale") },
-    ],
-    { kind: "gen-insert" },
-  );
-}
-
 /* 面板摆在视口正中，档位按入口预设；提示词和参数从这一刻起就归 genpanels/ 那份文件管 */
 function insertGenPanel(mode) {
   if (!current) return;
@@ -6850,15 +6831,6 @@ function insertGenPanel(mode) {
   const item = makeGen(at.x, at.y);
   item.mode = mode;
   placeBlock(item);
-  showToast(
-    mode === "upscale"
-      ? "高清放大面板已摆好：把要放大的图连进来，点开始"
-      : mode === "inpaint"
-        ? "局部重绘面板已摆好：把要改的图连进来，在预览上涂出要重绘的地方"
-        : mode === "i2i"
-          ? "图生图面板已摆好：把底图连进来，写清要改成什么样"
-          : "文生图面板已摆好：写一句提示词就能出图",
-  );
 }
 
 function insertFileFromPicker() {
@@ -7989,11 +7961,11 @@ function onKeyDown(e) {
     return;
   }
   if (e.key === "Escape") {
-    /* 手里捏着笔时 Esc 先把笔放下，回到挪块缩放 */
+    /* 手里捏着笔时 Esc 先退出编辑，回到挪块缩放 */
     const painting = paintingTarget();
     if (painting) {
       e.preventDefault();
-      setPictureTool(painting, "select");
+      setPictureEditing(painting, false);
       return;
     }
     const placing = current.items.find((item) => item.type === "scene" && scenePlacementActive(item));
@@ -9358,48 +9330,6 @@ function hideConnectorsTemporarily(ids) {
   };
 }
 
-/* 按页导出客户版 PDF：每页一张高清图，内部块和别的页都摘掉 */
-async function runClientPdf() {
-  if (!current || exporting) return;
-  const allPages = pageItems();
-  const pages = allPages.filter((page) => !page.internal);
-  if (!pages.length) {
-    showToast("没有客户版可见的提案页：请让 agent 指定要导出的页面");
-    return;
-  }
-  exporting = true;
-  ui.exportBtn?.classList.add("is-busy");
-  if (ui.exportBtn) ui.exportBtn.disabled = true;
-  showToast("正在按页生成客户版 PDF…");
-  const canvasId = current.meta.id;
-  const name = current.meta.name;
-  const hidden = clientHiddenIds();
-  const pageIds = allPages.map((page) => page.id);
-  try {
-    const payload = pages.map((page) => ({
-      box: { x: page.x, y: page.y, w: page.w, h: page.h },
-      pageId: page.id,
-      hideIds: [...hidden.ids, ...pageIds.filter((id) => id !== page.id)],
-    }));
-    const restoreConnectors = hideConnectorsTemporarily(hidden.connectors);
-    let result;
-    try {
-      result = await exporter.exportPagesPdf(payload, { quality: "high" });
-    } finally {
-      restoreConnectors();
-    }
-    if (!current || current.meta.id !== canvasId) return;
-    const saved = await store.exportSave(`${name} 客户版`, "pdf", result.data);
-    if (saved) showToast(`已导出 ${result.pages} 页 PDF`);
-  } catch (error) {
-    showError(error);
-  } finally {
-    exporting = false;
-    ui.exportBtn?.classList.remove("is-busy");
-    if (ui.exportBtn) ui.exportBtn.disabled = false;
-  }
-}
-
 async function fetchTextAsset(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`读不到 ${url}（${res.status}）`);
@@ -9628,34 +9558,7 @@ async function exportClientWebTo(dir, root) {
   return { root, pages: pages.length, scenes: scenes.length };
 }
 
-async function runClientWeb() {
-  if (!current || exporting) return;
-  if (!pageItems().some((page) => !page.internal)) {
-    showToast("没有客户版可见的提案页：请让 agent 指定要导出的页面");
-    return;
-  }
-  exporting = true;
-  ui.exportBtn?.classList.add("is-busy");
-  if (ui.exportBtn) ui.exportBtn.disabled = true;
-  showToast("正在导出客户版网页…");
-  const canvasId = current.meta.id;
-  try {
-    const dir = await store.exportPickDir();
-    if (!dir || !current || current.meta.id !== canvasId) return;
-    const root = exportRootName(current.meta.name);
-    const result = await exportClientWebTo(dir, root);
-    if (!current || current.meta.id !== canvasId) return;
-    showToast(`客户版网页已导出：${result.root}（双击 index.html 就能看）`);
-  } catch (error) {
-    showError(error);
-  } finally {
-    exporting = false;
-    ui.exportBtn?.classList.remove("is-busy");
-    if (ui.exportBtn) ui.exportBtn.disabled = false;
-  }
-}
-
-/* 按页 PDF 写进指定文件夹（agent 用；界面那条走保存框） */
+/* 按页 PDF 写进指定文件夹（agent 用） */
 async function exportClientPdfTo(dir, fileName) {
   if (!current) throw new Error("先打开一个画布");
   const allPages = pageItems();
@@ -11577,6 +11480,7 @@ export const canvasAgent = {
           visibility: style.visibility,
           position: style.position,
           zIndex: style.zIndex,
+          cursor: style.cursor,
           scrollHeight: el.scrollHeight || undefined,
           clientHeight: el.clientHeight || undefined,
           rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],

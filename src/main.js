@@ -55,10 +55,11 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#win-max").addEventListener("click", () => appWindow.toggleMaximize());
   document.querySelector("#win-close").addEventListener("click", () => appWindow.close());
 
-  /* 右上角那颗齿轮：开着就回画布，关着就开设置 */
+  /* 右上角那颗齿轮：开着就回画布，关着就开设置。
+     走 insepace:route 而不是直接 showRoute——主题弹窗也听这个事件，切路由时一起收起 */
   document.querySelector("#settings-btn")?.addEventListener("click", () => {
     const onSettings = !document.querySelector("#settings-view").hidden;
-    showRoute(onSettings ? "canvas" : "settings");
+    window.dispatchEvent(new CustomEvent("inspace:route", { detail: onSettings ? "canvas" : "settings" }));
   });
 
   /* MCP 工具要切页时派发这个事件，和点齿轮走同一条路 */

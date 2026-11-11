@@ -281,15 +281,6 @@ body.is-titlebar-hidden .titlebar {
   line-height: 1.6;
 }
 
-/* 影像署名：只在设置页最底下留一行小字，不占卡片 */
-.settings-credit {
-  margin: 4px 2px 0;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.6;
-  opacity: 0.8;
-}
-
 .settings-path {
   display: block;
   margin-top: 12px;
@@ -715,6 +706,33 @@ body.is-titlebar-hidden .titlebar {
   border-radius: 50%;
   border: 1.5px solid var(--muted);
   background: var(--menu-icon-color, transparent);
+}
+
+/* 图标格：只有图标的方块按钮排成 3 列（工具选择用）。
+   悬停底色跟文字行同一档；当前工具反蓝，靠图标本身说明是哪个工具。 */
+.menu-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+}
+
+.ctx-menu .menu-icon-grid button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  padding: 0;
+}
+
+.ctx-menu .menu-icon-grid button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.ctx-menu .menu-icon-grid button.is-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* 二级菜单：从父行右边展开，外观跟父菜单一套，只是多压一层 */
@@ -1254,35 +1272,14 @@ body.is-titlebar-hidden .titlebar {
   user-select: text;
 }
 
-/* ---------- 主题选择框 ---------- */
-.theme-pop {
-  position: fixed;
-  z-index: 80;
-  display: flex;
-  flex-direction: column;
-  width: 324px;
-  max-height: calc(100vh - 70px);
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+/* ---------- 主题选择弹窗 ---------- */
+/* 外壳、标题栏、关闭键全部复用设置弹层那套，只有宽度按四列色卡收窄 */
+.theme-dialog {
+  width: min(460px, 100%);
 }
 
-.theme-pop-title {
-  margin: 0 2px 8px;
-  font-size: 12px;
-  letter-spacing: 0.2px;
-  color: var(--muted);
-}
-
-/* 40 套主题放不下时在这层里滚，标题与浮层边框保持不动 */
-.theme-pop-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+.theme-body {
+  padding: 16px 20px 20px;
 }
 
 .theme-pop-group {
@@ -1297,7 +1294,7 @@ body.is-titlebar-hidden .titlebar {
 
 .theme-pop-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 6px;
 }
 
@@ -1987,7 +1984,8 @@ body.is-titlebar-hidden .titlebar {
 .canvas-stage[data-tool="ellipse"],
 .canvas-stage[data-tool="line"],
 .canvas-stage[data-tool="arrow"],
-.canvas-stage[data-tool="text"] {
+.canvas-stage[data-tool="text"],
+.canvas-stage[data-tool="picture"] {
   cursor: crosshair;
 }
 
@@ -2182,12 +2180,11 @@ body.is-titlebar-hidden .titlebar {
   box-sizing: border-box;
 }
 
-/* 落图抓屏时藏掉不属于面板内容的记号：容器虚线、锁点、鸟瞰窗 */
+/* 落图抓屏时藏掉不属于面板内容的记号：容器虚线、鸟瞰窗 */
 body.is-screen-capturing .canvas-item.is-container {
   outline: none !important;
 }
 
-body.is-screen-capturing .canvas-lock-layer,
 body.is-screen-capturing .canvas-minimap,
 body.is-screen-capturing .canvas-port-visual-layer,
 body.is-screen-capturing .canvas-port,
@@ -2212,11 +2209,10 @@ body.is-screen-capturing .canvas-port-box {
   outline-color: color-mix(in srgb, var(--accent) 78%, transparent);
 }
 
-/* 锁住的块：右上角一枚实心小圆点，所有块统一；不动块自己的边框、底色和圆角。
-   悬停或选中时块本身不出现任何选中记号，只让这颗点变色。
-   圆点外面套了 22px 的透明热区，双击热区解除锁定；块自己拖不动，
-   但按住它可以拖整张画布，所以光标给「可抓」而不是普通箭头。内部自带
-   cursor: move 的拖动头（如电子书头部）也一并改过来，免得指着它还以为能挪这块。 */
+/* 锁住的块：块上不再画任何记号，只留右上角一块透明热区，双击解除锁定。
+   锁定标识改由左下角信息条的小锁承担。块自己拖不动，但按住它可以拖整张画布，
+   所以光标给「可抓」而不是普通箭头。内部自带 cursor: move 的拖动头（如电子书头部）
+   也一并改过来，免得指着它还以为能挪这块。 */
 .canvas-item.is-locked,
 .canvas-item.is-locked .canvas-ebook-head {
   cursor: grab;
@@ -2234,7 +2230,7 @@ body.is-screen-capturing .canvas-port-box {
   right: var(--lock-inset, 0px);
   z-index: 3;
   display: none;
-  /* 只留热区；看得见的圆点由屏幕层的 .canvas-lock-visual 画 */
+  /* 只留热区，不画任何像素 */
   width: calc(3px + 19px * var(--canvas-inv, 1));
   height: calc(3px + 19px * var(--canvas-inv, 1));
   cursor: pointer;
@@ -2242,26 +2238,6 @@ body.is-screen-capturing .canvas-port-box {
 
 .canvas-item.is-locked .canvas-lock-dot {
   display: block;
-}
-
-/* 锁点视觉层：屏幕坐标，圆是真正的圆，不受相机缩放栅格化影响 */
-.canvas-lock-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  pointer-events: none;
-}
-
-.canvas-lock-visual {
-  position: absolute;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  background: color-mix(in srgb, var(--fg) 62%, transparent);
-  transition: background-color 0.12s ease;
-}
-
-.canvas-lock-visual.is-active {
-  background: var(--accent);
 }
 
 /* 线/箭头的端点圈视觉层：屏幕坐标，圆是真正的圆；块里的同类元素只留热区 */
@@ -4956,13 +4932,16 @@ body.is-screen-capturing .canvas-scene-selection {
   color: var(--fg);
 }
 
-/* 带下拉的工具栏按钮：「AI出图」三个字后面跟一颗小三角，点开是一列文字 */
-.canvas-tool-menu {
-  width: auto;
-  gap: 3px;
-  padding: 0 5px 0 6px;
-  font-size: 11px;
-  white-space: nowrap;
+/* 收纳后的「工具」按钮：38×38 里一枚图标；
+   端着工具时图标换成该工具自己的，底色高亮 */
+.canvas-tool-tools {
+  position: relative;
+}
+
+.canvas-tool-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* 标题栏矮下来了，图形跟着收一号：内联 17px 的 svg 在这里统一压到 15 */
@@ -4975,14 +4954,6 @@ body.is-screen-capturing .canvas-scene-selection {
 #settings-btn svg {
   width: 14px;
   height: 14px;
-}
-
-.canvas-tool-menu::after {
-  content: "";
-  border-left: 3px solid transparent;
-  border-right: 3px solid transparent;
-  border-top: 4px solid currentColor;
-  opacity: 0.55;
 }
 
 .canvas-zoom {
@@ -5217,7 +5188,7 @@ body.is-screen-capturing .canvas-scene-selection {
   }
 }
 
-/* 左下角坐标条：选中面板的左上角 X/Y，样式跟右下角缩放条同一路子（浮层控件） */
+/* 左下角信息条：选中面板的 (X, Y) 和 [W, H]，样式跟右下角缩放条同一路子（浮层控件） */
 .canvas-metrics {
   position: absolute;
   left: 14px;
@@ -5235,6 +5206,14 @@ body.is-screen-capturing .canvas-scene-selection {
   /* 拖动途中数字一直在跳，等宽数字才不会左右抖 */
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+
+/* 锁定块在 #N 前面挂的小锁，跟着 12px 字走 */
+.canvas-metrics-lock {
+  width: 11px;
+  height: 11px;
+  margin-right: 3px;
+  vertical-align: -1px;
 }
 
 /* ---- 右下角鸟瞰窗 ---- */

@@ -143,47 +143,13 @@ try {
 }
 apply(saved || DEFAULT_THEME, { persist: false });
 
-// ---------- 选择框 ----------
-
-let pop = null;
-
-function closePop() {
-  if (!pop) return;
-  pop.remove();
-  pop = null;
-  document.removeEventListener("pointerdown", onDocDown, true);
-  document.removeEventListener("keydown", onKeyDown, true);
-  themeBtn?.setAttribute("aria-expanded", "false");
-}
-
-function onDocDown(e) {
-  if (!pop) return;
-  if (pop.contains(e.target) || e.target === themeBtn || themeBtn?.contains(e.target)) return;
-  closePop();
-}
-
-function onKeyDown(e) {
-  if (e.key === "Escape" && pop) {
-    e.stopPropagation();
-    closePop();
-  }
-}
+// ---------- 选择弹窗 ----------
 
 let themeBtn = null;
+let ui = null;
+let chipsReady = false;
 
-function buildPop() {
-  const panel = document.createElement("div");
-  panel.className = "theme-pop";
-  panel.innerHTML = `
-    <div class="theme-pop-title">主题</div>
-    <div class="theme-pop-scroll">
-      <div class="theme-pop-group">深色</div>
-      <div class="theme-pop-grid theme-pop-grid-dark"></div>
-      <div class="theme-pop-group">浅色</div>
-      <div class="theme-pop-grid theme-pop-grid-light"></div>
-    </div>
-  `;
-
+function renderChips() {
   const addChips = (container, list) => {
     for (const theme of list) {
       const [id, name] = theme;
@@ -214,28 +180,57 @@ function buildPop() {
       container.append(chip);
     }
   };
-  addChips(panel.querySelector(".theme-pop-grid-dark"), THEMES);
-  addChips(panel.querySelector(".theme-pop-grid-light"), LIGHT_THEMES);
-  document.body.append(panel);
-  pop = panel;
+  addChips(ui.darkGrid, THEMES);
+  addChips(ui.lightGrid, LIGHT_THEMES);
+}
 
-  // 贴着标题栏右上角展开
-  const rect = themeBtn.getBoundingClientRect();
-  const width = panel.getBoundingClientRect().width;
-  const left = Math.min(rect.left, window.innerWidth - width - 8);
-  panel.style.left = `${Math.max(8, left)}px`;
-  panel.style.top = `${rect.bottom + 6}px`;
+function openTheme() {
+  if (!ui) return;
+  if (!chipsReady) {
+    renderChips();
+    chipsReady = true;
+  }
+  ui.page.hidden = false;
+  /* 焦点收进弹层，别留在标题栏那颗主题按钮上 */
+  ui.dialog.focus();
+  themeBtn?.setAttribute("aria-expanded", "true");
+}
 
-  themeBtn.setAttribute("aria-expanded", "true");
-  document.addEventListener("pointerdown", onDocDown, true);
-  document.addEventListener("keydown", onKeyDown, true);
+function closeTheme() {
+  if (!ui || ui.page.hidden) return;
+  ui.page.hidden = true;
+  themeBtn?.setAttribute("aria-expanded", "false");
 }
 
 export function initTheme() {
   themeBtn = document.getElementById("theme-btn");
-  if (!themeBtn) return;
+  const page = document.getElementById("theme-view");
+  if (!themeBtn || !page) return;
+  ui = {
+    page,
+    dialog: document.getElementById("theme-dialog"),
+    scrim: document.getElementById("theme-scrim"),
+    close: document.getElementById("theme-close"),
+    darkGrid: page.querySelector(".theme-pop-grid-dark"),
+    lightGrid: page.querySelector(".theme-pop-grid-light"),
+  };
   themeBtn.addEventListener("click", () => {
-    if (pop) closePop();
-    else buildPop();
+    if (!ui.page.hidden) {
+      closeTheme();
+      return;
+    }
+    /* 设置页开着时先回画布，避免两个弹层叠在一起 */
+    window.dispatchEvent(new CustomEvent("inspace:route", { detail: "canvas" }));
+    openTheme();
   });
+  ui.close.addEventListener("click", closeTheme);
+  ui.scrim.addEventListener("click", closeTheme);
+  document.addEventListener("keydown", (event) => {
+    if (ui.page.hidden) return;
+    if (event.key !== "Escape" || event.repeat) return;
+    event.preventDefault();
+    closeTheme();
+  });
+  /* 切去设置或别的页面时，主题弹窗跟着收起 */
+  window.addEventListener("inspace:route", closeTheme);
 }

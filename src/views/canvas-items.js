@@ -546,6 +546,8 @@ function normalizeBlock(raw) {
       seed: Number.isFinite(raw.seed) && raw.seed >= 0 ? Math.trunc(raw.seed) : -1,
       /* 取景窗自己的高度：提示词框变高时块跟着长，这一截不动 */
       stageH: Number.isFinite(raw.stageH) ? Math.max(0, Math.round(raw.stageH)) : 0,
+      /* 手动拖过尺寸的面板，重开画布也不按提示词自动改高 */
+      manualSize: raw.manualSize === true,
       mode: GEN_MODES.includes(raw.mode) ? raw.mode : GEN_MODE_DEFAULT,
       strength: clamp(num(raw.strength, GEN_STRENGTH_DEFAULT), GEN_STRENGTH_MIN, GEN_STRENGTH_MAX),
       /* 高清放大后要不要再补一遍低强度重绘（长出纹理） */
@@ -1232,6 +1234,8 @@ export function makeGen(x, y, w = GEN_DEFAULT_WIDTH, h = GEN_DEFAULT_HEIGHT) {
     w,
     h,
     stageH: 0,
+    /* 手动拖过尺寸：提示词再长也不自动改块高，超出部分在框里滚 */
+    manualSize: false,
     refine: false,
     prompt: "",
     negative: "",

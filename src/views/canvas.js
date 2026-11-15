@@ -3308,9 +3308,11 @@ function onWindowPointerMove(e) {
   /* 书页钉在起始尺寸上，容器的真实尺寸才不会把它撑到掉帧；拉满靠 transform */
   if (drag.page) pinEbookPage(drag.page);
   syncItemElement(el, item);
-  /* 生图面板拉过高度：记住这是手动尺寸，提示词超出时在框里滚，不再自动长高 */
+  /* 生图面板拉过高度：记住这是手动尺寸，提示词超出时在框里滚，不再自动长高。
+     这个标记要跟着块存进画布文件——只放 dataset 的话重开画布就丢，面板又会被撑高 */
   if (item.type === "gen") {
     el.dataset.userResized = "1";
+    item.manualSize = true;
     fitGenPrompt(item.id, el.querySelector(".canvas-gen-prompt"), false);
   }
   if (drag.page) stretchEbookPage(drag.page);
@@ -5275,7 +5277,7 @@ function fitGenPrompt(itemId, prompt, grow = false) {
   const other = bar ? bar.offsetHeight - prompt.offsetHeight : 0;
   const room = () => Math.max(56, item.h - GEN_STAGE_MIN_HEIGHT - other);
   /* 手动拉过高度之后就不再按提示词自动长高——用户缩矮时提示词滚动，图不缩没 */
-  const manual = el.dataset.userResized === "1";
+  const manual = item.manualSize === true || el.dataset.userResized === "1";
   if (grow && !manual && want > room()) {
     item.h += want - room();
     syncItemElement(el, item);
@@ -5719,9 +5721,9 @@ function refreshGenPanel(id) {
   if (!item || !el) return;
   syncGen(el, item, genFeedOf(item));
   paintGenMore(item, el);
-  /* 程序换掉提示词（agent 改词）后，框和块高都要跟着变；
-     加载画布走的是 attachGenPanel 那一路，不会从这里重复加高 */
-  fitGenPrompt(id, el.querySelector(".canvas-gen-prompt"), true);
+  /* 只量不涨：打开画布、拖块、连线、刷新引擎状态都会走到这里，
+     这些都该保持用户上次的尺寸。提示词变长由输入/改词那一趟单独 grow */
+  fitGenPrompt(id, el.querySelector(".canvas-gen-prompt"), false);
 }
 
 /* 面板上那一行进料提示：接了几张、这一张会按哪档走。
@@ -11195,8 +11197,12 @@ async function agentUpdateBlock(id, patch = {}) {
   /* 生图面板的参数也在这条路上改：改完单独落那份文件，和画面块一个规矩 */
   if (item.type === "gen" && applyGenFields(item, patch)) {
     persistGen(item);
-    /* 提示词/尺寸被 agent 改过，面板上的字和框高都要重新算 */
     refreshGenPanel(item.id);
+    /* agent 换了提示词：这是「内容真的变了」的一趟，框和块高跟着长 */
+    if (patch.prompt !== undefined) {
+      const genEl = itemEls.get(item.id);
+      fitGenPrompt(item.id, genEl?.querySelector(".canvas-gen-prompt"), true);
+    }
   }
   if (item.type === "genvideo") {
     let videoChanged = false;

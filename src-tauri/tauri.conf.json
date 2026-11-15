@@ -35,7 +35,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
     "resources": {
       "resources/cuda/cudart64_12.dll": "cudart64_12.dll",
       "resources/cuda/cublas64_12.dll": "cublas64_12.dll",

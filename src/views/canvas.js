@@ -5395,6 +5395,21 @@ function paintGenMore(item, el) {
   if (strengthRow) {
     strengthRow.hidden = effectiveMode !== "i2i" && effectiveMode !== "inpaint";
   }
+  /* 高清放大只吃「输入图 + 放大权重」：模型、尺寸、步数、CFG、种子、负向都不参与，
+     摆在这里只会让人以为调了有用。整行撤掉，连「更多设置」入口一起撤。 */
+  const upscale = effectiveMode === "upscale";
+  for (const field of ["model", "imageW", "imageH", "steps", "cfg", "seed", "negative"]) {
+    const row = more.querySelector(`[data-gen-field="${field}"]`)?.closest(".canvas-gen-more-row");
+    if (row) row.hidden = upscale;
+  }
+  const seedTip = more.querySelector(".canvas-gen-more-tip");
+  if (seedTip) seedTip.hidden = upscale;
+  const moreToggle = el.querySelector(".canvas-gen-more-toggle");
+  if (moreToggle) moreToggle.hidden = upscale;
+  /* 补细节只在「高清放大」这一档有意义（放大后按提示词重绘一遍）。
+     文生图、编辑、局部重绘都不读这个开关，H3 的放大也不支持重绘，都不显示。 */
+  const refineButton = el.querySelector(".canvas-gen-refine");
+  if (refineButton) refineButton.hidden = !upscale || family === "h3image";
 }
 
 /* 常用尺寸：宽高都是 32 的倍数；超出当前模型边长上限的项在菜单里自动过滤 */

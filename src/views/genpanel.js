@@ -57,6 +57,9 @@ function hintText(run, item, mode) {
     if (isUpscale) return upscaleRefine ? `补细节 ${run.step} / ${run.steps} 片` : "放大中…";
     /* 走 API 没有步进，0/0 就是「在等远端」 */
     if (!run.steps) return "生成中…";
+    /* 大模型第一次出图前要按张量把权重搬进显存，引擎报的是「第几个张量」，
+       几百上千的总数不是采样步数；这一段纯 CPU/IO，别让人误以为在出图 */
+    if (run.steps > 100) return `载入权重 ${run.step} / ${run.steps}`;
     return `第 ${run.step} / ${run.steps} 步`;
   }
   if (run.phase === "failed") return run.error || "出图失败";

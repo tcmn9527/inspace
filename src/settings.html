@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>设置</title>
+    <script type="module" src="/settings-window.js" defer></script>
+  </head>
+
+  <body class="settings-window">
+    <header class="titlebar settings-window-head" data-tauri-drag-region>
+      <span class="settings-window-title" data-tauri-drag-region>设置</span>
+      <div class="titlebar-right">
+        <button id="settings-win-min" class="caption" type="button" title="最小化" aria-label="最小化">
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M2 6h8" stroke="currentColor" stroke-width="1" fill="none" />
+          </svg>
+        </button>
+        <button
+          id="settings-win-close"
+          class="caption caption-close"
+          type="button"
+          title="关闭"
+          aria-label="关闭"
+        >
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1" fill="none" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="settings-layout">
+      <nav class="settings-nav" id="settings-nav" aria-label="设置分类">
+        <button class="settings-nav-item" data-pane="theme" type="button">主题</button>
+        <button class="settings-nav-item" data-pane="data" type="button">数据文件夹</button>
+        <button class="settings-nav-item" data-pane="gen" type="button">生图模型</button>
+        <button class="settings-nav-item" data-pane="video" type="button">视频生成</button>
+        <button class="settings-nav-item" data-pane="models" type="button">3D 模型库</button>
+        <button class="settings-nav-item" data-pane="cosmos" type="button" hidden>宇宙主题</button>
+        <button class="settings-nav-item" data-pane="mcp" type="button">Agent 连接（MCP）</button>
+        <button class="settings-nav-item" data-pane="shortcuts" type="button">快捷键</button>
+        <button class="settings-nav-item" data-pane="ffmpeg" type="button" hidden>视频组件</button>
+      </nav>
+
+      <main class="settings-content" id="settings-content">
+        <section class="settings-pane" data-pane="theme" hidden>
+          <div class="settings-card">
+            <p class="settings-title">主题</p>
+            <div class="theme-pop-group">深色</div>
+            <div class="theme-pop-grid theme-pop-grid-dark" id="settings-theme-dark"></div>
+            <div class="theme-pop-group">浅色</div>
+            <div class="theme-pop-grid theme-pop-grid-light" id="settings-theme-light"></div>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="data" hidden>
+          <div class="settings-card">
+            <p class="settings-title">数据文件夹</p>
+            <p class="settings-hint">
+              画布都存在这一个文件夹里：spaces/ 是一个画布一个文件夹。 换文件夹时会先问旧的要拷贝一份留着、剪贴走，还是干脆新建一份不带过去。
+            </p>
+            <code class="settings-path" id="settings-data-path"></code>
+            <div class="settings-actions">
+              <button class="plain-btn" id="settings-data-pick" type="button">更换文件夹…</button>
+              <button class="plain-btn" id="settings-data-reveal" type="button">打开所在目录</button>
+              <button class="plain-btn" id="settings-data-reset" type="button">恢复默认位置</button>
+            </div>
+            <p class="settings-status" id="settings-data-status" hidden></p>
+            <p class="settings-error" id="settings-data-error" hidden></p>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="gen" hidden>
+          <div class="settings-card" id="settings-gen-card">
+            <p class="settings-title">生图模型</p>
+            <div class="settings-gen-engine" id="settings-gen-engine" role="tablist" aria-label="生图引擎">
+              <button class="settings-gen-family" data-engine="local" type="button" role="tab">本地模型</button>
+              <button class="settings-gen-family" data-engine="api" type="button" role="tab">API</button>
+            </div>
+            <div class="settings-gen-api" id="settings-gen-api" hidden>
+              <label class="settings-field">
+                <span>协议</span>
+                <select id="settings-gen-api-protocol">
+                  <option value="images">OpenAI Images（/images/generations、/images/edits）</option>
+                  <option value="chat">OpenAI Chat（/chat/completions 多模态）</option>
+                </select>
+              </label>
+              <label class="settings-field">
+                <span>接口地址</span>
+                <input id="settings-gen-api-url" type="text" spellcheck="false" placeholder="https://api.openai.com/v1" />
+              </label>
+              <label class="settings-field">
+                <span>模型名</span>
+                <select id="settings-gen-api-model"></select>
+              </label>
+              <label class="settings-field">
+                <span>API Key</span>
+                <input id="settings-gen-api-key" type="password" spellcheck="false" placeholder="sk-…" />
+              </label>
+              <div class="settings-actions">
+                <button class="plain-btn" id="settings-gen-api-reload" type="button">重新读取模型</button>
+              </div>
+              <p class="settings-status" id="settings-gen-api-status" hidden></p>
+              <p class="settings-error" id="settings-gen-api-error" hidden></p>
+              <p class="settings-hint">
+                Images 协议直接出文生图；带参考图时走 edits。Chat 协议把提示词和图发进对话。
+                走 API 时步数、CFG、种子、负向这些本地参数不生效，高清放大仍然只能用本地模型。
+              </p>
+            </div>
+            <div class="settings-gen-local" id="settings-gen-local">
+              <div class="settings-gen-families" id="settings-gen-families" role="tablist" aria-label="出图模型">
+                <button class="settings-gen-family" data-family="qwen21" type="button" role="tab">Qwen-Image 2.1</button>
+                <button class="settings-gen-family" data-family="h3image" type="button" role="tab">MiniMax-H3-Image</button>
+              </div>
+              <p class="settings-gen-note" id="settings-gen-note" hidden></p>
+              <p class="settings-hint" id="settings-gen-hint" hidden>
+                模型文件都放在下面这个文件夹里，扔进去就能用。点「检测模型」看这台机器装得下哪一档、还缺哪几个文件。
+              </p>
+              <p class="settings-status" id="settings-gen-status"></p>
+              <span class="settings-path" id="settings-gen-dir"></span>
+              <div class="settings-gen-detail" id="settings-gen-detail" hidden></div>
+              <div class="settings-actions">
+                <button class="plain-btn" id="settings-gen-check" type="button">检测模型</button>
+                <button class="plain-btn" id="settings-gen-reveal" type="button">打开模型文件夹</button>
+                <button class="plain-btn" id="settings-gen-dir-pick" type="button">换个目录</button>
+                <button class="plain-btn" id="settings-gen-dir-reset" type="button" hidden>恢复默认位置</button>
+              </div>
+              <p class="settings-error" id="settings-gen-error" hidden></p>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="video" hidden>
+          <div class="settings-card" id="settings-video-card">
+            <p class="settings-title">视频生成</p>
+            <div class="settings-gen-engine" id="settings-video-engine" role="tablist" aria-label="视频引擎">
+              <button class="settings-gen-family" data-video-engine="local" type="button" role="tab">本地模型</button>
+              <button class="settings-gen-family" data-video-engine="api" type="button" role="tab">云端 API</button>
+            </div>
+            <div class="settings-video-local" id="settings-video-local">
+              <p class="settings-hint">
+                把 MiniMax-H3 的四个权重文件放进下面这个文件夹，应用会自动识别扩散模型、视频 VAE、音频 VAE、文本编码器；文件名不一样也能认，认不出的会提示改名，缺的会给下载链接。出片 1–20 秒、带声音；每条要几分钟，和本地生图抢显存。
+              </p>
+              <span class="settings-path" id="settings-video-dir"></span>
+              <div class="settings-actions">
+                <button class="plain-btn" id="settings-video-rescan" type="button">重新扫描</button>
+                <button class="plain-btn" id="settings-video-reveal" type="button">打开模型文件夹</button>
+                <button class="plain-btn" id="settings-video-dir-pick" type="button">换个目录</button>
+                <button class="plain-btn" id="settings-video-dir-reset" type="button" hidden>恢复默认位置</button>
+              </div>
+              <p class="settings-status" id="settings-video-local-status"></p>
+              <div class="settings-gen-files" id="settings-video-roles"></div>
+              <div class="settings-model-notes" id="settings-video-notes" hidden></div>
+              <p class="settings-error" id="settings-video-local-error" hidden></p>
+            </div>
+            <div class="settings-video-cloud" id="settings-video-cloud">
+              <p class="settings-hint">
+                文生视频、图生视频走远端 API。海螺和 OpenAI 协议直接吃画布上的首帧图；万相和百炼可灵只收公网图片 URL，本地首帧暂不支持。任务提交后服务端停不掉，按秒计费。
+              </p>
+              <div class="settings-gen-api settings-video-form">
+                <label class="settings-field">
+                  <span>协议</span>
+                  <select id="settings-video-protocol">
+                    <option value="openai">OpenAI videos（Sora / 兼容网关）</option>
+                    <option value="minimax">MiniMax 海螺</option>
+                    <option value="dashscope">DashScope（通义万相 / 百炼可灵）</option>
+                  </select>
+                </label>
+                <label class="settings-field">
+                  <span>接口地址</span>
+                  <input id="settings-video-url" type="text" spellcheck="false" placeholder="留空用该协议的官方默认地址" />
+                </label>
+                <label class="settings-field">
+                  <span>API Key</span>
+                  <input id="settings-video-key" type="password" spellcheck="false" placeholder="sk-…" />
+                </label>
+                <label class="settings-field">
+                  <span>模型</span>
+                  <select id="settings-video-model"></select>
+                </label>
+                <div class="settings-actions">
+                  <button class="plain-btn" id="settings-video-reload" type="button">读取模型列表</button>
+                </div>
+                <p class="settings-status" id="settings-video-status" hidden></p>
+                <p class="settings-error" id="settings-video-error" hidden></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="models" hidden>
+          <div class="settings-card" id="settings-models-card">
+            <p class="settings-title">3D 模型库</p>
+            <p class="settings-hint">
+              把 .glb 文件放进下面这个文件夹，3D 面板里就能调用到。
+              3D 面板不支持用户手动创建，需要时可以让 agent 通过 MCP 调用。
+            </p>
+            <p class="settings-status" id="settings-models-status"></p>
+            <code class="settings-path" id="settings-models-dir"></code>
+            <div class="settings-actions">
+              <button class="plain-btn" id="settings-models-reveal" type="button">打开模型文件夹</button>
+              <button class="plain-btn" id="settings-models-import" type="button">导入模型…</button>
+            </div>
+            <p class="settings-error" id="settings-models-error" hidden></p>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="cosmos" hidden>
+          <div class="settings-card" id="settings-cosmos-card">
+            <p class="settings-title">宇宙贴图</p>
+            <p class="settings-hint" id="settings-cosmos-hint">
+              内置的星体贴图是 2K，飞近了看表面会有点糊。这里是同一套贴图的 8K 版，共 7 张，
+              点一次下载到数据文件夹的 cosmos/ 里，之后离线照用；不升级也完全不影响飞行。
+            </p>
+            <p class="settings-status" id="settings-cosmos-status"></p>
+            <code class="settings-path" id="settings-cosmos-dir" hidden></code>
+            <div class="settings-actions">
+              <button class="plain-btn" id="settings-cosmos-upgrade" type="button">下载 8K 贴图</button>
+              <button class="plain-btn" id="settings-cosmos-cancel" type="button" hidden>取消下载</button>
+              <button class="plain-btn" id="settings-cosmos-clear" type="button" hidden>清除 8K 贴图</button>
+            </div>
+            <p class="settings-error" id="settings-cosmos-error" hidden></p>
+          </div>
+
+          <div class="settings-card" id="settings-route-card" hidden>
+            <p class="settings-title">遨游星球</p>
+            <p class="settings-hint">
+              航线按下面这个名单一颗颗遇到，走完一轮从头再开始。改了不打断正在绕的这颗。
+            </p>
+            <ol class="settings-route" id="settings-route-list"></ol>
+            <div class="settings-actions" id="settings-route-add"></div>
+            <label class="settings-field" id="settings-route-field" for="settings-route-minutes">
+              <input class="settings-input" id="settings-route-minutes" type="text" readonly title="双击修改" />
+              <span>分钟后遇到下一颗</span>
+            </label>
+            <p class="settings-status" id="settings-route-status" hidden></p>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="mcp" hidden>
+          <div class="settings-card" id="settings-mcp-card">
+            <p class="settings-title">Agent 连接（MCP）</p>
+            <p class="settings-hint">
+              别的 agent 可以通过本机 MCP 操作画布。复制连接配置贴到它那边即可；
+              服务只监听 127.0.0.1，token 只存在本机配置里。
+            </p>
+            <code class="settings-path" id="settings-mcp-url"></code>
+            <div class="settings-actions">
+              <button class="plain-btn" id="settings-mcp-copy" type="button">复制连接配置</button>
+              <button class="plain-btn" id="settings-mcp-reset" type="button">重置 token</button>
+            </div>
+            <p class="settings-status" id="settings-mcp-status" hidden></p>
+            <p class="settings-error" id="settings-mcp-error" hidden></p>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="shortcuts" hidden>
+          <div class="settings-card" id="settings-shortcuts-card">
+            <p class="settings-title">快捷键</p>
+            <p class="settings-hint">
+              当前画布的键盘操作一览。这里只做说明，暂不支持自定义。
+            </p>
+            <div class="settings-shortcuts">
+              <div class="settings-shortcut-group">
+                <p class="settings-shortcut-heading">画布</p>
+                <div class="settings-shortcut-row">
+                  <span>全选面板</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>A</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>复制选中的面板（有文字选区时复制文字）</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>C</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>粘贴面板、图片、音频或文字</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>V</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>原地复制并粘贴选中的面板</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>D</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>锁定 / 解锁选中的面板（都锁着就一起解开）</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>L</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>锁定 / 解锁某一块</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>左键双击</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>删除选中的面板</span>
+                  <span class="settings-keys"><kbd>Delete</kbd><span class="settings-key-sep">/</span><kbd>Backspace</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>微移选中的面板（按住 Shift 走 10 倍）</span>
+                  <span class="settings-keys"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>按住 Alt：量选中面板到四周最近面板的距离（拖动时实时更新）</span>
+                  <span class="settings-keys"><kbd>Alt</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>鸟瞰窗选中后移动视野（Shift 走得更远）</span>
+                  <span class="settings-keys"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>缩放回到 100%</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>0</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>缩放画布（以指针为中心）</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>滚轮</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>平移画布</span>
+                  <span class="settings-keys"><kbd>滚轮</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>依次放下画面笔、退出摆放 / 鸟瞰窗焦点、画图工具、选中</span>
+                  <span class="settings-keys"><kbd>Esc</kbd></span>
+                </div>
+              </div>
+              <div class="settings-shortcut-group">
+                <p class="settings-shortcut-heading">3D 场景</p>
+                <div class="settings-shortcut-row">
+                  <span>摆放模式下移动家具（右键进入）</span>
+                  <span class="settings-keys"><kbd>左键拖动</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>退出家具摆放</span>
+                  <span class="settings-keys"><kbd>Esc</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>旋转视角</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>左键拖动</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>整体平移视图</span>
+                  <span class="settings-keys"><kbd>Shift</kbd><kbd>左键拖动</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>推近 / 拉远</span>
+                  <span class="settings-keys"><kbd>滚轮</kbd></span>
+                </div>
+              </div>
+              <div class="settings-shortcut-group">
+                <p class="settings-shortcut-heading">搜索</p>
+                <div class="settings-shortcut-row">
+                  <span>打开搜索（再按一次聚焦并全选）</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>F</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>输入 #1 直接定位并选中 1 号面板（实时）</span>
+                  <span class="settings-keys"><kbd>#</kbd><kbd>数字</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>切换搜索结果</span>
+                  <span class="settings-keys"><kbd>↑</kbd><kbd>↓</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>跳到选中的结果</span>
+                  <span class="settings-keys"><kbd>Enter</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>关闭搜索</span>
+                  <span class="settings-keys"><kbd>Esc</kbd></span>
+                </div>
+              </div>
+              <div class="settings-shortcut-group">
+                <p class="settings-shortcut-heading">编辑</p>
+                <div class="settings-shortcut-row">
+                  <span>结束文字、笔记或文件编辑</span>
+                  <span class="settings-keys"><kbd>Esc</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>在笔记或文件编辑器里缩进两个空格</span>
+                  <span class="settings-keys"><kbd>Tab</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>撤销（笔记、文件编辑器、画面块笔画）</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>Z</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>重做</span>
+                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Z</kbd><span class="settings-key-sep">/</span><kbd>Ctrl</kbd><kbd>Y</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>保存连线标签（Esc 取消）</span>
+                  <span class="settings-keys"><kbd>Enter</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>生图提示词：开始出图（Shift+Enter 换行）</span>
+                  <span class="settings-keys"><kbd>Enter</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>就地输入时确认 / 取消（缩放比例、间隔分钟）</span>
+                  <span class="settings-keys"><kbd>Enter</kbd><span class="settings-key-sep">/</span><kbd>Esc</kbd></span>
+                </div>
+              </div>
+              <div class="settings-shortcut-group">
+                <p class="settings-shortcut-heading">弹窗与浮层</p>
+                <div class="settings-shortcut-row">
+                  <span>确定当前弹窗</span>
+                  <span class="settings-keys"><kbd>Enter</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>关闭弹窗、菜单、主题面板或取色板</span>
+                  <span class="settings-keys"><kbd>Esc</kbd></span>
+                </div>
+                <div class="settings-shortcut-row">
+                  <span>在多选弹窗里切换选项</span>
+                  <span class="settings-keys"><kbd>↑</kbd><kbd>↓</kbd></span>
+                </div>
+              </div>
+              <div class="settings-shortcut-group">
+                <p class="settings-shortcut-heading">窗口</p>
+                <div class="settings-shortcut-row">
+                  <span>收起 / 恢复软件标题栏</span>
+                  <span class="settings-keys"><kbd>F10</kbd></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="ffmpeg" hidden>
+          <div class="settings-card" id="settings-ffmpeg-card" hidden>
+            <p class="settings-title">视频组件</p>
+            <p class="settings-hint">
+              画布里的视频碰到本机放不出声的音轨（AC3、DTS 这类）时，要靠 ffmpeg
+              把那条音轨转成 AAC。没装它画面照样能播，只是那条视频不会响。
+              要修就把 ffmpeg.exe 放进下面这个文件夹，再点重新检测。
+            </p>
+            <code class="settings-path" id="settings-ffmpeg-dir"></code>
+            <div class="settings-actions">
+              <button class="plain-btn" id="settings-ffmpeg-reveal" type="button">打开组件文件夹</button>
+              <button class="plain-btn" id="settings-ffmpeg-recheck" type="button">重新检测</button>
+            </div>
+            <p class="settings-error" id="settings-ffmpeg-error" hidden></p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

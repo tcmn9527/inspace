@@ -1,46 +1,21 @@
 import { enterCanvas, initCanvas, leaveCanvas } from "./views/canvas.js";
-import { initSettings, refreshSettings } from "./views/settings.js";
-import { initTheme } from "./views/theme.js";
+import { currentTheme, setTheme } from "./views/theme.js";
 import { initCosmos } from "./views/cosmos.js";
 import { initAgent } from "./views/agent.js";
 
 const { getCurrentWindow } = window.__TAURI__.window;
+const { invoke } = window.__TAURI__.core;
+const { emitTo, listen } = window.__TAURI__.event;
 
 const appWindow = getCurrentWindow();
 
-/* 应用只有两页：画布和设置。设置从右上角那颗齿轮进出，其它时候都在画布上。 */
-function showRoute(route) {
-  const isCanvas = route === "canvas";
-  const isSettings = route === "settings";
+/* 主窗口只有画布：设置和主题都搬进了独立的设置窗口（label = settings）。 */
+let routeReady = Promise.resolve();
 
-  /* 设置是浮在画布上的弹层：画布留着当背景，交互已经由 leaveCanvas 停掉 */
-  document.querySelector("#canvas-view").hidden = !(isCanvas || isSettings);
-  document.querySelector("#settings-view").hidden = !isSettings;
-  if (isSettings) {
-    document.querySelector("#settings-body")?.scrollTo({ top: 0 });
-    /* 焦点收进弹层：别让它留在右上角齿轮上，不然关掉后按钮上会挂一圈焦点框 */
-    requestAnimationFrame(() => {
-      document.querySelector("#settings-dialog")?.focus({ preventScroll: true });
-    });
-  } else {
-    const active = document.activeElement;
-    if (active && (active.id === "settings-btn" || document.querySelector("#settings-view")?.contains(active))) {
-      active.blur();
-    }
-  }
-
-  /* 进出页面时刷新数据：设置页每次进页重读磁盘，画布进出要先把防抖里的改动落盘。
-     agent 也靠 routeReady 等这一轮读完再动手，不然会在半空的画布上做操作。 */
-  let work = Promise.resolve();
-  if (isSettings) work = Promise.resolve(refreshSettings());
-  if (isCanvas) work = Promise.resolve(enterCanvas());
-  else leaveCanvas();
-  const ready = work.catch((error) => {
-    console.error(`切到 ${route} 失败：${error}`);
+function openSettings(page) {
+  invoke("open_settings_window", page ? { page } : {}).catch((error) => {
+    console.error(`打开设置窗口失败：${error}`);
   });
-  window.__inspace = { route, ready };
-
-  document.querySelector("#settings-btn")?.classList.toggle("is-active", isSettings);
 }
 
 async function syncMaximizeIcon() {
@@ -55,24 +30,49 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#win-max").addEventListener("click", () => appWindow.toggleMaximize());
   document.querySelector("#win-close").addEventListener("click", () => appWindow.close());
 
-  /* 右上角那颗齿轮：开着就回画布，关着就开设置。
-     走 insepace:route 而不是直接 showRoute——主题弹窗也听这个事件，切路由时一起收起 */
-  document.querySelector("#settings-btn")?.addEventListener("click", () => {
-    const onSettings = !document.querySelector("#settings-view").hidden;
-    window.dispatchEvent(new CustomEvent("inspace:route", { detail: onSettings ? "canvas" : "settings" }));
+  /* 齿轮开设置窗口，主题也在那里设置。窗口已经开着的话，Rust 那边只把它提到前面。 */
+  document.querySelector("#settings-btn")?.addEventListener("click", () => openSettings());
+
+  /* 主题的真源在这一侧：设置窗口点色卡发过来，这里套上并写回 localStorage；
+     主窗口自己因任何原因变主题（启动、MCP）时再推回设置窗口，让色卡高亮跟上。 */
+  listen("inspace:theme-set", (event) => {
+    const id = event.payload?.id;
+    if (id) setTheme(id);
+  }).catch(() => {});
+  listen("inspace:theme-query", () => {
+    emitTo("settings", "inspace:theme-sync", { id: currentTheme() }).catch(() => {});
+  }).catch(() => {});
+  document.addEventListener("themechange", () => {
+    emitTo("settings", "inspace:theme-sync", { id: currentTheme() }).catch(() => {});
   });
 
-  /* MCP 工具要切页时派发这个事件，和点齿轮走同一条路 */
+  /* 设置窗口换过数据目录：重新进一次画布，别把旧目录的内容留在屏幕上 */
+  listen("inspace:data-root-changed", () => {
+    window.dispatchEvent(new Event("data-root-changed"));
+  }).catch(() => {});
+
+  /* 画布内部的「确保在画布页」事件保留下来；settings 路由现在等于开设置窗口 */
   window.addEventListener("inspace:route", (event) => {
-    const route = event.detail;
-    if (route === "canvas" || route === "settings") showRoute(route);
+    if (event.detail === "settings") {
+      openSettings();
+      return;
+    }
+    if (event.detail === "canvas") {
+      routeReady = Promise.resolve(enterCanvas()).catch((error) =>
+        console.error(`进画布失败：${error}`),
+      );
+      window.__inspace = { route: "canvas", ready: routeReady };
+    }
   });
 
   /* 换过数据目录，画布得整组重读一遍。只换个指针的话，页面上还挂着
      旧目录那些内容，看着就像「新文件夹里也有数据」。 */
   window.addEventListener("data-root-changed", () => {
     leaveCanvas();
-    enterCanvas().catch((error) => console.error(`换目录后重进画布失败：${error}`));
+    routeReady = Promise.resolve(enterCanvas()).catch((error) =>
+      console.error(`换目录后重进画布失败：${error}`),
+    );
+    window.__inspace = { route: "canvas", ready: routeReady };
   });
 
   /* 屏蔽 WebView2 原生右键菜单（含文本选择/输入框的剪切粘贴菜单），
@@ -100,10 +100,9 @@ window.addEventListener("DOMContentLoaded", () => {
   appWindow.onResized(syncMaximizeIcon);
   syncMaximizeIcon();
 
-  initTheme();
   initCanvas();
   initCosmos();
-  initSettings();
-  showRoute("canvas");
   initAgent();
+  routeReady = Promise.resolve(enterCanvas()).catch((error) => console.error(`进画布失败：${error}`));
+  window.__inspace = { route: "canvas", ready: routeReady };
 });

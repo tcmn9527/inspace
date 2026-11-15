@@ -31,7 +31,15 @@ import {
   patchGenRun,
   syncGen,
 } from "./genpanel.js";
+import {
+  dropVideoRun,
+  isVideoBusy,
+  patchVideoRun,
+  syncVideoPanel,
+  videoRunOf,
+} from "./videopanel.js";
 import { openVideoHelp } from "./video-help.js";
+import { openImageCompare } from "./image-compare.js";
 import { createExporter, QUALITY, DEFAULT_QUALITY } from "./export.js";
 import { rasterize, toPngDataUrl } from "./raster.js";
 import * as store from "./canvas-store.js";
@@ -53,6 +61,8 @@ import {
   GEN_DEFAULT_WIDTH,
   GEN_MIN_HEIGHT,
   GEN_MIN_WIDTH,
+  GEN_VIDEO_MIN_HEIGHT,
+  GEN_VIDEO_MIN_WIDTH,
   GEN_MODES,
   GEN_MODE_LABELS,
   GEN_STEPS_MAX,
@@ -121,6 +131,7 @@ import {
   makeScene,
   makeText,
   makeVideo,
+  makeVideoGen,
   newId,
   normalizeConnectorPoints,
   normalizeHidden,
@@ -199,6 +210,8 @@ const CONNECTABLE = new Set([
   /* 生图面板也上名单：选中要看得见那四个圈的记号，
      而且它的输入图本来就靠连线进来（P2 才吃这条线） */
   "gen",
+  /* 视频面板同理：首帧图就是连进来的 */
+  "genvideo",
   /* 画面块：手绘的图和矢量画都能连给生图面板当参考图 */
   "picture",
 ]);
@@ -213,6 +226,7 @@ const RESIZE_MIN = {
   picture: { w: PICTURE_MIN_WIDTH, h: PICTURE_MIN_HEIGHT },
   scene: { w: SCENE_MIN_WIDTH, h: SCENE_MIN_HEIGHT },
   gen: { w: GEN_MIN_WIDTH, h: GEN_MIN_HEIGHT },
+  genvideo: { w: GEN_VIDEO_MIN_WIDTH, h: GEN_VIDEO_MIN_HEIGHT },
 };
 const NOTE_EDITOR_GUARDS = ".canvas-note-editor, .color-pop, #ctx-menu";
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
@@ -436,7 +450,11 @@ async function runExport(format, options = {}) {
     const saved = await store.exportSave(result.name, result.format, result.data);
     if (!saved) return;
     if (format === "wechat") {
-      showToast(`已导出公众号文章：${saved}（点「复制全文」，再粘到编辑器）`);
+      showToast(
+        result.layout
+          ? `已导出公众号长图页：${saved}（点「复制整版长图」，再粘到编辑器）`
+          : `已导出公众号文章：${saved}（点「复制全文」，再粘到编辑器）`,
+      );
       /* 顺手打开：省得用户再去文件夹里翻。打不开不影响导出结果 */
       try {
         await store.openExport(saved);
@@ -552,8 +570,6 @@ export function initCanvas() {
     zoomIn: document.querySelector("#canvas-zoom-in"),
     zoomOut: document.querySelector("#canvas-zoom-out"),
     exportBtn: document.querySelector("#canvas-export"),
-    empty: document.querySelector("#canvas-empty"),
-    create: document.querySelector("#canvas-create"),
     error: document.querySelector("#canvas-error"),
     copy: document.querySelector("#canvas-video-copy"),
     copyName: document.querySelector("#canvas-copy-name"),
@@ -580,7 +596,6 @@ export function initCanvas() {
     store.cancelVideoCopy(job).catch(() => {});
   });
 
-  ui.create.addEventListener("click", createFlow);
   initSpaceTree();
   bindZoomHold(ui.zoomIn, ZOOM_STEP);
   bindZoomHold(ui.zoomOut, -ZOOM_STEP);
@@ -611,6 +626,12 @@ export function initCanvas() {
       ui.zoomValue.value = zoomLabel();
       ui.zoomValue.blur();
     }
+  });
+
+  /* 左下角信息条：默认只报编号，点一下展开坐标和尺寸，再点收起 */
+  ui.metrics.addEventListener("click", () => {
+    metricsOpen = !metricsOpen;
+    updateMetrics();
   });
 
   ui.stage.addEventListener("pointerdown", onStagePointerDown);
@@ -690,6 +711,7 @@ export function initCanvas() {
   setupFileDrop();
   setupVideoCopyEvents();
   setupGenEvents();
+  setupVideoEvents();
   initMinimap({
     getCamera: () => (current ? current.camera : null),
     getStageSize: () => ({ w: ui.stage.clientWidth, h: ui.stage.clientHeight }),
@@ -717,6 +739,27 @@ export function initCanvas() {
       if (spaceId !== current?.meta?.id) await canvasAgent.spaceOpen(spaceId);
       if (itemId) focusBlockById(itemId);
     },
+  });
+
+  /* 生图面板的模型默认参数：启动读一次，设置窗口切模型时再刷 */
+  watchGenFamily();
+  watchGenApi();
+  refreshGenDefaults();
+
+  /* Ctrl 按住时画布进入框选态（光标变十字），松开恢复 */
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Control" && event.key !== "Meta") return;
+    ctrlHeld = true;
+    setMarqueeCursor();
+  });
+  window.addEventListener("keyup", (event) => {
+    if (event.key !== "Control" && event.key !== "Meta") return;
+    ctrlHeld = false;
+    setMarqueeCursor();
+  });
+  window.addEventListener("blur", () => {
+    ctrlHeld = false;
+    setMarqueeCursor();
   });
 }
 
@@ -1019,7 +1062,6 @@ function pauseMedia() {
 function updateChrome() {
   const hasCanvas = Boolean(current);
   ui.page.classList.toggle("no-canvas", !hasCanvas);
-  ui.empty.hidden = hasCanvas;
   renderTree();
   if (!hasCanvas) {
     ui.world.textContent = "";
@@ -1054,10 +1096,6 @@ function showEmpty() {
   mediaMissing = new Set();
   updateChrome();
   updateMetrics();
-}
-
-async function createFlow() {
-  await createFlowIn(null);
 }
 
 /* ---------- 左侧画布树 ---------- */
@@ -1495,9 +1533,17 @@ function toolMenuEntries() {
       children: [
         { label: "文生图", onClick: () => armAndInsertGen("t2i") },
         { label: "图生图", onClick: () => armAndInsertGen("i2i") },
+        { label: "参考图编辑", onClick: () => armAndInsertGen("edit") },
         { label: "图片局部重绘", onClick: () => armAndInsertGen("inpaint") },
         { label: "图片高清放大", onClick: () => armAndInsertGen("upscale") },
       ],
+    },
+    {
+      label: "AI 视频",
+      onClick: () => {
+        dropTool();
+        insertVideoPanel();
+      },
     },
   ];
 }
@@ -1521,6 +1567,70 @@ function setTool(name, keepSelection = false) {
   if (ui.toolIcon) ui.toolIcon.innerHTML = (armed && TOOL_ICONS[name]) || toolboxMarkup;
   ui.stage.dataset.tool = name;
   if (name !== "select" && !keepSelection) select(null);
+  setMarqueeCursor();
+}
+
+/* Ctrl 按住 = 框选：光标换成十字，拖出矩形松手把相交的块加进选择。
+   输入框里的 Ctrl（选字/复制）不归它管，按下走原有输入逻辑。 */
+let ctrlHeld = false;
+let marqueeEl = null;
+
+function setMarqueeCursor() {
+  if (!ui?.stage) return;
+  ui.stage.classList.toggle("is-marquee-ready", ctrlHeld && tool === "select");
+}
+
+function beginMarquee(event, clickId) {
+  const box = document.createElement("div");
+  box.className = "canvas-marquee";
+  box.hidden = true;
+  document.body.append(box);
+  marqueeEl = box;
+  return {
+    kind: "marquee",
+    startClient: { x: event.clientX, y: event.clientY },
+    clickId,
+    moved: false,
+  };
+}
+
+function updateMarquee(dragState, clientX, clientY) {
+  if (!marqueeEl) return;
+  const left = Math.min(dragState.startClient.x, clientX);
+  const top = Math.min(dragState.startClient.y, clientY);
+  const width = Math.abs(clientX - dragState.startClient.x);
+  const height = Math.abs(clientY - dragState.startClient.y);
+  marqueeEl.hidden = false;
+  marqueeEl.style.left = `${left}px`;
+  marqueeEl.style.top = `${top}px`;
+  marqueeEl.style.width = `${width}px`;
+  marqueeEl.style.height = `${height}px`;
+  dragState.rect = { left, top, right: left + width, bottom: top + height };
+}
+
+function finishMarquee(dragState) {
+  marqueeEl?.remove();
+  marqueeEl = null;
+  if (!dragState.moved) {
+    /* 没拖动就是一次 Ctrl+点击：点到块加选，点空白清空 */
+    if (dragState.clickId && findItem(dragState.clickId)) select(dragState.clickId, true);
+    else select(null);
+    return;
+  }
+  const rect = dragState.rect;
+  if (!rect || !current) return;
+  const hits = [];
+  for (const item of current.items) {
+    if (item.type === "connector") continue;
+    const el = itemEls.get(item.id);
+    if (!el) continue;
+    const box = el.getBoundingClientRect();
+    if (box.right < rect.left || box.left > rect.right || box.bottom < rect.top || box.top > rect.bottom) {
+      continue;
+    }
+    hits.push(item.id);
+  }
+  for (const id of hits) select(id, true);
 }
 
 /* 画图工具是一次性的：这一按（或这一次操作）没能真的起画，就把选中态交回第一个按钮，
@@ -1895,6 +2005,7 @@ function addItemElement(item) {
   if (item.type === "note") hydrateNoteImages(item, el);
   if (item.type === "picture") attachPictureTools(el, item);
   if (item.type === "gen") attachGenPanel(el, item);
+  if (item.type === "genvideo") attachVideoPanel(el, item);
   if (item.type === "product") attachProductCard(el, item);
   if (item.type === "quote") {
     attachQuoteCard(el, item);
@@ -1986,8 +2097,11 @@ function loneSelected() {
 /* 锁定的块在左下角信息条的 #N 前面挂一枚小锁；非锁定不挂 */
 const LOCK_BADGE_SVG = `<svg class="canvas-metrics-lock" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.3" y="5.3" width="7.4" height="5.4" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M4.1 5.3V4a1.9 1.9 0 0 1 3.8 0v1.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
 
-/* 左下角信息条：选中谁就报谁的 (X, Y) 和 [W, H]，多选取整组的外接框。
-   连线没有自己的位置，单独选中它时这条不出现。 */
+/* 左下角信息条：选中谁就报谁的编号；(X, Y) 和 [W, H] 点一下才展开，再点收起。
+   多选取整组的外接框，收起时只报块数。连线没有自己的位置，单独选中它时这条不出现。 */
+let metricsOpen = false;
+let metricsSignature = "";
+
 function updateMetrics() {
   if (!ui?.metrics) return;
   let left = Infinity;
@@ -2007,13 +2121,23 @@ function updateMetrics() {
   const shown = Number.isFinite(left);
   ui.metrics.hidden = !shown;
   if (!shown) return;
+  /* 换了一批选中就回到收起态；拖动同一批时展开状态保持 */
+  const signature = [...selectedIds].sort().join("|");
+  if (signature !== metricsSignature) {
+    metricsSignature = signature;
+    metricsOpen = false;
+  }
   const count = selectedIds.size > 1 ? ` · ${selectedIds.size} 块` : "";
   const single = selectedIds.size === 1 ? findItem([...selectedIds][0]) : null;
   const lock = single?.locked ? LOCK_BADGE_SVG : "";
-  const seq = single && single.type !== "connector" && single.seq ? `#${single.seq} · ` : "";
+  const seq = single && single.type !== "connector" && single.seq ? `#${single.seq}` : "";
   const pos = `(${Math.round(left)}, ${Math.round(top)})`;
   const size = `[${Math.round(right - left)}, ${Math.round(bottom - top)}]`;
-  ui.metrics.innerHTML = `${lock}${seq}${pos} ${size}${count}`;
+  if (!metricsOpen) {
+    ui.metrics.innerHTML = `${lock}${seq || (single ? size : `${selectedIds.size} 块`)}`;
+    return;
+  }
+  ui.metrics.innerHTML = `${lock}${seq ? `${seq} · ` : ""}${pos} ${size}${count}`;
 }
 
 function updateSelection() {
@@ -2170,6 +2294,11 @@ function onStagePointerDown(e) {
     dropTool();
     return;
   }
+  /* 左下角信息条自己处理点击（展开/收起），别当成点空白清选择 */
+  if (e.target.closest?.("#canvas-metrics")) {
+    dropTool();
+    return;
+  }
   /* 回到画布上操作，方向键就不再是挪视野 */
   blurMinimapFocus();
   /* 连线文字的输入框自己收指针：选字、挪光标，不是平移画布 */
@@ -2201,6 +2330,13 @@ function onStagePointerDown(e) {
       return;
     }
     commitEditing();
+  }
+
+  /* Ctrl/⌘ 按住时进入框选：起点在块上或空白都一样，拖动拉框；不拖仍是 Ctrl 点击加选 */
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && tool === "select") {
+    e.preventDefault();
+    drag = beginMarquee(e, target?.dataset.id || null);
+    return;
   }
 
   if (!target) {
@@ -2963,6 +3099,15 @@ function onWindowPointerMove(e) {
   if (!active || !drag || !current) return;
 
   /* 平移用的是屏幕坐标，没有世界坐标起点；先处理，别去读 drag.start */
+  if (drag.kind === "marquee") {
+    const dx = e.clientX - drag.startClient.x;
+    const dy = e.clientY - drag.startClient.y;
+    if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    drag.moved = true;
+    updateMarquee(drag, e.clientX, e.clientY);
+    return;
+  }
+
   if (drag.kind === "pan") {
     const dx = e.clientX - drag.startClient.x;
     const dy = e.clientY - drag.startClient.y;
@@ -3163,6 +3308,11 @@ function onWindowPointerMove(e) {
   /* 书页钉在起始尺寸上，容器的真实尺寸才不会把它撑到掉帧；拉满靠 transform */
   if (drag.page) pinEbookPage(drag.page);
   syncItemElement(el, item);
+  /* 生图面板拉过高度：记住这是手动尺寸，提示词超出时在框里滚，不再自动长高 */
+  if (item.type === "gen") {
+    el.dataset.userResized = "1";
+    fitGenPrompt(item.id, el.querySelector(".canvas-gen-prompt"), false);
+  }
   if (drag.page) stretchEbookPage(drag.page);
   if (item.type === "text") {
     item.h = el.offsetHeight;
@@ -3210,6 +3360,10 @@ function settlePointerUp(e) {
     if (el) syncItemElement(el, item);
   }
 
+  if (finished.kind === "marquee") {
+    finishMarquee(finished);
+    return;
+  }
   if (finished.kind === "pan") {
     if (finished.moved) scheduleCameraSave();
     return;
@@ -3598,6 +3752,17 @@ function setConnectorBend(item, on) {
 
 function onStageDoubleClick(e) {
   if (!active || !current) return;
+  /* Ctrl+双击：给这块上锁/解锁。锁住的块也吃这一下，不然只能用右上角那个热区 */
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const hit = e.target.closest?.(".canvas-item");
+    const hitItem = findItem(hit?.dataset.id);
+    if (hitItem && hitItem.type !== "connector") {
+      e.preventDefault();
+      e.stopPropagation();
+      setLocked(hitItem, !hitItem.locked);
+      return;
+    }
+  }
   /* 双击锁点：解除锁定。锁住的块不吃别的双击，所以这条放在最前 */
   const lockDot = e.target.closest?.(".canvas-lock-dot");
   if (lockDot) {
@@ -3606,7 +3771,6 @@ function onStageDoubleClick(e) {
     if (lockedItem?.locked) {
       e.preventDefault();
       setLocked(lockedItem, false);
-      showToast("已解锁");
     }
     return;
   }
@@ -3660,7 +3824,12 @@ function openImageExternally(item) {
 }
 
 function onStageContextMenu(e) {
-  if (!active || !current) return;
+  if (!active) return;
+  /* 还没有画布时画布区域就是空的：右键什么都不给，创建入口只在左侧画布树 */
+  if (!current) {
+    e.preventDefault();
+    return;
+  }
   /* 全屏时也不挡：菜单会把浮层搬进全屏元素，才看得见「恢复」和音量 */
   if (edgeLabelEditor && e.target === edgeLabelEditor.input) {
     e.preventDefault();
@@ -3686,7 +3855,11 @@ function onStageContextMenu(e) {
   if (selectedIds.size > 1 && selectedIds.has(item.id)) {
     const ids = [...selectedIds];
     const allLocked = ids.every((id) => findItem(id)?.locked);
-    const entries = [
+    const entries = [];
+    /* 多选里正好两张能看的图（图片块/生图面板）：菜单顶部给「对比」 */
+    const compare = compareImagesEntry(item);
+    if (compare) entries.push(compare, "-");
+    entries.push(
       {
         label: "复制",
         onClick: () => {
@@ -3707,7 +3880,7 @@ function onStageContextMenu(e) {
           { label: "底对齐", onClick: () => alignSelected("bottom") },
         ],
       },
-    ];
+    );
     /* 两块只能对齐，散不开：分布要三块以上才有中间那几块可挪 */
     if (ids.length >= 3) {
       entries.push({
@@ -3926,6 +4099,40 @@ function openItemMenu(item, x, y) {
   openMenu(x, y, itemMenuEntries(item, x, y));
 }
 
+/* 选中里恰好有两张能看的图（图片块或有图的生图面板）时，菜单才出现「对比」：
+   临时叠图看差异，不落画布。选中里顺带带了文字块/连线也不影响。 */
+function compareImagesEntry(item) {
+  const images = [...selectedIds]
+    .map((id) => findItem(id))
+    .filter((block) => block && (block.type === "image" || block.type === "gen") && block.src);
+  if (images.length !== 2) return null;
+  if (!images.includes(item)) return null;
+  return { label: "对比", onClick: () => void openCompareFor(images) };
+}
+
+async function openCompareFor(pair) {
+  if (!current) return;
+  const canvasId = current.meta.id;
+  try {
+    const urls = await Promise.all(
+      pair.map(async (block) => {
+        const cached = imageCache.get(block.src);
+        if (cached) return cached;
+        const url = await store
+          .imageUrl(canvasId, block.src, Boolean(block.linked))
+          .catch(() => "");
+        if (url) imageCache.set(block.src, url);
+        return url;
+      }),
+    );
+    if (!current || current.meta.id !== canvasId) return;
+    if (urls.some((url) => !url)) throw new Error("图片读不出来，可能文件已经不在画布里了");
+    openImageCompare({ a: urls[0], b: urls[1] });
+  } catch (error) {
+    showError(error);
+  }
+}
+
 /* 一块的右键菜单内容。单独拆出来是为了「选择下层」：
    鼠标停在某一层上时，直接把这一层的菜单当子菜单挂出去。 */
 function itemMenuEntries(item, x, y, depth = 0) {
@@ -3939,6 +4146,9 @@ function itemMenuEntries(item, x, y, depth = 0) {
     if (revealTarget(item)) {
       entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
     }
+    /* 对比是只读查看，锁着也允许 */
+    const compare = compareImagesEntry(item);
+    if (compare) entries.push(compare);
     return entries;
   }
   const entries = [];
@@ -4166,7 +4376,10 @@ function itemMenuEntries(item, x, y, depth = 0) {
   if (item.type !== "connector") {
     const below = selectBelowEntry(item, x, y, depth);
     if (below) entries.push(below);
-    entries.push({ label: "层级", children: layerMenuItems(item) });
+    /* 图片块和生图面板：选中里恰好有两张图时给一个「对比」 */
+  const compare = compareImagesEntry(item);
+  if (compare) entries.push(compare);
+  entries.push({ label: "层级", children: layerMenuItems(item) });
     entries.push({
       label: "复制",
       onClick: () => {
@@ -4814,6 +5027,7 @@ function genContentOf(item) {
     cfg: item.cfg,
     seed: item.seed,
     mode: item.mode,
+    model: item.model || "",
     strength: item.strength,
   };
 }
@@ -4898,11 +5112,12 @@ async function loadBlockContents() {
               item.negative = file.negative;
               item.imageW = snapGenSize(file.imageW);
               item.imageH = snapGenSize(file.imageH);
-              item.steps = Math.min(GEN_STEPS_MAX, Math.max(GEN_STEPS_MIN, file.steps));
-              item.cfg = Math.min(GEN_CFG_MAX, Math.max(GEN_CFG_MIN, file.cfg));
+              item.steps = Math.min(GEN_STEPS_MAX, Math.max(0, file.steps));
+              item.cfg = Math.min(GEN_CFG_MAX, Math.max(0, file.cfg));
               item.seed = Number.isFinite(file.seed) && file.seed >= -1 ? Math.trunc(file.seed) : -1;
               /* 老文件里没有这两个字段：按「看连线自己定」和上游默认改动幅度接上 */
               item.mode = GEN_MODES.includes(file.mode) ? file.mode : "auto";
+              item.model = file.model === "qwen21" || file.model === "h3image" ? file.model : "";
               item.strength = Number.isFinite(file.strength)
                 ? Math.min(1, Math.max(0, file.strength))
                 : item.strength;
@@ -5042,24 +5257,247 @@ async function refreshGenMaskBase(item) {
 
 /* 提示词框跟着内容长高、不出滚动条。只按「框这次长了多少」调整块高：
    用户拖角改块高、agent 改块高都不受影响，刷新多少次也不会把尺寸弹回去 */
+/* 取景窗的地板（和 CSS .canvas-gen-stage 的 min-height 对齐）：
+   面板再矮也要给图留这么高，提示词在它自己的框里滚。 */
+const GEN_STAGE_MIN_HEIGHT = 160;
+
 function fitGenPrompt(itemId, prompt, grow = false) {
   const item = findItem(itemId);
   const el = itemEls.get(itemId);
   if (!item || !prompt || !el) return;
   /* 提示词框没显示（高清放大那档）：不参与量高，否则 0 和 56 的差会把块越撑越高 */
   if (prompt.hidden || prompt.offsetParent === null) return;
-  const before = prompt.offsetHeight;
+  const bar = el.querySelector(".canvas-gen-bar");
   /* 先压到 0 再读 scrollHeight：textarea 的 height:auto 只会退回 rows 行，
      不这么量出来的是三行的高度，长内容照样被裁 */
   prompt.style.height = "0px";
   const want = Math.max(56, prompt.scrollHeight);
-  prompt.style.height = `${want}px`;
-  if (!grow) return;
-  const delta = want - before;
-  if (!delta) return;
-  item.h = Math.max(GEN_MIN_HEIGHT, item.h + delta);
-  syncItemElement(el, item);
+  const other = bar ? bar.offsetHeight - prompt.offsetHeight : 0;
+  const room = () => Math.max(56, item.h - GEN_STAGE_MIN_HEIGHT - other);
+  /* 手动拉过高度之后就不再按提示词自动长高——用户缩矮时提示词滚动，图不缩没 */
+  const manual = el.dataset.userResized === "1";
+  if (grow && !manual && want > room()) {
+    item.h += want - room();
+    syncItemElement(el, item);
+    scheduleItemsSave();
+  }
+  const height = Math.min(want, room());
+  prompt.style.height = `${height}px`;
+  prompt.style.overflowY = want > height ? "auto" : "hidden";
+}
+
+/* ---------- 生图面板的参数默认值（每模型一套） ---------- */
+
+const genDefaultsCache = new Map();
+let genFamily = "qwen21";
+/* 生图引擎走哪条路：local 用本地权重，api 发远端。API 模式下本地参数不生效，
+   面板上要撤掉它们；尺寸仍然有用。 */
+let genEngine = { provider: "local", apiModel: "" };
+
+async function loadGenDefaults(family) {
+  const value = await store.genDefaults(family).catch(() => null);
+  if (value) genDefaultsCache.set(family, value);
+  return value;
+}
+
+async function refreshGenDefaults() {
+  const status = await store.genStatus().catch(() => null);
+  if (status?.family) genFamily = status.family;
+  if (status?.provider) {
+    genEngine = { provider: status.provider, apiModel: status.apiModel || "" };
+  }
+  if (status?.defaults) genDefaultsCache.set(genFamily, status.defaults);
+  const other = genFamily === "qwen21" ? "h3image" : "qwen21";
+  loadGenDefaults(other);
+}
+
+/* 新建面板：把当前模型那套默认参数带上，用户不用每块重新设。 */
+function applyGenDefaultsToItem(item) {
+  const family = genFamily;
+  const value = genDefaultsCache.get(family);
+  item.model = family;
+  if (!value) return item;
+  item.imageW = value.width;
+  item.imageH = value.height;
+  item.steps = value.steps;
+  item.cfg = value.cfg;
+  item.seed = value.seed;
+  item.mode = value.mode;
+  item.strength = value.strength;
+  item.negative = value.negative || "";
+  item.refine = Boolean(value.refine);
+  return item;
+}
+
+/* 面板上改的值同时记成该模型的新建默认（其它已有面板不动）。 */
+let genDefaultsTimer = 0;
+function saveGenDefaults(item) {
+  clearTimeout(genDefaultsTimer);
+  genDefaultsTimer = setTimeout(() => {
+    const family = item.model === "h3image" || item.model === "qwen21" ? item.model : genFamily;
+    const fallback = genDefaultsCache.get(family) || {};
+    const value = {
+      width: item.imageW,
+      height: item.imageH,
+      steps: item.steps > 0 ? item.steps : fallback.steps ?? 20,
+      cfg: item.cfg > 0 ? item.cfg : fallback.cfg ?? 6,
+      seed: item.seed,
+      mode: item.mode,
+      strength: item.strength,
+      negative: item.negative || "",
+      refine: Boolean(item.refine),
+    };
+    genDefaultsCache.set(family, value);
+    store.genDefaultsSet(value, family).catch(() => {});
+  }, 400);
+}
+
+/* 面板里显示的实际生效值：0 是「跟模型走」，用该模型默认补齐。 */
+function genEffective(item, field, fallback) {
+  const value = item[field];
+  if (field === "steps" || field === "cfg") return value > 0 ? value : fallback;
+  return value;
+}
+
+function paintGenMore(item, el) {
+  const more = el.querySelector(".canvas-gen-more");
+  if (!more) return;
+  /* 走 API：本地参数（模型档位、步数、CFG、种子、负向、改动幅度）整行撤掉，
+     只留尺寸；顶部一行说清这一张走的是哪个 API 模型。 */
+  const usingApi = genEngine.provider === "api";
+  more.classList.toggle("is-api", usingApi);
+  const apiNote = more.querySelector(".canvas-gen-more-api");
+  if (apiNote) {
+    apiNote.hidden = !usingApi;
+    apiNote.textContent = usingApi
+      ? `走 API${genEngine.apiModel ? `（${genEngine.apiModel}）` : ""}：只发提示词、尺寸和参考图`
+      : "";
+  }
+  const family = item.model === "h3image" || item.model === "qwen21" ? item.model : genFamily;
+  const fallback = genDefaultsCache.get(family) || {};
+  const set = (field, value) => {
+    const control = more.querySelector(`[data-gen-field="${field}"]`);
+    if (!control || document.activeElement === control) return;
+    if (control.type === "checkbox") control.checked = Boolean(value);
+    else control.value = value ?? "";
+  };
+  set("model", family);
+  set("imageW", item.imageW);
+  set("imageH", item.imageH);
+  set("steps", genEffective(item, "steps", fallback.steps ?? 20));
+  set("cfg", genEffective(item, "cfg", fallback.cfg ?? 6));
+  set("seed", item.seed);
+  set("strength", item.strength);
+  set("negative", item.negative || "");
+  /* 改动幅度只对图生图/局部重绘有意义：其它模式（含 H3 的全部模式）这一行不摆 */
+  const effectiveMode = genModeFor(item, genInputItems(item).length);
+  const strengthRow = more.querySelector('[data-gen-field="strength"]')?.closest(".canvas-gen-more-row");
+  if (strengthRow) {
+    strengthRow.hidden = effectiveMode !== "i2i" && effectiveMode !== "inpaint";
+  }
+}
+
+/* 常用尺寸：宽高都是 32 的倍数；超出当前模型边长上限的项在菜单里自动过滤 */
+const GEN_SIZE_PRESETS = [
+  {
+    label: "手机壁纸",
+    items: [
+      { label: "1080p 手机 · 1088×1920", w: 1088, h: 1920 },
+      { label: "2K 手机 · 1440×2560", w: 1440, h: 2560 },
+      { label: "16MP 竖屏 · 2304×4096", w: 2304, h: 4096 },
+    ],
+  },
+  {
+    label: "电脑壁纸",
+    items: [
+      { label: "1080p · 1920×1088", w: 1920, h: 1088 },
+      { label: "2K · 2560×1440", w: 2560, h: 1440 },
+      { label: "16MP 横屏 · 4096×2304", w: 4096, h: 2304 },
+    ],
+  },
+  {
+    label: "方形",
+    items: [
+      { label: "1024 × 1024", w: 1024, h: 1024 },
+      { label: "2048 × 2048", w: 2048, h: 2048 },
+      { label: "16MP · 4096×4096", w: 4096, h: 4096 },
+    ],
+  },
+  {
+    label: "海报 / 竖版",
+    items: [
+      { label: "2:3 · 1024×1536", w: 1024, h: 1536 },
+      { label: "2:3 大图 · 2048×3072", w: 2048, h: 3072 },
+      { label: "4:5 · 1024×1280", w: 1024, h: 1280 },
+    ],
+  },
+  {
+    label: "超宽",
+    items: [
+      { label: "21:9 · 2560×1088", w: 2560, h: 1088 },
+      { label: "21:9 大图 · 4096×1728", w: 4096, h: 1728 },
+    ],
+  },
+];
+
+function applySizePreset(item, preset) {
+  if (!applyGenFields(item, { imageW: preset.w, imageH: preset.h })) return;
+  persistGen(item);
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
   scheduleItemsSave();
+  refreshGenPanel(item.id);
+  saveGenDefaults(item);
+}
+
+/* 面板里换模型：块上那套参数跟着换成目标模型的默认值。 */
+async function switchGenFamily(item, family) {
+  let value = genDefaultsCache.get(family);
+  if (!value) value = await loadGenDefaults(family);
+  const patch = { model: family };
+  if (value) {
+    patch.imageW = value.width;
+    patch.imageH = value.height;
+    patch.steps = value.steps;
+    patch.cfg = value.cfg;
+    patch.seed = value.seed;
+    patch.mode = value.mode;
+    patch.strength = value.strength;
+    patch.negative = value.negative || "";
+    patch.refine = Boolean(value.refine);
+  }
+  if (!applyGenFields(item, patch)) return;
+  persistGen(item);
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  scheduleItemsSave();
+  refreshGenPanel(item.id);
+}
+
+let genFamilyWatchBound = false;
+function watchGenFamily() {
+  if (genFamilyWatchBound) return;
+  const listen = window.__TAURI__?.event?.listen;
+  if (typeof listen !== "function") return;
+  genFamilyWatchBound = true;
+  listen("inspace:gen-family", (event) => {
+    const next = event.payload?.family;
+    if (next !== "qwen21" && next !== "h3image") return;
+    genFamily = next;
+    if (!genDefaultsCache.has(next)) loadGenDefaults(next);
+  }).catch(() => {});
+}
+
+/* 设置里切了「本地 / API」：重读状态，再把每块面板的档位行和更多设置刷一遍。 */
+let genApiWatchBound = false;
+function watchGenApi() {
+  if (genApiWatchBound) return;
+  const listen = window.__TAURI__?.event?.listen;
+  if (typeof listen !== "function") return;
+  genApiWatchBound = true;
+  listen("inspace:gen-api", () => {
+    void refreshGenDefaults().then(() => refreshGenFeeds());
+  }).catch(() => {});
 }
 
 function attachGenPanel(el, item) {
@@ -5134,11 +5572,128 @@ function attachGenPanel(el, item) {
     scheduleItemsSave();
     refreshGenPanel(target.id);
   });
+  /* 更多设置：展开/收起、改参数、换模型、恢复默认 */
+  const more = el.querySelector(".canvas-gen-more");
+  const moreToggle = el.querySelector(".canvas-gen-more-toggle");
+  if (more && moreToggle) {
+    moreToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const target = findItem(item.id);
+      const targetEl = itemEls.get(item.id);
+      if (!target || !targetEl) return;
+      const box = targetEl.querySelector(".canvas-gen-more");
+      if (!box) return;
+      const open = box.hidden;
+      box.hidden = !open;
+      moreToggle.classList.toggle("is-open", open);
+      moreToggle.textContent = open ? "隐藏更多设置" : "更多设置";
+      moreToggle.title = open
+        ? "收起尺寸、步数、CFG、种子、模式等参数"
+        : "展开尺寸、步数、CFG、种子、模式等参数";
+      const resetButton = targetEl.querySelector(".canvas-gen-more-reset");
+      if (resetButton) resetButton.hidden = !open;
+      if (open) {
+        box.dataset.height = String(box.offsetHeight + 6);
+        targetEl.dataset.openHeight = String(target.h);
+        target.h = Math.max(GEN_MIN_HEIGHT, target.h + (Number(box.dataset.height) || 0));
+      } else {
+        const before = Number(targetEl.dataset.openHeight);
+        target.h = Number.isFinite(before)
+          ? before
+          : Math.max(GEN_MIN_HEIGHT, target.h - (Number(box.dataset.height) || 0));
+        delete targetEl.dataset.openHeight;
+      }
+      /* 展开只是看参数，不把临时高度写进画布文件 */
+      syncItemElement(targetEl, target);
+      /* 块高变了，选中框和端口要立刻跟到新边缘，不能停在展开前的位置 */
+      updateSelection();
+      updatePorts();
+      paintGenMore(target, targetEl);
+    });
+    const applyMore = (event) => {
+      const control = event.target.closest?.("[data-gen-field]");
+      if (!control) return;
+      event.stopPropagation();
+      const target = findItem(item.id);
+      if (!target || target.locked) return;
+      const field = control.dataset.genField;
+      if (field === "model") {
+        switchGenFamily(target, control.value);
+        return;
+      }
+      const value = control.type === "checkbox" ? control.checked : control.value;
+      if (!applyGenFields(target, { [field]: value })) return;
+      persistGen(target);
+      const targetEl = itemEls.get(target.id);
+      if (targetEl) syncItemElement(targetEl, target);
+      scheduleItemsSave();
+      refreshGenPanel(target.id);
+      saveGenDefaults(target);
+    };
+    more.addEventListener("change", applyMore);
+    /* 输入框敲一下就生效，不用等失焦：面板上没有「保存」 */
+    more.addEventListener("input", (event) => {
+      const control = event.target.closest?.("[data-gen-field]");
+      if (!control || control.tagName === "SELECT" || control.type === "checkbox") return;
+      applyMore(event);
+    });
+    const reset = el.querySelector(".canvas-gen-more-reset");
+    reset?.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const target = findItem(item.id);
+      if (!target || target.locked) return;
+      const family = target.model === "h3image" || target.model === "qwen21" ? target.model : genFamily;
+      const value = await store.genDefaultsReset(family).catch((error) => {
+        showError(error);
+        return null;
+      });
+      if (!value) return;
+      genDefaultsCache.set(family, value);
+      applyGenFields(target, {
+        imageW: value.width,
+        imageH: value.height,
+        steps: value.steps,
+        cfg: value.cfg,
+        seed: value.seed,
+        mode: value.mode,
+        strength: value.strength,
+        negative: value.negative || "",
+        refine: Boolean(value.refine),
+      });
+      persistGen(target);
+      const targetEl = itemEls.get(target.id);
+      if (targetEl) syncItemElement(targetEl, target);
+      scheduleItemsSave();
+      refreshGenPanel(target.id);
+    });
+    /* 常用尺寸：按当前模型能出的边长过滤，选完直接写块并记成默认 */
+    const sizePreset = el.querySelector(".canvas-gen-more-size-preset");
+    sizePreset?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const target = findItem(item.id);
+      if (!target || target.locked) return;
+      const family = target.model === "h3image" || target.model === "qwen21" ? target.model : genFamily;
+      const maxSide = family === "h3image" ? 4096 : 2048;
+      const entries = GEN_SIZE_PRESETS.map((group) => ({
+        label: group.label,
+        children: group.items
+          .filter((preset) => preset.w <= maxSide && preset.h <= maxSide)
+          .map((preset) => ({
+            label: preset.label,
+            onClick: () => applySizePreset(target, preset),
+          })),
+      })).filter((group) => group.children.length);
+      if (!entries.length) return;
+      const rect = sizePreset.getBoundingClientRect();
+      openMenu(rect.left, rect.bottom + 6, entries, { kind: "gen-size" });
+    });
+  }
   /* 局部重绘面板一建好就进涂抹态：拉开就是要涂的 */
   if (genModeFor(item, genInputItems(item).length) === "inpaint") {
     applyGenMaskMode(el, item.id, true);
   }
   syncGen(el, item, genFeedOf(item));
+  paintGenMore(item, el);
   fitGenPrompt(item.id, prompt);
   void refreshGenMaskBase(item);
 }
@@ -5148,6 +5703,7 @@ function refreshGenPanel(id) {
   const el = itemEls.get(id);
   if (!item || !el) return;
   syncGen(el, item, genFeedOf(item));
+  paintGenMore(item, el);
   /* 程序换掉提示词（agent 改词）后，框和块高都要跟着变；
      加载画布走的是 attachGenPanel 那一路，不会从这里重复加高 */
   fitGenPrompt(id, el.querySelector(".canvas-gen-prompt"), true);
@@ -5158,9 +5714,14 @@ function refreshGenPanel(id) {
 function genFeedOf(item) {
   const sources = genInputItems(item);
   const mode = genModeFor(item, sources.length);
+  const base = GEN_MODE_LABELS[mode] || mode;
+  const label =
+    genEngine.provider === "api"
+      ? `${base} · API${genEngine.apiModel ? ` ${genEngine.apiModel}` : ""}`
+      : base;
   return {
     mode,
-    label: GEN_MODE_LABELS[mode] || mode,
+    label,
     count: sources.length,
     baseUrl: genMaskBases.get(item.id) || "",
   };
@@ -5171,6 +5732,7 @@ function refreshGenFeeds() {
   for (const item of current.items) {
     if (item.type === "gen") void refreshGenMaskBase(item);
     if (item.type === "gen") refreshGenPanel(item.id);
+    if (item.type === "genvideo") refreshVideoPanel(item.id);
   }
 }
 
@@ -5284,6 +5846,7 @@ async function startGenRun(item) {
       cfg: item.cfg,
       seed: item.seed,
       mode,
+      family: item.model || undefined,
       strength: item.strength,
       images,
     };
@@ -5309,6 +5872,37 @@ async function stopGen(id) {
   await store.genCancel().catch(() => {});
 }
 
+/* 落块时右边放不下：把面板右侧、和新图同一水平线的块整体右移，给新图片留出位置。
+   只看块的起点在不在面板右边缘之外；垂直不重叠的块属于别的行，不动。
+   连线跟着端点重算，不参与平移。 */
+function shiftBlocksForPlace(panel, x, y, width, height) {
+  if (!current) return;
+  const right = x + width + GEN_PLACE_GAP;
+  const threshold = panel.x + panel.w;
+  const blocks = current.items.filter(
+    (other) =>
+      other !== panel &&
+      other.type !== "connector" &&
+      Number.isFinite(other.x) &&
+      other.x >= threshold &&
+      other.y < y + height &&
+      other.y + (other.h || 0) > y,
+  );
+  if (!blocks.length) return;
+  const nearest = Math.min(...blocks.map((block) => block.x));
+  if (right <= nearest) return;
+  const delta = right - nearest;
+  for (const block of blocks) {
+    block.x += delta;
+    const el = itemEls.get(block.id);
+    if (el) syncItemElement(el, block);
+  }
+  refreshConnectors();
+  updateSelection();
+  updatePorts();
+  scheduleItemsSave();
+}
+
 async function placeGenImage(id) {
   const item = findItem(id);
   const run = genRunOf(id);
@@ -5323,7 +5917,9 @@ async function placeGenImage(id) {
     imageCache.set(rel, url || null);
     const size = await imageSize(url || run.imageUrl);
     const fit = fitImageSize(size.width, size.height);
-    return placeBlock(makeImage(item.x + item.w + GEN_PLACE_GAP, item.y, fit.w, fit.h, rel));
+    const placeX = item.x + item.w + GEN_PLACE_GAP;
+    shiftBlocksForPlace(item, placeX, item.y, fit.w, fit.h);
+    return placeBlock(makeImage(placeX, item.y, fit.w, fit.h, rel));
   } catch (error) {
     showError(error);
     return null;
@@ -5412,6 +6008,243 @@ function setupGenEvents() {
     keepLastGenImage(payload.block);
     refreshGenPanel(payload.block);
   });
+}
+
+/* 视频任务的回执：进度写进这一块的运行态，面板据此画「排队中/生成中」；
+   出片路径也在这里，点「落块」时从这儿取。 */
+function setupVideoEvents() {
+  const listen = window.__TAURI__?.event?.listen;
+  if (!listen) return;
+  const on = (name, handler) => {
+    Promise.resolve(listen(name, (event) => handler(event?.payload))).catch(() => {});
+  };
+  on("video-progress", (payload) => {
+    if (!payload?.block) return;
+    patchVideoRun(payload.block, {
+      phase: "running",
+      label: payload.label || "生成中",
+      waited: payload.waited || 0,
+    });
+    refreshVideoPanel(payload.block);
+  });
+  on("video-done", (payload) => {
+    if (!payload?.block) return;
+    patchVideoRun(payload.block, {
+      phase: "done",
+      path: payload.path || "",
+      seconds: payload.seconds || 0,
+      label: "",
+    });
+    refreshVideoPanel(payload.block);
+  });
+  on("video-failed", (payload) => {
+    if (!payload?.block) return;
+    patchVideoRun(payload.block, {
+      phase: payload.canceled ? "canceled" : "failed",
+      error: payload.error || "",
+      canceled: Boolean(payload.canceled),
+    });
+    refreshVideoPanel(payload.block);
+  });
+  /* 生成中每秒刷一遍面板：后端 5 秒才报一次，秒数不能让用户数着事件跳 */
+  setInterval(() => {
+    if (!current) return;
+    for (const item of current.items) {
+      if (item.type === "genvideo" && videoRunOf(item.id).phase === "running") {
+        refreshVideoPanel(item.id);
+      }
+    }
+  }, 1000);
+}
+
+/* ---------- 视频面板 ---------- */
+
+function videoFeedOf(item) {
+  return { count: genInputItems(item).length };
+}
+
+function refreshVideoPanel(id) {
+  const item = findItem(id);
+  const el = itemEls.get(id);
+  if (!item || !el) return;
+  syncVideoPanel(el, item, videoFeedOf(item));
+}
+
+/* 视频面板的常用档：时长按秒，尺寸按用户认得的 720p/1080p 命名，给的是真实像素 */
+const VIDEO_SECONDS_PRESETS = [4, 5, 6, 8, 10, 12];
+const VIDEO_SIZE_PRESETS = [
+  { label: "720p 横屏 · 1280×720", w: 1280, h: 720 },
+  { label: "1080p 横屏 · 1920×1080", w: 1920, h: 1080 },
+  { label: "720p 竖屏 · 720×1280", w: 720, h: 1280 },
+  { label: "1080p 竖屏 · 1080×1920", w: 1080, h: 1920 },
+  { label: "1:1 方形 · 1024×1024", w: 1024, h: 1024 },
+];
+
+function attachVideoPanel(el, item) {
+  const card = el.querySelector(".canvas-genvideo-card");
+  if (!card) return;
+  /* 输入框、下拉、按钮、播放器自己吃按下：其余地方留给拖整块 */
+  card.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("textarea, input, select, button, video")) e.stopPropagation();
+  });
+  const prompt = el.querySelector(".canvas-genvideo-prompt");
+  prompt.addEventListener("input", () => {
+    const target = findItem(item.id);
+    if (!target) return;
+    target.prompt = prompt.value.slice(0, GEN_TEXT_MAX);
+    scheduleItemsSave();
+  });
+  prompt.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    e.preventDefault();
+    runOrStopVideo(item.id);
+  });
+  el.querySelector(".canvas-genvideo-run").addEventListener("click", (e) => {
+    e.stopPropagation();
+    runOrStopVideo(item.id);
+  });
+  el.querySelector(".canvas-genvideo-place").addEventListener("click", (e) => {
+    e.stopPropagation();
+    void placeVideoBlock(item.id);
+  });
+  const controls = el.querySelector(".canvas-genvideo-controls");
+  const applyField = (control) => {
+    const target = findItem(item.id);
+    if (!target) return;
+    const value = Math.round(Number(control.value));
+    if (!Number.isFinite(value) || value <= 0) return;
+    if (control.dataset.videoField === "seconds") {
+      target.seconds = Math.min(60, value);
+    } else {
+      const even = Math.min(4096, value - (value % 2));
+      if (even < 64) return;
+      target[control.dataset.videoField] = even;
+    }
+    scheduleItemsSave();
+  };
+  controls.addEventListener("input", (e) => {
+    const control = e.target.closest?.("[data-video-field]");
+    if (control) applyField(control);
+  });
+  controls.addEventListener("change", (e) => {
+    const control = e.target.closest?.("[data-video-field]");
+    if (!control) return;
+    applyField(control);
+    refreshVideoPanel(item.id);
+  });
+  controls.addEventListener("click", (e) => {
+    const button = e.target.closest?.("[data-video-preset]");
+    if (!button) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const target = findItem(item.id);
+    if (!target || target.locked) return;
+    const kind = button.dataset.videoPreset;
+    const entries =
+      kind === "seconds"
+        ? VIDEO_SECONDS_PRESETS.map((value) => ({
+            label: `${value} 秒`,
+            onClick: () => {
+              const current = findItem(item.id);
+              if (!current) return;
+              current.seconds = value;
+              scheduleItemsSave();
+              refreshVideoPanel(current.id);
+            },
+          }))
+        : VIDEO_SIZE_PRESETS.map((preset) => ({
+            label: preset.label,
+            onClick: () => {
+              const current = findItem(item.id);
+              if (!current) return;
+              current.width = preset.w;
+              current.height = preset.h;
+              scheduleItemsSave();
+              refreshVideoPanel(current.id);
+            },
+          }));
+    const rect = button.getBoundingClientRect();
+    openMenu(rect.left, rect.bottom + 6, entries, { kind: "video-preset" });
+  });
+  syncVideoPanel(el, item, videoFeedOf(item));
+}
+
+function insertVideoPanel() {
+  if (!current) return;
+  const at = insertPoint(320, 360);
+  placeBlock(makeVideoGen(at.x, at.y));
+}
+
+function runOrStopVideo(id) {
+  const item = findItem(id);
+  if (!item || item.type !== "genvideo" || item.locked) return;
+  const run = videoRunOf(id);
+  if (run.phase === "running") {
+    void stopVideo(id);
+    return;
+  }
+  if (isVideoBusy()) return;
+  if (!(item.prompt || "").trim()) {
+    showError("先写一句提示词");
+    return;
+  }
+  patchVideoRun(id, {
+    phase: "running",
+    label: "提交中…",
+    startedAt: Date.now(),
+    path: "",
+    seconds: 0,
+    error: "",
+    canceled: false,
+  });
+  refreshVideoPanel(id);
+  void startVideoRun(item);
+}
+
+async function startVideoRun(item) {
+  const id = item.id;
+  try {
+    const sources = genInputItems(item);
+    /* 首帧一张就够：多张时按连线顺序取第一张 */
+    const image = sources.length ? await genInputPng(sources[0]) : "";
+    await store.genVideoStart({
+      block: id,
+      prompt: (item.prompt || "").trim(),
+      image: image || undefined,
+      seconds: item.seconds,
+      width: item.width,
+      height: item.height,
+    });
+  } catch (error) {
+    patchVideoRun(id, {
+      phase: "failed",
+      error: String(error?.message || error || "视频生成失败"),
+    });
+    refreshVideoPanel(id);
+  }
+}
+
+async function stopVideo(id) {
+  /* 点了就是不等了；后端那边只置标志位，平台任务照样跑完、费用照算 */
+  patchVideoRun(id, { phase: "canceled" });
+  refreshVideoPanel(id);
+  await store.genVideoCancel().catch(() => {});
+}
+
+/* 出片在缓存里；落块把它拷进画布 video/，新块自己带一份，面板接着改词重出。 */
+async function placeVideoBlock(id) {
+  const item = findItem(id);
+  if (!item || item.type !== "genvideo" || item.locked) return;
+  const run = videoRunOf(id);
+  if (!run.path || run.phase === "running") return;
+  const canvasId = current?.meta.id;
+  if (!canvasId) return;
+  const name = "AI 视频.mp4";
+  const rel = await copyIntoCanvas(canvasId, { path: run.path, name }, "video");
+  if (!rel || !current || current.meta.id !== canvasId) return;
+  const target = findItem(id);
+  if (!target) return;
+  placeBlock(makeVideo(target.x + target.w + GEN_PLACE_GAP, target.y, name, rel, false));
 }
 
 /* ---------- 画面块：右键菜单控件与手绘 ----------
@@ -6828,7 +7661,7 @@ async function pickAndInsert(pick) {
 function insertGenPanel(mode) {
   if (!current) return;
   const at = insertPoint(GEN_DEFAULT_WIDTH, GEN_DEFAULT_HEIGHT);
-  const item = makeGen(at.x, at.y);
+  const item = applyGenDefaultsToItem(makeGen(at.x, at.y));
   item.mode = mode;
   placeBlock(item);
 }
@@ -7953,6 +8786,15 @@ function onKeyDown(e) {
     pasteCopiedBlocks();
     return;
   }
+  /* Ctrl+L：锁/解锁选中的面板；都锁着就一起解开，否则一起锁上 */
+  if ((e.ctrlKey || e.metaKey) && (e.key === "l" || e.key === "L")) {
+    const ids = [...selectedIds].filter((id) => findItem(id)?.type !== "connector");
+    if (!ids.length) return;
+    e.preventDefault();
+    const allLocked = ids.every((id) => findItem(id)?.locked);
+    setLockedMany(ids, !allLocked);
+    return;
+  }
   if (NUDGE_KEYS[e.key] && selectedIds.size && !isMinimapFocused()) {
     e.preventDefault();
     const [dx, dy] = NUDGE_KEYS[e.key];
@@ -8835,7 +9677,7 @@ async function placeProductInScene(product, scene, options = {}) {
   }
   const models = await invoke("model_library_list").catch(() => []);
   if (!models.some((one) => one.name === product.model)) {
-    throw new Error(`模型库里没有 ${product.model}，去设置页「3D 模型库」导入`);
+    throw new Error(`模型库里没有 ${product.model}，去设置窗口「3D 模型库」导入`);
   }
   let floors = scene.surfaces.filter((one) => one.kind === "floor");
   if (!scene.parts.length && !floors.length && !options.surface) {
@@ -8945,7 +9787,7 @@ async function pickProductModel(item) {
           showToast(`模型：${model.name}`);
         },
       }))
-    : [{ label: "模型库还没有 .glb（去设置页导入）", disabled: true }];
+    : [{ label: "模型库还没有 .glb（去设置窗口导入）", disabled: true }];
   openMenu(r.left + 24, r.top + 24, entries, { label: "3D 模型" });
 }
 
@@ -9751,6 +10593,7 @@ async function agentCreateBlock(spec = {}) {
     }
     if (spec.fillColor !== undefined) item.fillColor = String(spec.fillColor || "");
     if (spec.color !== undefined) item.color = String(spec.color || "");
+    else if (spec.textColor !== undefined) item.color = String(spec.textColor || "");
     if (spec.borderWidth !== undefined) {
       item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
     }
@@ -9842,7 +10685,7 @@ async function agentCreateBlock(spec = {}) {
     const w = Math.max(GEN_MIN_WIDTH, numOr(spec.w, GEN_DEFAULT_WIDTH));
     const h = Math.max(GEN_MIN_HEIGHT, numOr(spec.h, GEN_DEFAULT_HEIGHT));
     const at = agentPlacePoint(w, h, spec);
-    const item = withLock(makeGen(at.x, at.y, w, h));
+    const item = withLock(applyGenDefaultsToItem(makeGen(at.x, at.y, w, h)));
     if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
     if (spec.borderWidth !== undefined) {
       item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
@@ -9854,6 +10697,25 @@ async function agentCreateBlock(spec = {}) {
        items.json 里根本没有这几个字段 */
     persistGen(placed);
     return agentSummary(placed);
+  }
+
+  if (type === "genvideo") {
+    const w = Math.max(320, numOr(spec.w, 320));
+    const h = Math.max(360, numOr(spec.h, 360));
+    const at = agentPlacePoint(w, h, spec);
+    const item = withLock(makeVideoGen(at.x, at.y, w, h));
+    if (spec.prompt !== undefined) item.prompt = String(spec.prompt).slice(0, GEN_TEXT_MAX);
+    const seconds = Math.round(numOr(spec.seconds, 6));
+    if (seconds >= 1 && seconds <= 60) item.seconds = seconds;
+    const even = (value) => Math.min(4096, Math.max(64, Math.round(value) - (Math.round(value) % 2)));
+    if (spec.width !== undefined) item.width = even(numOr(spec.width, item.width));
+    if (spec.height !== undefined) item.height = even(numOr(spec.height, item.height));
+    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
+    if (spec.borderWidth !== undefined) {
+      item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
+    }
+    if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
+    return agentSummary(placeBlock(item));
   }
 
   if (type === "note") {
@@ -10236,8 +11098,8 @@ async function agentUpdateBlock(id, patch = {}) {
   if (patch.fillColor !== undefined) {
     applyColor(item, "fillColor", String(patch.fillColor || ""));
   }
-  if (patch.color !== undefined) {
-    applyColor(item, "color", String(patch.color || ""));
+  if (patch.color !== undefined || patch.textColor !== undefined) {
+    applyColor(item, "color", String(patch.color ?? patch.textColor ?? ""));
   }
   if (patch.text !== undefined && item.type === "text") {
     item.text = String(patch.text);
@@ -10321,6 +11183,34 @@ async function agentUpdateBlock(id, patch = {}) {
     /* 提示词/尺寸被 agent 改过，面板上的字和框高都要重新算 */
     refreshGenPanel(item.id);
   }
+  if (item.type === "genvideo") {
+    let videoChanged = false;
+    if (patch.prompt !== undefined) {
+      item.prompt = String(patch.prompt).slice(0, GEN_TEXT_MAX);
+      videoChanged = true;
+    }
+    if (patch.seconds !== undefined) {
+      const seconds = Math.round(numOr(patch.seconds, item.seconds));
+      if (seconds >= 1 && seconds <= 60) {
+        item.seconds = seconds;
+        videoChanged = true;
+      }
+    }
+    const evenDim = (value, fallback) => {
+      const raw = Math.round(numOr(value, fallback));
+      return Math.min(4096, Math.max(64, raw - (raw % 2)));
+    };
+    if (patch.width !== undefined) {
+      item.width = evenDim(patch.width, item.width);
+      videoChanged = true;
+    }
+    if (patch.height !== undefined) {
+      item.height = evenDim(patch.height, item.height);
+      videoChanged = true;
+    }
+    if (videoChanged) refreshVideoPanel(item.id);
+  }
+  if (item.type === "pet") applyPetFields(item, patch);
   if (item.type === "product") applyProductFields(item, patch);
   if (item.type === "quote") {
     if (patch.title !== undefined) {
@@ -10822,11 +11712,11 @@ function applyGenFields(item, spec = {}) {
     touched = true;
   }
   if (Number.isFinite(Number(spec.steps))) {
-    item.steps = clamp(Math.round(Number(spec.steps)), GEN_STEPS_MIN, GEN_STEPS_MAX);
+    item.steps = clamp(Math.round(Number(spec.steps)), 0, GEN_STEPS_MAX);
     touched = true;
   }
   if (Number.isFinite(Number(spec.cfg))) {
-    item.cfg = clamp(Number(spec.cfg), GEN_CFG_MIN, GEN_CFG_MAX);
+    item.cfg = clamp(Number(spec.cfg), 0, GEN_CFG_MAX);
     touched = true;
   }
   if (spec.seed !== undefined) {
@@ -10839,6 +11729,14 @@ function applyGenFields(item, spec = {}) {
     const want = String(spec.mode).trim().toLowerCase();
     if (!GEN_MODES.includes(want)) throw new Error(`mode 只认 ${GEN_MODES.join(" / ")}`);
     item.mode = want;
+    touched = true;
+  }
+  if (spec.model !== undefined) {
+    const want = String(spec.model).trim().toLowerCase();
+    if (!["", "qwen21", "h3image"].includes(want)) {
+      throw new Error("model 只认 qwen21 / h3image，空串是跟随设置里的当前模型");
+    }
+    item.model = want;
     touched = true;
   }
   if (spec.strength !== undefined) {
@@ -10856,12 +11754,35 @@ async function agentGenStatus() {
   return {
     loaded: Boolean(engine.loaded),
     busyBlock: genBusyId() || null,
+    family: engine.family || "",
+    familyLabel: engine.familyLabel || "",
+    provider: engine.provider || "local",
+    apiModel: engine.apiModel || "",
+    apiProblem: engine.apiProblem || null,
     modelsDir: engine.modelsDir || "",
     missing: Array.isArray(engine.missing) ? engine.missing : [],
     dit: engine.dit || "",
     encoder: engine.encoder || "",
     idleSeconds: engine.idleSeconds || 0,
     panels: current.items.filter((item) => item.type === "gen").map(agentSummary),
+  };
+}
+
+/* 看/切当前生图模型族。切换会放掉已载入的权重，下一次出图按新族重新载入。 */
+async function agentGenFamily(family) {
+  agentRequireSpace();
+  const want = typeof family === "string" ? family.trim() : "";
+  const info = want ? await store.genFamilySet(want) : await store.genModels();
+  return {
+    family: info.family || "",
+    familyLabel: info.familyLabel || "",
+    modes: Array.isArray(info.modes) ? info.modes : [],
+    maxSide: info.maxSide || 0,
+    modelsDir: info.modelsDir || "",
+    currentDit: info.currentDit || "",
+    currentEncoder: info.currentEncoder || "",
+    missing: Array.isArray(info.missing) ? info.missing : [],
+    advice: info.advice || "",
   };
 }
 
@@ -10921,8 +11842,7 @@ function agentGenCancel() {
 }
 
 /* 把最近那张落成一块独立图片块：面板留着继续改词重出，图片块自己带一份文件 */
-async function agentGenPlace(id) {
-  const item = agentGenOf(id);
+async function agentGenPlace(id) {  const item = agentGenOf(id);
   if (!item.src) throw new Error("这块还没出过图，先 gen_run");
   const run = genRunOf(item.id);
   if (run.phase === "loading" || run.phase === "running") {
@@ -10932,6 +11852,77 @@ async function agentGenPlace(id) {
   if (!placed) throw new Error("没能落块：那张图的文件读不出来，具体原因弹在界面右下角了");
   agentRevealBlock(placed.id);
   return agentSummary(placed);
+}
+
+/* 视频生成：提交一条任务，等它出片。首帧可以给画布块 id（图片块、画面块、
+   已出图的生图面板），也可以直接给 PNG 的 base64。产物是 gen/videos 下的缓存文件。 */
+async function agentGenVideo(args = {}) {
+  agentRequireSpace();
+  /* 给了 genvideo 面板就按面板走：提示词、秒数、尺寸、首帧都从面板上取，
+     结果也写在面板的取景窗里，和手点「开始」完全一样，出完能直接落块。 */
+  const panel = args.block ? findItem(String(args.block)) : null;
+  const usePanel = panel && panel.type === "genvideo";
+  const prompt = String(args.prompt || (usePanel ? panel.prompt : "") || "").trim();
+  if (!prompt) throw new Error("prompt 是空的");
+  let image = "";
+  const first = args.firstFrame ? String(args.firstFrame) : "";
+  if (first) {
+    const item = findItem(first);
+    image = item ? await genInputPng(item) : first;
+  } else if (usePanel) {
+    const sources = genInputItems(panel);
+    if (sources.length) image = await genInputPng(sources[0]);
+  }
+  const block = usePanel ? panel.id : `video-${Date.now()}`;
+  dropVideoRun(block);
+  if (usePanel) {
+    patchVideoRun(block, {
+      phase: "running",
+      label: "提交中…",
+      startedAt: Date.now(),
+      path: "",
+      seconds: 0,
+      error: "",
+      canceled: false,
+    });
+    refreshVideoPanel(block);
+  }
+  await store.genVideoStart({
+    block,
+    prompt,
+    image: image || undefined,
+    seconds: numOr(args.seconds, usePanel ? panel.seconds : 6),
+    ratio: args.ratio || "16:9",
+    width: args.imageW ? Math.round(Number(args.imageW)) : usePanel ? panel.width : undefined,
+    height: args.imageH ? Math.round(Number(args.imageH)) : usePanel ? panel.height : undefined,
+    model: args.model || undefined,
+  });
+  const timeout = Math.min(1800, Math.max(30, numOr(args.timeout, 600)));
+  const deadline = Date.now() + timeout * 1000;
+  for (;;) {
+    const run = videoRunOf(block);
+    if (run?.phase === "failed") {
+      throw new Error(run.canceled ? "已取消" : run.error || "视频生成失败");
+    }
+    if (run?.phase === "done") {
+      return { path: run.path, seconds: run.seconds };
+    }
+    if (Date.now() > deadline) {
+      const status = await store.genVideoStatus().catch(() => null);
+      return { timedOut: true, status };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+}
+
+async function agentGenVideoStatus() {
+  agentRequireSpace();
+  return store.genVideoStatus();
+}
+
+async function agentGenVideoCancel() {
+  const canceled = await store.genVideoCancel().catch(() => false);
+  return { canceled };
 }
 
 function agentNoteOf(id) {
@@ -11213,6 +12204,14 @@ export const canvasAgent = {
       onChange: (color) => applyColor(item, prop, color),
     });
     return { id, prop, opened: true };
+  },
+  /* 调试用：直接设置选中的块 id 列表（不模拟鼠标），验证多选相关菜单用 */
+  debugSelect: ({ ids } = {}) => {
+    agentRequireSpace();
+    const list = Array.isArray(ids) ? ids.filter((id) => findItem(id)) : [];
+    selectedIds = new Set(list);
+    updateSelection();
+    return { selected: [...selectedIds] };
   },
   /* 调试用：按块 id 打开右键菜单，不展开子菜单 */
   debugMenu: ({ id } = {}) => {
@@ -11550,6 +12549,19 @@ export const canvasAgent = {
   pageSnapshot: agentPageSnapshot,
   proposalTemplate: agentProposalTemplate,
   pageDuplicate: agentPageDuplicate,
+  exportCanvas: async (format, options = {}) => {
+    const kinds = ["wechat", "html", "png", "pdf", "toutiao"];
+    const kind = kinds.includes(format) ? format : "wechat";
+    const result = await exporter.exportAs(kind, { quality: options.quality });
+    const saved = await store.exportAuto(result.name, result.format, result.data);
+    const out = { path: saved, format: kind, file: result.format, name: result.name };
+    if (result.layout !== undefined) out.layout = result.layout;
+    if (result.width) out.width = result.width;
+    if (result.height) out.height = result.height;
+    if (result.pages) out.pages = result.pages;
+    if (result.blocks) out.blocks = result.blocks;
+    return out;
+  },
   clientWebExport: (dir, name) => {
     const target = String(dir || "").trim();
     if (!target) throw new Error("要给一个已经存在的导出文件夹 dir");
@@ -11640,8 +12652,21 @@ export const canvasAgent = {
   pictureLight: agentPictureLight,
   genStatus: agentGenStatus,
   genRun: agentGenRun,
+  genFamily: agentGenFamily,
   genCancel: agentGenCancel,
   genPlace: agentGenPlace,
+  genVideo: agentGenVideo,
+  genVideoStatus: agentGenVideoStatus,
+  genVideoCancel: agentGenVideoCancel,
+  genVideoLocal: async (dir) => {
+    if (dir === undefined) return store.genVideoLocalGet();
+    const current = await store.genVideoLocalGet();
+    return store.genVideoLocalSet({
+      ...(current?.config || {}),
+      dir: String(dir || ""),
+    });
+  },
+  openSettings: (page) => invoke("open_settings_window", page ? { page } : {}),
   noteRead: agentNoteRead,
   noteWrite: agentNoteWrite,
   fileRead: agentFileRead,

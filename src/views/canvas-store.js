@@ -128,8 +128,23 @@ export const writeGen = (id, itemId, content) => invoke("canvas_write_gen", { id
 export const deleteGen = (id, itemId) => invoke("canvas_delete_gen", { id, itemId });
 /* 出图引擎：一次只出一张，进度和成品走事件（gen-progress / gen-preview / gen-done / gen-failed） */
 export const genStatus = () => invoke("gen_status");
+export const genModels = () => invoke("gen_models");
+export const genFamilySet = (family) => invoke("gen_family_set", { family });
+export const genDefaults = (family) => invoke("gen_defaults", { family: family || null });
+export const genDefaultsSet = (defaults, family) =>
+  invoke("gen_defaults_set", { defaults, family: family || null });
+export const genDefaultsReset = (family) => invoke("gen_defaults_reset", { family: family || null });
 export const genStart = (req) => invoke("gen_start", { req });
 export const genCancel = () => invoke("gen_cancel");
+/* 视频生成：一次一条，进度和成品走事件（video-progress / video-done / video-failed），
+   成品是缓存文件的绝对路径，落块时再拷进画布 video/。 */
+export const genVideoStart = (req) => invoke("gen_video_start", { req });
+export const genVideoCancel = () => invoke("gen_video_cancel");
+export const genVideoStatus = () => invoke("gen_video_status");
+export const genVideoApiGet = () => invoke("gen_video_api_get");
+export const genVideoLocalGet = () => invoke("gen_video_local_get");
+export const genVideoLocalSet = (config) => invoke("gen_video_local_set", { config });
+export const genVideoModels = (config) => invoke("gen_video_models", { config });
 /* 复制块时把源块那份文件再拷一份进目标画布，返回新的相对路径；
    引用态那块也照样收：从它记的原文件路径拷，粘出来的块从此自己带一份 */
 export const duplicateMedia = (id, itemId, toId) =>
@@ -144,6 +159,8 @@ export const revealCanvas = (id) => invoke("canvas_reveal", { id });
 export const imageData = (id, src, linked) =>
   invoke("canvas_image_data", { id, src, linked: Boolean(linked) });
 export const exportSave = (name, ext, data) => invoke("canvas_export_save", { name, ext, data });
+/* agent 导出：不弹框，直接写数据根下的 exports/ */
+export const exportAuto = (name, ext, data) => invoke("canvas_export_auto", { name, ext, data });
 export const openExport = (path) => invoke("canvas_open_export", { path });
 /* 落图抓屏：抓窗口客户区当前画面，返回 PNG data URL；和屏幕像素一致 */
 export const captureViewport = () => invoke("webview_capture");

@@ -7,7 +7,7 @@
  * 随便换哪套都不会出现看不清文字、描边消失的情况。
  *
  * 选中的主题存 localStorage，模块加载时就先套上（早于首帧绘制，不会闪默认色）。
- * 标题栏的主题按钮（index.html 里 #theme-btn）点击后弹出选择框。 */
+ * 色卡在设置窗口的「主题」页（settings-window.js 渲染），这里只负责数据和应用。 */
 
 const STORAGE_KEY = "workbench.theme";
 
@@ -142,95 +142,3 @@ try {
   saved = null;
 }
 apply(saved || DEFAULT_THEME, { persist: false });
-
-// ---------- 选择弹窗 ----------
-
-let themeBtn = null;
-let ui = null;
-let chipsReady = false;
-
-function renderChips() {
-  const addChips = (container, list) => {
-    for (const theme of list) {
-      const [id, name] = theme;
-      const vars = palette(theme);
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "theme-chip";
-      chip.dataset.theme = id;
-      chip.title = name;
-      chip.setAttribute("aria-label", `主题 ${name}`);
-      chip.innerHTML = `
-        <span class="theme-chip-preview">
-          <span class="theme-chip-line"></span>
-          <span class="theme-chip-dot"></span>
-        </span>
-        <span class="theme-chip-name">${name}</span>
-      `;
-      const preview = chip.querySelector(".theme-chip-preview");
-      if (id === "cosmos") {
-        preview.classList.add("is-cosmos");
-      } else {
-        preview.style.background = vars["--surface"];
-        chip.querySelector(".theme-chip-line").style.background = vars["--line"];
-        chip.querySelector(".theme-chip-dot").style.background = vars["--accent"];
-      }
-      chip.classList.toggle("is-active", id === currentId);
-      chip.addEventListener("click", () => apply(id));
-      container.append(chip);
-    }
-  };
-  addChips(ui.darkGrid, THEMES);
-  addChips(ui.lightGrid, LIGHT_THEMES);
-}
-
-function openTheme() {
-  if (!ui) return;
-  if (!chipsReady) {
-    renderChips();
-    chipsReady = true;
-  }
-  ui.page.hidden = false;
-  /* 焦点收进弹层，别留在标题栏那颗主题按钮上 */
-  ui.dialog.focus();
-  themeBtn?.setAttribute("aria-expanded", "true");
-}
-
-function closeTheme() {
-  if (!ui || ui.page.hidden) return;
-  ui.page.hidden = true;
-  themeBtn?.setAttribute("aria-expanded", "false");
-}
-
-export function initTheme() {
-  themeBtn = document.getElementById("theme-btn");
-  const page = document.getElementById("theme-view");
-  if (!themeBtn || !page) return;
-  ui = {
-    page,
-    dialog: document.getElementById("theme-dialog"),
-    scrim: document.getElementById("theme-scrim"),
-    close: document.getElementById("theme-close"),
-    darkGrid: page.querySelector(".theme-pop-grid-dark"),
-    lightGrid: page.querySelector(".theme-pop-grid-light"),
-  };
-  themeBtn.addEventListener("click", () => {
-    if (!ui.page.hidden) {
-      closeTheme();
-      return;
-    }
-    /* 设置页开着时先回画布，避免两个弹层叠在一起 */
-    window.dispatchEvent(new CustomEvent("inspace:route", { detail: "canvas" }));
-    openTheme();
-  });
-  ui.close.addEventListener("click", closeTheme);
-  ui.scrim.addEventListener("click", closeTheme);
-  document.addEventListener("keydown", (event) => {
-    if (ui.page.hidden) return;
-    if (event.key !== "Escape" || event.repeat) return;
-    event.preventDefault();
-    closeTheme();
-  });
-  /* 切去设置或别的页面时，主题弹窗跟着收起 */
-  window.addEventListener("inspace:route", closeTheme);
-}

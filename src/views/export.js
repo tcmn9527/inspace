@@ -899,6 +899,434 @@ body { font-family: ${FONT_STACK}; }
 })();
 `;
 
+  /* 版式画布：绝对定位在公众号里没法照搬，但字必须是真字——字数统计、
+     搜索和推荐都靠正文文本吃饭，整张图等于自废武功。所以按画布的结构
+     （年份 / 标题 / 正文 / 当时的世界 / 配图）重排成图文：卡片、红线和
+     年份用内联样式还原，图片内嵌成 data:，在页面上右键就能复制。 */
+  function layoutBoxOf(items) {
+    const box = contentBox(items);
+    if (!box) return null;
+    const big = items.some(
+      (item) =>
+        item.type === "picture" &&
+        item.w > 0 &&
+        item.h > 0 &&
+        item.w * item.h >= box.w * box.h * 0.5,
+    );
+    return big ? box : null;
+  }
+
+  function entryText(entry) {
+    return String(entry?.item?.text || "").trim();
+  }
+
+  function pictureHtml(entry) {
+    return (
+      '<p style="margin:16px 0 6px;font-size:0;line-height:0;">' +
+      `<img src="${entry.url}" alt="" style="width:100%;height:auto;border-radius:8px;display:block;">` +
+      "</p>"
+    );
+  }
+
+  /* 文章里的图走 JPEG、宽度收到 1200：公众号正文最宽 677，再大只是把 HTML 撑成十几兆 */
+  function articleImage(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 1200;
+        const ratio = Math.min(1, maxW / Math.max(1, img.width));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * ratio));
+        canvas.height = Math.max(1, Math.round(img.height * ratio));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        try {
+          resolve(canvas.toDataURL("image/jpeg", 0.88));
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
+  async function buildLayoutArticle(box, name) {
+    const items = getItems();
+    const canvasId = (getMeta() || {}).id || "";
+    const texts = items.filter((item) => item.type === "text" && String(item.text || "").trim());
+    const pics = items.filter((item) => item.type === "image" && item.src);
+    const entries = [
+      ...texts.map((item) => ({ kind: "text", item, y: item.y })),
+      ...pics.map((item) => ({ kind: "image", item, y: item.y, url: "" })),
+    ].sort((a, b) => a.y - b.y || a.item.x - b.item.x);
+
+    for (const entry of entries) {
+      if (entry.kind !== "image") continue;
+      try {
+        entry.url = await articleImage(
+          await loadImageData(canvasId, entry.item.src, Boolean(entry.item.linked)),
+        );
+      } catch {
+        entry.url = "";
+      }
+    }
+
+    /* 三套版式的年份写法都要认：1964 / T-1971 / 「一 ／ 1949 · 01 · 12」 */
+    const yearTextOf = (e) => {
+      const t = entryText(e);
+      let m = t.match(/^T-(\d{4})$/);
+      if (m) return m[1];
+      m = t.match(/／\s*(\d{4})/);
+      if (m) return m[1];
+      m = t.match(/^(\d{4})$/);
+      return m ? m[1] : "";
+    };
+    const isYear = (e) => e.kind === "text" && Boolean(yearTextOf(e)) && Number(e.item.fontSize) >= 18;
+    /* 档案版的「01」编号：两位数字的大字，不是年份 */
+    const isIndex = (e) =>
+      e.kind === "text" && /^\d{1,2}$/.test(entryText(e)) && Number(e.item.fontSize) >= 70;
+    const isMonth = (e) =>
+      e.kind === "text" &&
+      Number(e.item.fontSize) <= 24 &&
+      /^\d{1,2}(\s*[·.]\s*\d{1,2})?$/.test(entryText(e));
+    const isRed = (e) => e.kind === "text" && /c8102e/i.test(String(e.item.color || e.item.textColor || ""));
+    const isLabel = (e) =>
+      e.kind === "text" &&
+      /^(当时的世界|时代注脚|WORLD|世界 ·)/.test(entryText(e)) &&
+      Number(e.item.fontSize) <= 26;
+    const isChinaLabel = (e) =>
+      e.kind === "text" && (/^CHINA/.test(entryText(e)) || /^中国 ?· ?\d{4}$/.test(entryText(e)));
+    const isSmall = (e) => e.kind === "text" && Number(e.item.fontSize) <= 20;
+
+    /* 节点按「标题」分块：三套版式的年份位置不一样（左栏中部 / T-1971 / 小节号），
+       但每节都有一个 32–60 号、不是年份标签引语的标题，位置就在节顶。
+       封面大标题是 60+，不会混进来。 */
+    /* 标题附近 300px 内必须有年份块：封面的大标题旁边没有年份块，会被排除 */
+    const yearEntries = entries.filter(isYear);
+    const titleAnchors = entries
+      .filter(
+        (e) =>
+          e.kind === "text" &&
+          Number(e.item.fontSize) >= 32 &&
+          Number(e.item.fontSize) <= 60 &&
+          !isYear(e) &&
+          !isIndex(e) &&
+          !isLabel(e) &&
+          !isChinaLabel(e) &&
+          !/^「/.test(entryText(e)) &&
+          yearEntries.some((y) => Math.abs(y.y - e.y) < 300),
+      )
+      .sort((a, b) => a.y - b.y);
+    if (!titleAnchors.length) return buildArticle(name);
+
+    const lastLabel = [...entries].reverse().find(isLabel);
+    const closingStartY = lastLabel ? lastLabel.y + 560 : Infinity;
+    const coverEntries = entries.filter((e) => e.y < titleAnchors[0].y - 80);
+    const sections = titleAnchors.map((anchor, k) => {
+      const upper = k + 1 < titleAnchors.length ? titleAnchors[k + 1].y - 80 : closingStartY;
+      return entries.filter((e) => e.y >= anchor.y - 80 && e.y < upper);
+    });
+    const closingParts = entries.filter((e) => e.y >= closingStartY);
+
+    const html = [];
+
+    /* 封面：眉标（红小字）→ 大标题（合并）→ 副标/引语 → 封面图 */
+    const coverTitles = coverEntries.filter((e) => e.kind === "text" && Number(e.item.fontSize) >= 60);
+    const titleY = coverTitles.length ? coverTitles[0].y : Infinity;
+    const coverRest = coverEntries.filter((e) => !coverTitles.includes(e));
+    const coverLine = (entry) => {
+      if (entry.kind === "image") {
+        if (entry.url) html.push(pictureHtml(entry));
+        return;
+      }
+      const size = Number(entry.item.fontSize) || 16;
+      const red = isRed(entry);
+      html.push(
+        `<p style="margin:0 0 ${size >= 28 ? 12 : 8}px;font-size:${size >= 28 ? 18 : 14}px;` +
+          `line-height:1.7;color:${red ? "#C8102E" : size >= 24 ? "#6F675C" : "#2A2620"};` +
+          `${red ? "font-weight:700;letter-spacing:1px;" : ""}">${escapeMulti(entryText(entry))}</p>`,
+      );
+    };
+    /* 封面图注跟着图片走，不按坐标插在副标前面 */
+    const coverFigure = coverRest.find((e) => e.kind === "image");
+    const coverCaption = coverFigure
+      ? coverRest.find(
+          (e) =>
+            e.kind === "text" &&
+            Number(e.item.fontSize) <= 22 &&
+            Math.abs(e.item.y - (coverFigure.item.y + (coverFigure.item.h || 0))) < 120,
+        )
+      : null;
+    for (const entry of coverRest.filter((e) => e.kind === "text" && e !== coverCaption && e.y < titleY)) coverLine(entry);
+    if (coverTitles.length) {
+      html.push(
+        '<p style="margin:0 0 12px;font-size:34px;line-height:1.3;color:#14110E;font-weight:700;letter-spacing:1px;">' +
+          coverTitles.map((e) => escapeText(entryText(e))).join("") +
+          "</p>",
+      );
+    }
+    for (const entry of coverRest.filter((e) => e.kind === "text" && e !== coverCaption && e.y >= titleY)) coverLine(entry);
+    /* 封面图放在标题和副标后面，文章开头先用文字立住 */
+    for (const entry of coverRest.filter((e) => e.kind === "image")) coverLine(entry);
+    if (coverCaption) {
+      html.push(
+        `<p style="margin:6px 0 16px;font-size:12px;line-height:1.6;color:#8a7f70;">${escapeText(entryText(coverCaption))}</p>`,
+      );
+    }
+
+    /* 节点：年份 → 标题 → 正文 → 配图 → 当时的世界 */
+    for (const parts of sections) {
+      const year = parts.find(isYear);
+      if (!year) continue;
+      const month = parts.find(isMonth);
+      const title = parts
+        .filter(
+          (e) =>
+            e.kind === "text" &&
+            e !== year &&
+            e !== month &&
+            !isLabel(e) &&
+            !isIndex(e) &&
+            !isChinaLabel(e) &&
+            !isRed(e) &&
+            !isSmall(e) &&
+            !/^「/.test(entryText(e)),
+        )
+        .sort((a, b) => Number(b.item.fontSize) - Number(a.item.fontSize))[0];
+      const label = parts.find(isLabel);
+      const quote = parts.find(
+        (e) =>
+          e.kind === "text" &&
+          Number(e.item.fontSize) >= 22 &&
+          Number(e.item.fontSize) <= 40 &&
+          /^「/.test(entryText(e)),
+      );
+      const afterLabel = label
+        ? parts
+            .filter((e) => e.kind === "text" && e !== label && e.item.y >= label.item.y)
+            .sort((a, b) => a.item.y - b.item.y)
+        : [];
+      const chinaLabel = afterLabel.find(isChinaLabel);
+      /* 数据行不再只认红色：档案铜色、蓝图白色、书页棕色、编年双卡都要认。
+         特征是「在卡片里、字号小、带数字、够短」。先认数据再认中国行，
+         免得「中国钢产量…」这种数据被当成中国正文。 */
+      const dataList = afterLabel.filter(
+        (e) =>
+          e !== chinaLabel &&
+          Number(e.item.fontSize) <= 24 &&
+          /\d/.test(entryText(e)) &&
+          entryText(e).length <= 40,
+      );
+      const chinaText = afterLabel.find(
+        (e) => e !== chinaLabel && !dataList.includes(e) && /^中国/.test(entryText(e)),
+      );
+      const chinaBody = chinaLabel
+        ? afterLabel.find(
+            (e) =>
+              e !== chinaLabel &&
+              e !== chinaText &&
+              !dataList.includes(e) &&
+              e.item.y > chinaLabel.item.y &&
+              Math.abs(Number(e.item.x) - Number(chinaLabel.item.x)) < 40 &&
+              Number(e.item.fontSize) <= 22 &&
+              !/^中国/.test(entryText(e)),
+          )
+        : null;
+      const img = parts.find((e) => e.kind === "image" && e.url);
+      const caption = img
+        ? parts.find((e) => isSmall(e) && e !== month && Math.abs(e.y - (img.y + (img.item.h || 0))) < 90)
+        : null;
+      const worldBody = afterLabel.find(
+        (e) =>
+          e !== chinaLabel &&
+          e !== chinaBody &&
+          e !== chinaText &&
+          !dataList.includes(e) &&
+          Math.abs(Number(e.item.x) - Number(label.item.x)) < 40 &&
+          Number(e.item.fontSize) >= 20,
+      );
+      const body = parts.filter(
+        (e) =>
+          e.kind === "text" &&
+          e !== year &&
+          e !== month &&
+          e !== title &&
+          e !== label &&
+          e !== worldBody &&
+          e !== chinaText &&
+          e !== chinaLabel &&
+          e !== chinaBody &&
+          e !== caption &&
+          !isIndex(e) &&
+          !dataList.includes(e) &&
+          !isSmall(e) &&
+          (!label || e.item.y < label.item.y),
+      );
+
+      const chinaLine = chinaText
+        ? entryText(chinaText)
+        : chinaBody
+          ? `中国 · ${yearTextOf(year)}｜${entryText(chinaBody)}`
+          : "";
+
+      html.push('<section style="margin:0 0 34px;padding:0 0 0 16px;border-left:3px solid #C8102E;">');
+      html.push(
+        '<p style="margin:0 0 2px;font-size:40px;line-height:1.1;color:#C8102E;font-weight:700;letter-spacing:1px;">' +
+          escapeText(yearTextOf(year)) +
+          (month
+            ? `<span style="font-size:13px;font-weight:400;color:#6F675C;letter-spacing:0.5px;"> ${escapeText(entryText(month))}</span>`
+            : "") +
+          "</p>",
+      );
+      if (title) {
+        html.push(
+          `<p style="margin:0 0 10px;font-size:24px;line-height:1.45;color:#14110E;font-weight:700;letter-spacing:0.5px;">${escapeMulti(entryText(title))}</p>`,
+        );
+      }
+      for (const entry of body) {
+        if (entry === quote) {
+          html.push(
+            '<section style="margin:2px 0 16px;padding:4px 0 4px 14px;border-left:3px solid #C8102E;">' +
+              `<p style="margin:0;font-size:18px;line-height:1.7;color:#5A5248;letter-spacing:0.3px;">${escapeMulti(entryText(entry))}</p>` +
+              "</section>",
+          );
+          continue;
+        }
+        html.push(
+          `<p style="margin:0 0 14px;font-size:17px;line-height:1.9;color:#2A2620;letter-spacing:0.4px;">${escapeMulti(entryText(entry))}</p>`,
+        );
+      }
+      if (img) html.push(pictureHtml(img));
+      if (caption) {
+        html.push(
+          `<p style="margin:6px 0 12px;font-size:12px;line-height:1.6;color:#8a7f70;">${escapeText(entryText(caption))}</p>`,
+        );
+      }
+      if (label) {
+        html.push('<section style="margin:8px 0 0;padding:14px 16px;background:#EAE3D6;border-radius:10px;">');
+        html.push(
+          `<p style="margin:0 0 6px;font-size:13px;line-height:1.6;color:#6F675C;letter-spacing:0.5px;">${escapeText(entryText(label))}</p>`,
+        );
+        if (worldBody) {
+          html.push(
+            `<p style="margin:0 0 8px;font-size:15px;line-height:1.85;color:#3A352C;">${escapeMulti(entryText(worldBody))}</p>`,
+          );
+        }
+        for (const data of dataList) {
+          html.push(
+            `<p style="margin:0 0 4px;font-size:15px;line-height:1.7;color:#C8102E;font-weight:700;">${escapeText(entryText(data))}</p>`,
+          );
+        }
+        if (chinaLine) {
+          html.push(
+            `<p style="margin:8px 0 0;font-size:13px;line-height:1.75;color:#8a7f70;">${escapeMulti(chinaLine)}</p>`,
+          );
+        }
+        html.push("</section>");
+      }
+      html.push("</section>");
+    }
+
+    /* 结语：引语 → 英文 → 正文 → 两张世界对比卡（按列配对，两列的标签是同一行） */
+    if (closingParts.length) {
+      const quote = closingParts.find((e) => e.kind === "text" && Number(e.item.fontSize) >= 42);
+      /* 档案 / 蓝图 / 书页三套版式把两张卡合成了一段（标签｜正文 + 换行），先拆出来 */
+      const mergedCard = closingParts.find(
+        (e) => e.kind === "text" && /世界/.test(entryText(e)) && entryText(e).includes("｜"),
+      );
+      const labels = closingParts.filter(
+        (e) =>
+          e.kind === "text" &&
+          e !== mergedCard &&
+          Number(e.item.fontSize) <= 24 &&
+          /世界/.test(entryText(e)),
+      );
+      const cardBodies = new Map();
+      for (const label of labels) {
+        const body = closingParts.find(
+          (e) =>
+            e.kind === "text" &&
+            e !== label &&
+            e.item.y > label.item.y + 10 &&
+            Math.abs(Number(e.item.x) - Number(label.item.x)) < 80 &&
+            Number(e.item.fontSize) >= 24 &&
+            Number(e.item.fontSize) <= 30,
+        );
+        if (body) cardBodies.set(label, body);
+      }
+      const skip = new Set([quote, ...labels, ...cardBodies.values(), mergedCard].filter(Boolean));
+      if (quote) {
+        html.push(
+          `<p style="margin:0 0 8px;font-size:30px;line-height:1.4;color:#14110E;font-weight:700;letter-spacing:1px;">${escapeText(entryText(quote))}</p>`,
+        );
+      }
+      for (const entry of closingParts.filter((e) => !skip.has(e))) {
+        const text = entryText(entry);
+        if (entry.kind !== "text" || !text) continue;
+        if (/^Stay /i.test(text)) {
+          html.push(
+            `<p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#8A7F70;">${escapeText(text)}</p>`,
+          );
+          continue;
+        }
+        html.push(
+          `<p style="margin:0 0 14px;font-size:17px;line-height:1.9;color:#2A2620;letter-spacing:0.4px;">${escapeMulti(text)}</p>`,
+        );
+      }
+      for (const label of labels) {
+        html.push('<section style="margin:0 0 12px;padding:14px 16px;background:#EAE3D6;border-radius:10px;">');
+        html.push(
+          `<p style="margin:0 0 4px;font-size:13px;letter-spacing:0.5px;color:${isRed(label) ? "#C8102E" : "#6F675C"};${isRed(label) ? "font-weight:700;" : ""}">${escapeText(entryText(label))}</p>`,
+        );
+        const body = cardBodies.get(label);
+        if (body) {
+          html.push(
+            `<p style="margin:0;font-size:15px;line-height:1.85;color:#14110E;">${escapeMulti(entryText(body))}</p>`,
+          );
+        }
+        html.push("</section>");
+      }
+      if (mergedCard) {
+        for (const line of entryText(mergedCard).split("\n").filter(Boolean)) {
+          const parts2 = line.split("｜");
+          const lab = parts2.shift() || "";
+          html.push('<section style="margin:0 0 12px;padding:14px 16px;background:#EAE3D6;border-radius:10px;">');
+          html.push(
+            `<p style="margin:0 0 4px;font-size:13px;letter-spacing:0.5px;color:#6F675C;">${escapeText(lab)}</p>`,
+          );
+          html.push(
+            `<p style="margin:0;font-size:15px;line-height:1.85;color:#14110E;">${escapeMulti(parts2.join("｜"))}</p>`,
+          );
+          html.push("</section>");
+        }
+      }
+    }
+
+    return [
+      "<!doctype html>",
+      '<html lang="zh">',
+      "<head>",
+      '<meta charset="utf-8">',
+      '<meta name="viewport" content="width=device-width,initial-scale=1">',
+      `<title>${escapeText(name)}</title>`,
+      `<style>${WECHAT_PAGE_CSS}</style>`,
+      "</head>",
+      "<body>",
+      '<div class="wx-bar"><button id="wx-copy">复制全文</button>' +
+        '<span id="wx-hint">正文是可选文本（字数、搜索都正常）；图片内嵌在正文里，粘贴后请在图上右键「复制图片」再替换进编辑器</span></div>',
+      `<article id="wx-article" style="font-family:${FONT_STACK_ATTR};font-size:17px;line-height:1.9;` +
+        'color:#2b2622;letter-spacing:0.4px;">',
+      html.join(""),
+      "</article>",
+      `<script>${WECHAT_PAGE_SCRIPT}</script>`,
+      "</body>",
+      "</html>",
+    ].join("\n");
+  }
+
   async function buildArticle(name) {
     const items = getItems();
     if (!items.length) throw new Error("这个画布还是空的，没东西可导出");
@@ -1314,11 +1742,13 @@ body { font-family: ${FONT_STACK}; }
     const name = (getMeta().name || "画布").trim() || "画布";
 
     if (format === "wechat") {
-      const html = await buildArticle(name);
+      const layoutBox = layoutBoxOf(items);
+      const html = layoutBox ? await buildLayoutArticle(layoutBox, name) : await buildArticle(name);
       return {
         format: "html",
         name: `${name} · 公众号`,
         data: bytesToBase64(new TextEncoder().encode(html)),
+        layout: Boolean(layoutBox),
       };
     }
 

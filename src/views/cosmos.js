@@ -6,7 +6,7 @@
  *   星体   世界坐标的球体，沿航线前方生成、飞过就回收。远处只有针尖大，越近越大；
  *          追上一颗就绕着它慢慢飞两圈看表面，看完顺切线方向接着飞。
  * 光照由世界里的太阳给主光、相机方向补光，绕飞时会看到明暗面和相位变化。
- *   贴图   内置 2K 保底；设置页下载过 8K 就换成 8K，显存里同一时刻只留镜头里这一颗的量。
+ *   贴图   内置 2K 保底；设置窗口下载过 8K 就换成 8K，显存里同一时刻只留镜头里这一颗的量。
  *
  * 工作区的平移/缩放只当「头部偏移」：小幅转头 + 长焦倍率，不打断航线。
  * 只有「宇宙」主题激活时才跑渲染循环；贴图第一次激活才加载。 */
@@ -64,9 +64,9 @@ const ORBIT_ENTER_K = 1.8;
    竖向最多 65°，再陡镜头就要从极点正上方往下看，世界 up 退化会翻屏。 */
 const ORBIT_TILT_FLAT = [0.05, 0.3]; // 约 3°~17°
 const ORBIT_TILT_STEEP = [0.7, 1.13]; // 约 40°~65°
-/* 星体一颗一颗沿航线摆，隔多远由用户在设置页定的「几分钟遇到一颗」换算成世界距离：
+/* 星体一颗一颗沿航线摆，隔多远由用户在设置窗口定的「几分钟遇到一颗」换算成世界距离：
    按巡航 150 单位/秒算，三分钟就是两万七。名单和间隔都存在 localStorage，
-   设置页和 MCP 走同一个写入口。 */
+   设置窗口和 MCP 走同一个写入口。 */
 const ROUTE_KEY = "workbench.cosmosRoute";
 const PACE_KEY = "workbench.cosmosMinutes";
 const DEFAULT_ORDER = ["earth", "moon", "mars", "jupiter", "saturn"];
@@ -173,7 +173,7 @@ const TYPES = Object.keys(PLANET_DEFS);
 /* ---------- 航线名单与遭遇间隔 ----------
    名单是循环的：走完一轮从头再走，所以地球也能每轮遇到一次；
    间隔说「几分钟遇到一颗」，换算成世界距离交给 nextSpawnDistance。
-   两个值都存在 localStorage，设置页和 MCP 都走 cosmosRouteSet 这一个口子。 */
+   两个值都存在 localStorage，设置窗口和 MCP 都走 cosmosRouteSet 这一个口子。 */
 
 const ROUTE = {
   order: parseOrder(readStored(ROUTE_KEY)),
@@ -302,7 +302,7 @@ export function initCosmos() {
   if (document.documentElement.dataset.theme === "cosmos") activate();
 }
 
-/* 设置页下载完或清除完 8K 会广播这一条：正在飞的航线下一颗就该用新档位 */
+/* 设置窗口下载完或清除完 8K 会广播这一条：正在飞的航线下一颗就该用新档位 */
 window.addEventListener("cosmos-textures-changed", () => {
   dropHiRes();
   refreshPack();
@@ -347,8 +347,8 @@ export function cosmosFlight() {
   };
 }
 
-/* 航线名单和遭遇间隔：设置页读这一份、写也从这一份走，MCP 用的是同一个口子，
-   所以 agent 改完，用户在设置页能当场看到一样的值 */
+/* 航线名单和遭遇间隔：设置窗口读这一份、写也从这一份走，MCP 用的是同一个口子，
+   所以 agent 改完，用户在设置窗口能当场看到一样的值 */
 export function cosmosRoute() {
   return {
     order: [...ROUTE.order],
@@ -365,7 +365,7 @@ export function cosmosRouteSet(order, minutes) {
   writeStored(ROUTE_KEY, ROUTE.order.join(","));
   writeStored(PACE_KEY, String(ROUTE.minutes));
   if (ROUTE.order.join(",") !== before) requeuePending();
-  /* 设置页正开着时也让它跟着重画：agent 从 MCP 改的，用户要当场看见 */
+  /* 设置窗口正开着时也让它跟着重画：agent 从 MCP 改的，用户要当场看见 */
   window.dispatchEvent(new CustomEvent("cosmos-route-changed"));
   return cosmosRoute();
 }

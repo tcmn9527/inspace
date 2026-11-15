@@ -26,10 +26,13 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::canvas::check_item_id;
 use crate::db::{self, DbState};
+use crate::imageapi::{self, ApiConfig};
 use crate::sdcpp as sd;
 use crate::store::{DataRoot, GEN_DIR};
 
 const MODELS_SUB: &str = "models";
+/// H3-Image 那套 25GB 权重默认住自己的子目录，不和 Qwen 的混在一起
+const H3_MODELS_SUB: &str = "h3image";
 /// 目录可以不在数据根里：有人只有一个盘装得下这十几 GB
 const DIR_KEY: &str = "gen_models_dir";
 /// 这四件的实测名字和字节数都在盘上核过，就是设置页的检测清单
@@ -37,6 +40,27 @@ const DEFAULT_DIT: &str = "qwen_image_2.1-Q6_K.gguf";
 const DEFAULT_ENCODER: &str = "Qwen3VL-8B-Instruct-Q4_K_M.gguf";
 const DEFAULT_VISION: &str = "mmproj-Qwen3VL-8B-Instruct-F16.gguf";
 const DEFAULT_VAE: &str = "qwen_image_2.1_vae_bf16.safetensors";
+
+/* ---------- MiniMax-H3-Image：33B DiT + Qwen3-VL-32B 编码器 + 专用 2D VAE ----------
+   4080 16GB 实测：Q4 DiT + Q2 编码器，1MP 热态 4.9 秒、2MP 8.3 秒、16MP 136 秒。
+   6 步蒸馏、cfg 1、不需要视觉投影（编码器里自带视觉塔）。 */
+const H3_DEFAULT_DIT: &str = "MiniMax-H3-Image-AD-Q4_K.gguf";
+const H3_DEFAULT_ENCODER: &str = "qwen3vl_32b_minimax_h3-Q2_K_M.gguf";
+const H3_DEFAULT_VAE: &str = "minimax_h3_image_vae_fp16.safetensors";
+const H3_ENCODER_BYTES: u64 = 13_102_161_024;
+const H3_VAE_BYTES: u64 = 1_168_505_312;
+const H3_DIT_TIERS: [(&str, u64); 6] = [
+    ("MiniMax-H3-Image-AD-Q2_K.gguf", 7_567_053_024),
+    ("MiniMax-H3-Image-AD-Q3_K.gguf", 8_726_118_624),
+    ("MiniMax-H3-Image-AD-Q4_K.gguf", 11_571_097_824),
+    ("MiniMax-H3-Image-AD-Q5_K.gguf", 13_841_060_064),
+    ("MiniMax-H3-Image-AD-Q6_K.gguf", 16_670_986_464),
+    ("MiniMax-H3-Image-Q8_0.gguf", 21_448_745_184),
+];
+const H3_DIT_PAGE: &str = "https://hf-mirror.com/AtomicChat/MiniMax-H3-Image-GGUF/tree/main";
+const H3_ENCODER_PAGE: &str = "https://hf-mirror.com/leejet/MiniMax-H3-GGUF/tree/main";
+const H3_VAE_PAGE: &str = "https://hf-mirror.com/Comfy-Org/MiniMax-H3-Image/tree/main/vae";
+
 /// 高清放大那颗网络权重，跟着数据根走（`gen/upscale/`）。它不参与「模型目录可换」
 /// 那套：只有 67 MB，没人会为它单独指一个盘。
 const UPSCALE_SUB: &str = "upscale";
@@ -51,8 +75,217 @@ const UPSCALE_TILE: i32 = 512;
 /// 档位存 SQLite 用的键：存的就是模型目录里的纯文件名
 const DIT_KEY: &str = "gen_dit";
 const ENCODER_KEY: &str = "gen_encoder";
+const FAMILY_KEY: &str = "gen_family";
+/// H3 那套的档位键；Qwen 沿用旧键，老配置升级后原样可用
+const H3_DIT_KEY: &str = "gen_h3_dit";
+const H3_ENCODER_KEY: &str = "gen_h3_encoder";
+const H3_DIR_KEY: &str = "gen_h3_models_dir";
+/// 每族一套「新建面板默认参数」，用户在面板「更多设置」里改的就是它（JSON）
+const DEFAULTS_KEY: &str = "gen_defaults_qwen21";
+const H3_DEFAULTS_KEY: &str = "gen_defaults_h3image";
+/// 负向提示词存这么长就够，再长也是白占
+const NEGATIVE_MAX: usize = 2000;
 /// 显存预算（GiB）：留出的那一截是给 three.js 的
 const VRAM_BUDGET: &str = "12";
+
+/// 两套模型：Qwen-Image 2.1（日常，20 步）和 MiniMax-H3-Image（高质量，6 步）。
+/// 各自有独立的槽位、目录、默认参数和空闲卸载时长。
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum Family {
+    Qwen21,
+    H3Image,
+}
+
+impl Family {
+    fn from_id(text: &str) -> Option<Family> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "qwen21" | "qwen" | "qwen-image" => Some(Family::Qwen21),
+            "h3image" | "h3" | "h3-image" | "minimax" | "minimax-h3-image" => Some(Family::H3Image),
+            _ => None,
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            Family::Qwen21 => "qwen21",
+            Family::H3Image => "h3image",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Family::Qwen21 => "Qwen-Image 2.1",
+            Family::H3Image => "MiniMax-H3-Image",
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Family::Qwen21 => 0,
+            Family::H3Image => 1,
+        }
+    }
+
+    fn dit_key(self) -> &'static str {
+        match self {
+            Family::Qwen21 => DIT_KEY,
+            Family::H3Image => H3_DIT_KEY,
+        }
+    }
+
+    fn encoder_key(self) -> &'static str {
+        match self {
+            Family::Qwen21 => ENCODER_KEY,
+            Family::H3Image => H3_ENCODER_KEY,
+        }
+    }
+
+    fn dir_key(self) -> &'static str {
+        match self {
+            Family::Qwen21 => DIR_KEY,
+            Family::H3Image => H3_DIR_KEY,
+        }
+    }
+
+    fn defaults(self) -> Weights {
+        match self {
+            Family::Qwen21 => Weights {
+                dit: DEFAULT_DIT.to_string(),
+                encoder: DEFAULT_ENCODER.to_string(),
+            },
+            Family::H3Image => Weights {
+                dit: H3_DEFAULT_DIT.to_string(),
+                encoder: H3_DEFAULT_ENCODER.to_string(),
+            },
+        }
+    }
+
+    /// 这一族躲不掉的固定件：VAE 名字和字节数（Qwen 另有一个可选的视觉投影）
+    fn vae(self) -> (&'static str, u64) {
+        match self {
+            Family::Qwen21 => (DEFAULT_VAE, VAE_BYTES),
+            Family::H3Image => (H3_DEFAULT_VAE, H3_VAE_BYTES),
+        }
+    }
+
+    fn tiers(self) -> &'static [(&'static str, u64)] {
+        match self {
+            Family::Qwen21 => &DIT_TIERS,
+            Family::H3Image => &H3_DIT_TIERS,
+        }
+    }
+
+    fn default_steps(self) -> i32 {
+        match self {
+            Family::Qwen21 => DEFAULT_STEPS,
+            Family::H3Image => 6,
+        }
+    }
+
+    fn default_cfg(self) -> f32 {
+        match self {
+            Family::Qwen21 => DEFAULT_CFG,
+            Family::H3Image => 1.0,
+        }
+    }
+
+    /// H3 原生支持到 4K 级（16MP 实测 136 秒）；Qwen 到 2048。
+    fn max_side(self) -> i32 {
+        match self {
+            Family::Qwen21 => 2048,
+            Family::H3Image => 4096,
+        }
+    }
+
+    /// H3-Image 只保证文生图和参考图编辑；图生图/局部重绘没验证，先不接。
+    fn modes(self) -> Vec<&'static str> {
+        match self {
+            Family::Qwen21 => vec!["t2i", "i2i", "edit", "inpaint", "upscale"],
+            Family::H3Image => vec!["t2i", "edit", "upscale"],
+        }
+    }
+
+    fn supports(self, mode: Mode) -> bool {
+        match mode {
+            Mode::Text | Mode::Upscale => true,
+            Mode::Reference => true,
+            Mode::Image => self == Family::Qwen21,
+            Mode::Inpaint => self == Family::Qwen21,
+        }
+    }
+
+    /// 25GB 权重每次重读要十几秒，H3 停手后多热一会儿再放。
+    fn idle_seconds(self) -> u64 {
+        match self {
+            Family::Qwen21 => 45,
+            Family::H3Image => 300,
+        }
+    }
+
+    fn defaults_key(self) -> &'static str {
+        match self {
+            Family::Qwen21 => DEFAULTS_KEY,
+            Family::H3Image => H3_DEFAULTS_KEY,
+        }
+    }
+
+    /// 出厂参数：用户没改过、或点了「恢复默认」时用这一套。
+    fn factory_defaults(self) -> GenDefaults {
+        GenDefaults {
+            width: DEFAULT_SIZE,
+            height: DEFAULT_SIZE,
+            steps: self.default_steps(),
+            cfg: self.default_cfg(),
+            seed: -1,
+            mode: "auto".to_string(),
+            strength: DEFAULT_STRENGTH,
+            negative: String::new(),
+            refine: false,
+        }
+    }
+}
+
+/// 一族的出图默认参数：面板「更多设置」显示和修改的就是它，新建面板直接照这套初始化。
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenDefaults {
+    pub width: i32,
+    pub height: i32,
+    pub steps: i32,
+    pub cfg: f32,
+    pub seed: i64,
+    /// auto / t2i / i2i / edit / upscale / inpaint
+    pub mode: String,
+    pub strength: f32,
+    pub negative: String,
+    pub refine: bool,
+}
+
+/// 把用户给的数收进合法范围：宽高 32 对齐并按该族上限，模式不支持就回 auto。
+fn normalize_defaults(mut value: GenDefaults, family: Family) -> GenDefaults {
+    let snap = |amount: i32| (amount / 32).max(1) * 32;
+    value.width = snap(value.width).clamp(256, family.max_side());
+    value.height = snap(value.height).clamp(256, family.max_side());
+    value.steps = value.steps.clamp(1, 100);
+    value.cfg = value.cfg.clamp(0.1, 20.0);
+    if value.seed < -1 {
+        value.seed = -1;
+    }
+    if !matches!(
+        value.mode.as_str(),
+        "auto" | "t2i" | "i2i" | "edit" | "upscale" | "inpaint"
+    ) {
+        value.mode = "auto".to_string();
+    }
+    if !family.supports(Mode::pick(Some(&value.mode), 0)) {
+        value.mode = "auto".to_string();
+    }
+    value.strength = value.strength.clamp(0.0, 1.0);
+    if value.negative.chars().count() > NEGATIVE_MAX {
+        value.negative = value.negative.chars().take(NEGATIVE_MAX).collect();
+    }
+    value
+}
 
 /// DiT 的量化档，从小到大。名字和字节数都是 2026-11-03 从模型仓库的 tree 接口
 /// 一家一家核过的（不是估的），下载清单和本机建议都靠这张表。
@@ -70,15 +303,14 @@ const ENCODER_BYTES: u64 = 5_027_784_800;
 const VAE_BYTES: u64 = 675_509_688;
 const VISION_BYTES: u64 = 1_159_029_824;
 /// 三个来源页。下载由用户自己点，应用不碰网络。
-const DIT_PAGE: &str = "https://huggingface.co/leejet/Qwen-Image-2.1-GGUF/tree/main";
-const ENCODER_PAGE: &str = "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/tree/main";
-const VAE_PAGE: &str = "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/vae";
+const DIT_PAGE: &str = "https://hf-mirror.com/leejet/Qwen-Image-2.1-GGUF/tree/main";
+const ENCODER_PAGE: &str = "https://hf-mirror.com/Qwen/Qwen3-VL-8B-Instruct-GGUF/tree/main";
+const VAE_PAGE: &str = "https://hf-mirror.com/Comfy-Org/Qwen-Image-2.1/tree/main/vae";
 /// 建议档要留下的余量（MB）。显存不参与：权重住内存条、按预算现搬上卡，
 /// P0 实测卸载档和全显存档出的图像素逐字节相同，卡的 size 只影响快慢。
 const RAM_RESERVE_MB: u64 = 4096;
 const DISK_RESERVE_MB: u64 = 2048;
-const IDLE_UNLOAD: Duration = Duration::from_secs(45);
-/// 后台线程就按这个节奏看一眼，所以实际释放落在 45~55 秒之间
+/// 后台线程就按这个节奏看一眼，所以实际释放落在 idle_seconds 之后
 const IDLE_POLL: Duration = Duration::from_secs(10);
 
 const DEFAULT_SIZE: i32 = 1024;
@@ -100,16 +332,6 @@ unsafe impl Send for Ctx {}
 struct Weights {
     dit: String,
     encoder: String,
-}
-
-impl Weights {
-    /// 盘上没配过档时用它，也是设置页下载清单的默认项。
-    fn fallback() -> Self {
-        Self {
-            dit: DEFAULT_DIT.to_string(),
-            encoder: DEFAULT_ENCODER.to_string(),
-        }
-    }
 }
 
 /// 一个 models 目录里混着四种文件，靠名字认。分错档就是拿编码器去当 DiT 载入，
@@ -167,17 +389,31 @@ pub struct GenCore {
     /// 「这一轮别再跑了」的意愿。冷加载权重那一两分钟锁被人占着，
     /// 停止只能靠这个标志位传话，不能去等锁。
     cancel: Arc<AtomicBool>,
-    /// 当前档位。改动只发生在 gen_models_set，那儿会同步写进 SQLite。
-    picked: Arc<Mutex<Weights>>,
-    /// 模型目录：Some 是用户在设置页另指的位置，None 就跟着数据根走。
+    /// 当前用哪一族。切换会放掉旧 ctx，下一次出图按新族重新载入。
+    family: Arc<Mutex<Family>>,
+    /// 两族各自的档位，下标见 Family::index。改动都同步写进 SQLite。
+    picked: Arc<Mutex<[Weights; 2]>>,
+    /// 两族各自的模型目录：Some 是用户在设置页另指的位置，None 就跟着数据根走。
     /// 指到数据根外面那份就不跟着搬，所以换数据目录时别指望它。
-    models_dir: Arc<Mutex<Option<PathBuf>>>,
+    models_dir: Arc<Mutex<[Option<PathBuf>; 2]>>,
+    /// 两族各自的新建面板默认参数，下标见 Family::index。
+    /// 面板「更多设置」改的就是这一份：新建面板照它初始化，恢复默认回出厂值。
+    defaults: Arc<Mutex<[GenDefaults; 2]>>,
     /// nvidia-smi 认到的那张卡。探测要等一两秒，认过一次就记下——
     /// 认不到也记着（Gpu 里名字为空），不然每次检测都再等一遍。
     gpu: Arc<Mutex<Option<Gpu>>>,
+    /// 远端 API 的配置（设置页写、出图时读）。启用且填全了就不碰本地引擎。
+    api: Arc<Mutex<ApiConfig>>,
 }
 
 pub struct GenState(GenCore);
+
+impl GenState {
+    /// 设置页改完 API 配置后同步进内存缓存，下一次出图直接用新配置。
+    pub fn set_api(&self, value: ApiConfig) {
+        self.0.set_api(value);
+    }
+}
 
 impl GenCore {
     fn lock(&self) -> std::sync::MutexGuard<'_, Engine> {
@@ -186,45 +422,81 @@ impl GenCore {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn weights(&self) -> Weights {
-        self.picked
+    fn family(&self) -> Family {
+        *self
+            .family
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+    }
+
+    fn set_family(&self, family: Family) {
+        *self
+            .family
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = family;
+    }
+
+    fn weights(&self) -> Weights {
+        let family = self.family();
+        self.picked.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[family.index()].clone()
     }
 
     fn set_weights(&self, weights: Weights) {
-        *self
-            .picked
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = weights;
+        let family = self.family();
+        self.picked.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[family.index()] = weights;
     }
 
     fn set_models_dir(&self, dir: Option<PathBuf>) {
-        *self
-            .models_dir
+        let family = self.family();
+        self.models_dir
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = dir;
+            .unwrap_or_else(|poisoned| poisoned.into_inner())[family.index()] = dir;
     }
 
-    /// 数据根里那份默认位置，「换个目录」之前的样子。
+    /// 数据根里那份默认位置，「换个目录」之前的样子。H3 有自己的子目录。
     fn default_models(&self) -> PathBuf {
-        self.data.dir(GEN_DIR).join(MODELS_SUB)
+        let sub = match self.family() {
+            Family::Qwen21 => MODELS_SUB,
+            Family::H3Image => H3_MODELS_SUB,
+        };
+        self.data.dir(GEN_DIR).join(sub)
     }
 
     fn models(&self) -> PathBuf {
+        let family = self.family();
         self.models_dir
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner())[family.index()]
             .clone()
             .unwrap_or_else(|| self.default_models())
     }
 
     fn is_default_dir(&self) -> bool {
+        let family = self.family();
         self.models_dir
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner())[family.index()]
             .is_none()
+    }
+
+    fn defaults_of(&self, family: Family) -> GenDefaults {
+        self.defaults.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[family.index()].clone()
+    }
+
+    fn defaults(&self) -> GenDefaults {
+        self.defaults_of(self.family())
+    }
+
+    fn set_defaults(&self, family: Family, value: GenDefaults) {
+        self.defaults.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[family.index()] = value;
+    }
+
+    fn api(&self) -> ApiConfig {
+        self.api.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+    }
+
+    fn set_api(&self, value: ApiConfig) {
+        *self.api.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = value;
     }
 }
 
@@ -233,6 +505,9 @@ impl GenCore {
 pub struct GenStatus {
     pub loaded: bool,
     pub busy: bool,
+    /// 当前族：qwen21 / h3image
+    pub family: &'static str,
+    pub family_label: &'static str,
     pub models_dir: String,
     /// 模型目录还是数据根里那份默认位置（false = 用户另指过，换数据根不跟着搬）
     pub dir_is_default: bool,
@@ -242,6 +517,14 @@ pub struct GenStatus {
     /// 这一轮真会载入的两个文件
     pub dit: String,
     pub encoder: String,
+    /// 当前族的新建面板默认参数（面板「更多设置」读它）
+    pub defaults: GenDefaults,
+    /// local / api：这一张会走哪条路
+    pub provider: &'static str,
+    /// 走 API 时用的模型名（本地模式为空）
+    pub api_model: String,
+    /// API 配置的毛病：启用了但缺哪样，或者为 None 表示没配好也没启用
+    pub api_problem: Option<String>,
 }
 
 /// 目录里的档位清单：两列可选 + 两件固定，都带字节数好比较大小。
@@ -296,6 +579,13 @@ pub struct TierRow {
 #[serde(rename_all = "camelCase")]
 pub struct GenModels {
     pub models_dir: String,
+    /// 当前族：qwen21 / h3image
+    pub family: &'static str,
+    pub family_label: &'static str,
+    /// 出图边长上限（Qwen 2048，H3 4096）
+    pub max_side: i32,
+    /// 这一族支持的模式：t2i / i2i / edit / inpaint / upscale
+    pub modes: Vec<&'static str>,
     /// false = 用户在设置页另指过目录。换数据根不搬它，前端要说清。
     pub dir_is_default: bool,
     pub dit: Vec<ModelFile>,
@@ -308,7 +598,7 @@ pub struct GenModels {
     pub machine: Machine,
     /// 一句话：为什么建议这一档
     pub advice: String,
-    /// 建议那一套的四个文件
+    /// 建议那一套的文件
     pub needed: Vec<NeededRow>,
     /// DiT 的全部量化档，从小到大
     pub tiers: Vec<TierRow>,
@@ -347,6 +637,10 @@ pub struct GenRequest {
     /// 局部重绘的遮罩：PNG 的 base64，白=重绘、黑=保留，尺寸会自动缩到底图。
     #[serde(default)]
     pub mask: Option<String>,
+    /// 用哪一族：qwen21 / h3image。不给就用设置里当前选的那一族；
+    /// 给了会先把当前族切过去（下次面板出图也跟着用这套）。
+    #[serde(default)]
+    pub family: Option<String>,
     /// 高清放大后要不要再补一遍低强度重绘（长出原图没有的纹理）
     #[serde(default)]
     pub refine: Option<bool>,
@@ -357,7 +651,7 @@ pub struct GenRequest {
 
 /// 输入图的三种吃法，外加一条完全不碰扩散模型的放大路。
 #[derive(Copy, Clone, PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     Text,
     /// 一张底图 + strength 重绘
     Image,
@@ -370,7 +664,7 @@ enum Mode {
 }
 
 impl Mode {
-    fn pick(want: Option<&str>, count: usize) -> Mode {
+    pub(crate) fn pick(want: Option<&str>, count: usize) -> Mode {
         match want.unwrap_or("").trim().to_ascii_lowercase().as_str() {
             "t2i" | "text" => Mode::Text,
             "i2i" | "image" => Mode::Image,
@@ -472,9 +766,21 @@ pub fn init(data: DataRoot, db: &DbState) -> GenState {
             last_used: Instant::now(),
         })),
         cancel: Arc::new(AtomicBool::new(false)),
-        picked: Arc::new(Mutex::new(read_weights(db))),
-        models_dir: Arc::new(Mutex::new(read_models_dir(db))),
+        family: Arc::new(Mutex::new(read_family(db))),
+        picked: Arc::new(Mutex::new([
+            read_weights(db, Family::Qwen21),
+            read_weights(db, Family::H3Image),
+        ])),
+        models_dir: Arc::new(Mutex::new([
+            read_models_dir(db, Family::Qwen21),
+            read_models_dir(db, Family::H3Image),
+        ])),
+        defaults: Arc::new(Mutex::new([
+            read_defaults(db, Family::Qwen21),
+            read_defaults(db, Family::H3Image),
+        ])),
         gpu: Arc::new(Mutex::new(None)),
+        api: Arc::new(Mutex::new(imageapi::load(db))),
     };
     // 引擎自己的日志：只放行警告和错误，INFO 一步刷几十行会把开发台埋了
     unsafe {
@@ -489,7 +795,7 @@ pub fn init(data: DataRoot, db: &DbState) -> GenState {
             if engine.busy || engine.ctx.is_null() {
                 continue;
             }
-            if engine.last_used.elapsed() < IDLE_UNLOAD {
+            if engine.last_used.elapsed() < Duration::from_secs(watcher.family().idle_seconds()) {
                 continue;
             }
             unsafe { sd::free_sd_ctx(engine.ctx) };
@@ -499,14 +805,28 @@ pub fn init(data: DataRoot, db: &DbState) -> GenState {
     GenState(core)
 }
 
-/// 启动时把档位从 SQLite 读回来。读不到、值不合法就用默认档。
+/// 启动时把「用哪一族」读回来。读不到或值不合法就回到 Qwen——
+/// 那是原来一直在跑的那套，升级后行为不变。
+fn read_family(db: &DbState) -> Family {
+    let Some(conn) = db.0.lock().ok() else {
+        return Family::Qwen21;
+    };
+    db::read_setting(&conn, FAMILY_KEY)
+        .and_then(|text| Family::from_id(&text))
+        .unwrap_or(Family::Qwen21)
+}
+
+/// 启动时把档位从 SQLite 读回来。读不到、值不合法就用该族的默认档。
 /// 这儿不查文件在不在：缺权重是点「开始」那一刻要报的事，不是启动的事。
-fn read_weights(db: &DbState) -> Weights {
-    let mut next = Weights::fallback();
+fn read_weights(db: &DbState, family: Family) -> Weights {
+    let mut next = family.defaults();
     let Some(conn) = db.0.lock().ok() else {
         return next;
     };
-    for (key, slot) in [(DIT_KEY, &mut next.dit), (ENCODER_KEY, &mut next.encoder)] {
+    for (key, slot) in [
+        (family.dit_key(), &mut next.dit),
+        (family.encoder_key(), &mut next.encoder),
+    ] {
         if let Some(name) = db::read_setting(&conn, key).filter(|name| check_weight_name(name).is_ok())
         {
             *slot = name;
@@ -517,11 +837,25 @@ fn read_weights(db: &DbState) -> Weights {
 
 /// 另指过的模型目录。空串、不存在的目录都当没配过——跟着数据根走。
 /// 用户后来把那个文件夹删了不该让整个生图通路哑掉，退回默认才是能用的样子。
-fn read_models_dir(db: &DbState) -> Option<PathBuf> {
+fn read_models_dir(db: &DbState, family: Family) -> Option<PathBuf> {
     let conn = db.0.lock().ok()?;
-    let text = db::read_setting(&conn, DIR_KEY)?;
+    let text = db::read_setting(&conn, family.dir_key())?;
     let path = PathBuf::from(text);
     path.is_dir().then_some(path)
+}
+
+/// 每族的新建面板默认参数。没存过、存坏了都回出厂值——
+/// 参数坏了不该把生图通路的默认挡住。
+fn read_defaults(db: &DbState, family: Family) -> GenDefaults {
+    let Some(conn) = db.0.lock().ok() else {
+        return family.factory_defaults();
+    };
+    let Some(text) = db::read_setting(&conn, family.defaults_key()) else {
+        return family.factory_defaults();
+    };
+    serde_json::from_str::<GenDefaults>(&text)
+        .map(|value| normalize_defaults(value, family))
+        .unwrap_or_else(|_| family.factory_defaults())
 }
 
 /// 档名只许是 models 目录里的纯文件名：挡掉分隔符、`..`、绝对路径、隐藏文件。
@@ -544,17 +878,137 @@ pub fn gen_status(state: tauri::State<GenState>) -> GenStatus {
         Err(_) => (false, true),
     };
     drop(engine);
-    let weights = core.weights();
+    let family = core.family();
+    let weights = resolve_weights(&core.models(), family, &core.weights());
+    let api = core.api();
     GenStatus {
         loaded,
         busy,
+        family: family.id(),
+        family_label: family.label(),
         models_dir: core.models().display().to_string(),
         dir_is_default: core.is_default_dir(),
-        missing: missing_weights(&core.models(), &weights),
-        idle_seconds: IDLE_UNLOAD.as_secs(),
+        missing: missing_weights(&core.models(), &weights, family),
+        idle_seconds: family.idle_seconds(),
         dit: weights.dit,
         encoder: weights.encoder,
+        defaults: core.defaults(),
+        provider: if api.enabled { "api" } else { "local" },
+        api_model: if api.enabled { api.model.clone() } else { String::new() },
+        api_problem: if api.enabled { api.problem() } else { None },
     }
+}
+
+/// 换模型族：Qwen-Image 2.1 ↔ MiniMax-H3-Image。正在出图时不换。
+/// 换完把旧 ctx 放掉——它是按上一族的权重建的，留着只会让下一张用错模型。
+#[tauri::command]
+pub async fn gen_family_set(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, GenState>,
+    family: String,
+) -> Result<GenModels, String> {
+    let core = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || apply_family(core, app, &family))
+        .await
+        .map_err(|e| format!("换模型任务起不来：{e}"))?
+}
+
+fn apply_family(core: GenCore, app: tauri::AppHandle, family: &str) -> Result<GenModels, String> {
+    let db = app.state::<DbState>();
+    let next = Family::from_id(family).ok_or_else(|| format!("没有这个模型：{family}"))?;
+    if core.family() == next {
+        return Ok(collect_models(&core));
+    }
+    let mut engine = core.lock();
+    if engine.busy {
+        return Err("正在出图，等这一张跑完再换模型".to_string());
+    }
+    {
+        let conn = db
+            .0
+            .lock()
+            .map_err(|_| "数据库连接状态异常（前一次访问发生 panic）".to_string())?;
+        db::write_setting(&conn, FAMILY_KEY, next.id())?;
+    }
+    core.set_family(next);
+    if !engine.ctx.is_null() {
+        unsafe { sd::free_sd_ctx(engine.ctx) };
+        engine.ctx = null_mut();
+    }
+    /* 主窗口缓存着「当前族 + 新建面板默认参数」，切完广播一声——
+       不管这次切换是设置窗口点的还是 agent 调的，新建面板都得跟着换。 */
+    let _ = app.emit("inspace:gen-family", serde_json::json!({ "family": next.id() }));
+    Ok(collect_models(&core))
+}
+
+/// 读某族的新建面板默认参数。不传族就是当前族。
+#[tauri::command]
+pub fn gen_defaults(state: tauri::State<GenState>, family: Option<String>) -> GenDefaults {
+    let core = state.0.clone();
+    let family = family
+        .as_deref()
+        .and_then(Family::from_id)
+        .unwrap_or_else(|| core.family());
+    core.defaults_of(family)
+}
+
+/// 保存某族的新建面板默认参数（面板「更多设置」改动时调）。不传族就是当前族。
+#[tauri::command]
+pub async fn gen_defaults_set(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, GenState>,
+    defaults: GenDefaults,
+    family: Option<String>,
+) -> Result<GenDefaults, String> {
+    let core = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let family = family
+            .as_deref()
+            .and_then(Family::from_id)
+            .unwrap_or_else(|| core.family());
+        apply_defaults(core, app, defaults, family)
+    })
+    .await
+    .map_err(|e| format!("保存默认参数失败：{e}"))?
+}
+
+/// 恢复某族的出厂参数。不传族就是当前族。
+#[tauri::command]
+pub async fn gen_defaults_reset(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, GenState>,
+    family: Option<String>,
+) -> Result<GenDefaults, String> {
+    let core = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let family = family
+            .as_deref()
+            .and_then(Family::from_id)
+            .unwrap_or_else(|| core.family());
+        apply_defaults(core, app, family.factory_defaults(), family)
+    })
+    .await
+    .map_err(|e| format!("恢复默认参数失败：{e}"))?
+}
+
+fn apply_defaults(
+    core: GenCore,
+    app: tauri::AppHandle,
+    defaults: GenDefaults,
+    family: Family,
+) -> Result<GenDefaults, String> {
+    let next = normalize_defaults(defaults, family);
+    let db = app.state::<DbState>();
+    {
+        let conn = db
+            .0
+            .lock()
+            .map_err(|_| "数据库连接状态异常（前一次访问发生 panic）".to_string())?;
+        let text = serde_json::to_string(&next).map_err(|e| format!("参数存不下来：{e}"))?;
+        db::write_setting(&conn, family.defaults_key(), &text)?;
+    }
+    core.set_defaults(family, next.clone());
+    Ok(next)
 }
 
 /// 检测：列出模型目录里能选的档位，再报这台机器的规格、建议档和该下的文件。
@@ -604,6 +1058,7 @@ fn apply_models_dir(
     dir: Option<String>,
 ) -> Result<GenModels, String> {
     let db = app.state::<DbState>();
+    let family = core.family();
     let picked = dir
         .map(|text| text.trim().trim_matches('"').to_string())
         .filter(|text| !text.is_empty());
@@ -620,11 +1075,12 @@ fn apply_models_dir(
         }
         None => None,
     };
-    if next == *core
+    let current = core
         .models_dir
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-    {
+        .unwrap_or_else(|poisoned| poisoned.into_inner())[family.index()]
+        .clone();
+    if next == current {
         return Ok(collect_models(&core));
     }
     let mut engine = core.lock();
@@ -640,7 +1096,7 @@ fn apply_models_dir(
             .as_ref()
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_default();
-        db::write_setting(&conn, DIR_KEY, &value)?;
+        db::write_setting(&conn, family.dir_key(), &value)?;
     }
     core.set_models_dir(next);
     if !engine.ctx.is_null() {
@@ -704,8 +1160,9 @@ fn apply_weights(
             .0
             .lock()
             .map_err(|_| "数据库连接状态异常（前一次访问发生 panic）".to_string())?;
-        db::write_setting(&conn, DIT_KEY, &next.dit)?;
-        db::write_setting(&conn, ENCODER_KEY, &next.encoder)?;
+        let family = core.family();
+        db::write_setting(&conn, family.dit_key(), &next.dit)?;
+        db::write_setting(&conn, family.encoder_key(), &next.encoder)?;
     }
     /* 换的就是引擎的进料：旧 ctx 留着只会让下一次出图用错档，直接放掉。
        先改档位再放 ctx，两步都在这把锁里做完——中间要是松一下手，
@@ -887,29 +1344,50 @@ fn gb(mb: u64) -> String {
 
 /// 建议哪一档：编码器和 VAE 是躲不掉的固定开销，剩下的内存和磁盘看能塞进
 /// 多大的 DiT，从最大档往下试。认不到机器数字就退回默认档，不瞎猜。
-fn advise(machine: &Machine) -> (&'static str, u64, String) {
-    let smallest = DIT_TIERS[0];
-    let fallback = DIT_TIERS
+fn advise(machine: &Machine, family: Family) -> (&'static str, u64, String) {
+    let tiers = family.tiers();
+    let smallest = tiers[0];
+    let fallback_name = family.defaults().dit;
+    let fallback = tiers
         .iter()
-        .find(|(name, _)| *name == DEFAULT_DIT)
+        .find(|(name, _)| *name == fallback_name)
         .unwrap_or(&smallest);
+    let (_, vae_bytes) = family.vae();
+    let encoder_bytes = match family {
+        Family::Qwen21 => ENCODER_BYTES,
+        Family::H3Image => H3_ENCODER_BYTES,
+    };
     if machine.ram_avail_mb == 0 || machine.dir_free_mb == 0 {
-        let need = (fallback.1 + ENCODER_BYTES + VAE_BYTES) / MB;
+        let need = (fallback.1 + encoder_bytes + vae_bytes) / MB;
         return (
             fallback.0,
             fallback.1,
             format!("认不到这台机器的空闲内存或磁盘余量，先按默认的 {}（这一套 {}）给建议。", fallback.0, gb(need)),
         );
     }
-    let fixed = (ENCODER_BYTES + VAE_BYTES) / MB;
+    let fixed = (encoder_bytes + vae_bytes) / MB;
     let ram_budget = machine.ram_avail_mb.saturating_sub(RAM_RESERVE_MB);
     let disk_budget = machine.dir_free_mb.saturating_sub(DISK_RESERVE_MB);
-    let picked = DIT_TIERS
-        .iter()
-        .rev()
-        .find(|(_, bytes)| fixed + bytes / MB <= ram_budget && fixed + bytes / MB <= disk_budget);
+    /* H3 的 DiT 比 Qwen 大一个数量级：只看内存/磁盘会把 Q8 也推荐出来，
+       16GB 卡上那是拿满屏 offload 换时间。按显存再压一道上限。 */
+    let vram_cap = if family == Family::H3Image {
+        match machine.vram_mb {
+            0 => u64::MAX,
+            v if v >= 32_000 => u64::MAX,
+            v if v >= 20_000 => 18_000,
+            v if v >= 12_000 => 13_000,
+            _ => 9_500,
+        }
+    } else {
+        u64::MAX
+    };
+    let picked = tiers.iter().rev().find(|(_, bytes)| {
+        fixed + bytes / MB <= ram_budget
+            && fixed + bytes / MB <= disk_budget
+            && bytes / MB <= vram_cap
+    });
     let (name, dit_bytes) = *picked.unwrap_or(&smallest);
-    let need = (dit_bytes + ENCODER_BYTES + VAE_BYTES) / MB;
+    let need = (dit_bytes + encoder_bytes + vae_bytes) / MB;
     let mut reason = match picked {
         Some(_) => format!(
             "内存空出 {}、模型目录那个盘还剩 {}，扣掉留给应用和系统的余量，装得下 {}（这一套共 {}）。",
@@ -926,6 +1404,11 @@ fn advise(machine: &Machine) -> (&'static str, u64, String) {
             gb(need)
         ),
     };
+    if family == Family::H3Image {
+        reason.push_str(
+            "H3-Image 是 33B DiT + 32B 编码器：16GB 显卡建议 Q3–Q4 的 DiT 配 Q2 编码器，1–2MP 出图 5–15 秒，16MP 约 2 分钟。",
+        );
+    }
     if machine.vram_mb == 0 {
         reason.push_str("另外没认到 NVIDIA 显卡，出图会走纯 CPU，慢一个数量级。");
     }
@@ -933,39 +1416,50 @@ fn advise(machine: &Machine) -> (&'static str, u64, String) {
 }
 
 /// 建议那一套要扔进目录的文件。字节数是仓库里的真数，不是本地文件的。
-fn needed_rows(dir: &Path, dit: &str, dit_bytes: u64) -> Vec<NeededRow> {
-    let rows: [(&str, u64, &'static str, bool, String); 4] = [
-        (dit, dit_bytes, Kind::Dit.label(), false, DIT_PAGE.to_string()),
-        (
-            DEFAULT_ENCODER,
-            ENCODER_BYTES,
-            Kind::Encoder.label(),
-            false,
-            ENCODER_PAGE.to_string(),
-        ),
-        (DEFAULT_VAE, VAE_BYTES, Kind::Vae.label(), false, VAE_PAGE.to_string()),
-        (
-            DEFAULT_VISION,
-            VISION_BYTES,
-            Kind::Mmproj.label(),
-            true,
-            ENCODER_PAGE.to_string(),
-        ),
+fn needed_rows(dir: &Path, family: Family, dit: &str, dit_bytes: u64) -> Vec<NeededRow> {
+    let (vae_name, vae_bytes) = family.vae();
+    let mut rows: Vec<(String, u64, &'static str, bool, String)> = vec![
+        (dit.to_string(), dit_bytes, Kind::Dit.label(), false, match family {
+            Family::Qwen21 => DIT_PAGE.to_string(),
+            Family::H3Image => H3_DIT_PAGE.to_string(),
+        }),
     ];
+    match family {
+        Family::Qwen21 => {
+            rows.push((DEFAULT_ENCODER.to_string(), ENCODER_BYTES, Kind::Encoder.label(), false, ENCODER_PAGE.to_string()));
+            rows.push((vae_name.to_string(), vae_bytes, Kind::Vae.label(), false, VAE_PAGE.to_string()));
+            rows.push((DEFAULT_VISION.to_string(), VISION_BYTES, Kind::Mmproj.label(), true, ENCODER_PAGE.to_string()));
+        }
+        Family::H3Image => {
+            rows.push((H3_DEFAULT_ENCODER.to_string(), H3_ENCODER_BYTES, Kind::Encoder.label(), false, H3_ENCODER_PAGE.to_string()));
+            rows.push((vae_name.to_string(), vae_bytes, Kind::Vae.label(), false, H3_VAE_PAGE.to_string()));
+        }
+    }
     rows.into_iter()
-        .map(|(name, bytes, role, optional, page)| NeededRow {
-            name: name.to_string(),
-            bytes,
-            role,
-            optional,
-            present: dir.join(name).is_file(),
-            page,
+        .map(|(name, bytes, role, optional, page)| {
+            /* 认文件名之外的文件也算「已有」：目录里那份能被识别出来就能跑 */
+            let resolved = resolve_weights(dir, family, &family.defaults());
+            let present = match weight_kind(&name) {
+                Some(Kind::Dit) => dir.join(&resolved.dit).is_file(),
+                Some(Kind::Encoder) => dir.join(&resolved.encoder).is_file(),
+                Some(Kind::Vae) => resolve_vae(dir, family).is_some(),
+                _ => dir.join(&name).is_file(),
+            };
+            NeededRow {
+                present,
+                name,
+                bytes,
+                role,
+                optional,
+                page,
+            }
         })
         .collect()
 }
 
-fn tier_rows(dir: &Path, recommended: &str) -> Vec<TierRow> {
-    DIT_TIERS
+fn tier_rows(dir: &Path, family: Family, recommended: &str) -> Vec<TierRow> {
+    family
+        .tiers()
         .iter()
         .map(|(name, bytes)| TierRow {
             name: name.to_string(),
@@ -977,6 +1471,7 @@ fn tier_rows(dir: &Path, recommended: &str) -> Vec<TierRow> {
 }
 
 fn collect_models(core: &GenCore) -> GenModels {
+    let family = core.family();
     let dir = core.models();
     let mut buckets: Vec<Vec<ModelFile>> = vec![Vec::new(), Vec::new(), Vec::new()];
     if let Ok(entries) = fs::read_dir(&dir) {
@@ -1005,20 +1500,24 @@ fn collect_models(core: &GenCore) -> GenModels {
     }
     let weights = core.weights();
     let machine = core.machine();
-    let (dit, dit_bytes, advice) = advise(&machine);
+    let (dit, dit_bytes, advice) = advise(&machine, family);
     GenModels {
         models_dir: dir.display().to_string(),
+        family: family.id(),
+        family_label: family.label(),
+        max_side: family.max_side(),
+        modes: family.modes(),
         dir_is_default: core.is_default_dir(),
         dit: buckets.remove(0),
         encoder: buckets.remove(0),
         fixed: buckets.remove(0),
         current_dit: weights.dit.clone(),
         current_encoder: weights.encoder.clone(),
-        missing: missing_weights(&dir, &weights),
+        missing: missing_weights(&dir, &weights, family),
         machine,
         advice,
-        needed: needed_rows(&dir, dit, dit_bytes),
-        tiers: tier_rows(&dir, dit),
+        needed: needed_rows(&dir, family, dit, dit_bytes),
+        tiers: tier_rows(&dir, family, dit),
     }
 }
 
@@ -1043,9 +1542,41 @@ pub async fn gen_start(
 }
 
 fn begin(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: String) -> Result<(), String> {
+    /* API 启用就整条路走远端：配置不全也不偷偷退回本地——
+       那会变成几十秒的本地生成，和「配置了就走 API」相悖。缺什么直接报。 */
+    let api = core.api();
+    if api.enabled {
+        if let Some(problem) = api.problem() {
+            return Err(format!("API 配置不完整：{problem}。去设置 → 生图模型里补上"));
+        }
+        return begin_api(core, app, req, block, api);
+    }
     /* 放大这一档不碰扩散模型：既不载入那 12 GB，也不走 ctx，自成一条路 */
     if Mode::pick(req.mode.as_deref(), req.images.len()) == Mode::Upscale {
         return begin_upscale(core, app, req, block);
+    }
+    /* 请求里点名了另一族：先切过去（持久化），这一次和下次都按它来。
+       名字写错就报错，别静默拿旧模型出图。 */
+    if let Some(requested) = req.family.as_deref().map(str::trim).filter(|text| !text.is_empty()) {
+        match Family::from_id(requested) {
+            Some(family) if family != core.family() => {
+                apply_family(core.clone(), app.clone(), family.id())?;
+            }
+            Some(_) => {}
+            None => return Err(format!("没有这个模型：{requested}")),
+        }
+    }
+    let family = core.family();
+    let mode = Mode::pick(req.mode.as_deref(), req.images.len());
+    if !family.supports(mode) {
+        return Err(match mode {
+            Mode::Image => format!(
+                "{} 不支持图生图；要拿参考图改画风/改内容，用参考图编辑（mode=edit）",
+                family.label()
+            ),
+            Mode::Inpaint => format!("{} 暂不支持局部重绘", family.label()),
+            _ => format!("{} 不支持这个模式", family.label()),
+        });
     }
     let ctx = {
         let mut engine = core.lock();
@@ -1100,6 +1631,42 @@ fn begin_upscale(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: S
     Ok(())
 }
 
+/// API 这一趟：认领 busy 后把请求丢给后台线程。网络那头掐不断，
+/// 「停止」只留标志位，请求回来再认这张作废——和放大那条路一个道理。
+fn begin_api(
+    core: GenCore,
+    app: tauri::AppHandle,
+    req: GenRequest,
+    block: String,
+    config: ApiConfig,
+) -> Result<(), String> {
+    {
+        let mut engine = core.lock();
+        if engine.busy {
+            return Err("正在出图，等这一张跑完".to_string());
+        }
+        engine.busy = true;
+        engine.last_used = Instant::now();
+        core.cancel.store(false, Ordering::Relaxed);
+    }
+    thread::spawn(move || {
+        let started = Instant::now();
+        /* 一条 0/0 的进度：前端拿它把「载入权重…」换成「生成中…」 */
+        let _ = app.emit(
+            "gen-progress",
+            ProgressEvent {
+                block: block.clone(),
+                step: 0,
+                steps: 0,
+                seconds: 0.0,
+            },
+        );
+        let outcome = imageapi::generate(&config, &req, &core.cancel);
+        finish(&core, &app, block, outcome, started.elapsed().as_secs_f32());
+    });
+    Ok(())
+}
+
 /// 放大权重的位置：数据根里的 `gen/upscale/`，跟「模型目录可换」那套无关。
 fn upscaler_path(core: &GenCore) -> Result<PathBuf, String> {
     let path = core.data.dir(GEN_DIR).join(UPSCALE_SUB).join(DEFAULT_UPSCALER);
@@ -1134,20 +1701,26 @@ fn ensure_ctx(core: &GenCore, engine: &mut Engine) -> Result<*mut sd::sd_ctx_t, 
     if !engine.ctx.is_null() {
         return Ok(engine.ctx);
     }
+    let family = core.family();
     let dir = core.models();
-    let weights = core.weights();
-    let missing = missing_weights(&dir, &weights);
+    let weights = resolve_weights(&dir, family, &core.weights());
+    let missing = missing_weights(&dir, &weights, family);
     if !missing.is_empty() {
         return Err(format!("权重还没下全，缺：{}", missing.join("、")));
     }
     // 这几条 CString 必须活到 new_sd_ctx 返回之后，所以只能在栈上捏着
     let diffusion = cpath(&dir.join(&weights.dit));
     let encoder = cpath(&dir.join(&weights.encoder));
-    let vae = cpath(&dir.join(DEFAULT_VAE));
-    /* 视觉投影是可选件：没有它就出不了图生图和编辑，纯文生图照跑。
-       引擎那边按 strlen 判空，所以缺了就干脆不填这个槽。 */
-    let vision_path = dir.join(DEFAULT_VISION);
-    let vision = vision_path.is_file().then(|| cpath(&vision_path));
+    let vae_name = resolve_vae(&dir, family).unwrap_or_else(|| family.vae().0.to_string());
+    let vae = cpath(&dir.join(&vae_name));
+    /* 视觉投影是 Qwen 的可选件：没有它就出不了图生图和编辑，纯文生图照跑。
+       H3 的编码器自带视觉塔，不填这个槽。 */
+    let vision = if family == Family::Qwen21 {
+        let vision_path = dir.join(DEFAULT_VISION);
+        vision_path.is_file().then(|| cpath(&vision_path))
+    } else {
+        None
+    };
     let budget = CString::new(VRAM_BUDGET).expect("常量串");
     let backend = CString::new("cpu").expect("常量串");
     unsafe {
@@ -1161,6 +1734,7 @@ fn ensure_ctx(core: &GenCore, engine: &mut Engine) -> Result<*mut sd::sd_ctx_t, 
         }
         params.vae_path = vae.as_ptr();
         params.flash_attn = true;
+        params.diffusion_flash_attn = true;
         params.max_vram = budget.as_ptr();
         params.params_backend = backend.as_ptr();
         let ctx = sd::new_sd_ctx(&params);
@@ -1185,19 +1759,22 @@ fn run_job(
     };
     let sink_ptr = &sink as *const Sink as *mut c_void;
     let started = Instant::now();
+    let family = core.family();
     let outcome = unsafe {
         sd::sd_set_progress_callback(Some(on_progress), sink_ptr);
         // proj 模式是 latent 到 RGB 的一次线性投影，Qwen 2.1 有现成的投影表，
-        // 不用多下一个预览用的小 VAE，代价几乎看不出来
-        sd::sd_set_preview_callback(
-            Some(on_preview),
-            sd::preview_t::PREVIEW_PROJ,
-            1,
-            true,
-            false,
-            sink_ptr,
-        );
-        let out = generate(ctx, &req);
+        // 不用多下一个预览用的小 VAE，代价几乎看不出来。H3 没有这张投影表。
+        if family == Family::Qwen21 {
+            sd::sd_set_preview_callback(
+                Some(on_preview),
+                sd::preview_t::PREVIEW_PROJ,
+                1,
+                true,
+                false,
+                sink_ptr,
+            );
+        }
+        let out = generate(ctx, &req, family);
         sd::sd_set_progress_callback(None, null_mut());
         sd::sd_set_preview_callback(
             None,
@@ -1275,7 +1852,11 @@ fn upscale_job(
     let started = Instant::now();
     eprintln!("[gen] upscale refine={:?} prompt={:?}", req.refine, req.prompt.trim());
     let outcome = if req.refine == Some(true) {
-        refine_then_upscale(&core, &app, &block, &req, &model)
+        if core.family() == Family::H3Image {
+            Err("H3-Image 不支持放大后的低强度重绘；把「补细节」关掉，只做纯 ESRGAN 放大".to_string())
+        } else {
+            refine_then_upscale(&core, &app, &block, &req, &model)
+        }
     } else {
         upscale_run(&model, &req)
     };
@@ -1337,7 +1918,7 @@ fn refine_then_upscale(
                 let mut engine = core.lock();
                 ensure_ctx(core, &mut engine)?
             };
-            let done = generate(Ctx(ctx), &sub)?;
+            let done = generate(Ctx(ctx), &sub, core.family())?;
             blend_tile(&mut acc, &mut weights, &big, &tile, &done, overlap, channels);
             /* 每补完一片就报进度、发一张「到目前为止」的缩略图：
                用户能看着画面一块块清晰起来，而不是对着「放大中…」干等 */
@@ -1615,19 +2196,32 @@ fn read_back(
 }
 
 #[derive(Clone)]
-struct Out {
-    pixels: Vec<u8>,
-    width: u32,
-    height: u32,
-    channel: u32,
+pub(crate) struct Out {
+    pub(crate) pixels: Vec<u8>,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) channel: u32,
 }
 
-fn generate(ctx: Ctx, req: &GenRequest) -> Result<Out, String> {
+fn generate(ctx: Ctx, req: &GenRequest, family: Family) -> Result<Out, String> {
     let prompt = cstring(&req.prompt)?;
     let negative = cstring(req.negative.as_deref().unwrap_or(""))?;
-    let (width, height) = fit_size(req.width, req.height);
-    let steps = req.steps.unwrap_or(DEFAULT_STEPS).clamp(1, 100);
-    let cfg = req.cfg.unwrap_or(DEFAULT_CFG).clamp(1.0, 20.0);
+    let (width, height) = fit_size(req.width, req.height, family.max_side());
+    /* 0 或没给 = 跟着模型走（Qwen 20 步 / cfg 6，H3 6 步 / cfg 1）。 */
+    let mut steps = match req.steps.filter(|value| *value > 0) {
+        Some(steps) => steps.clamp(1, 100),
+        None => family.default_steps(),
+    };
+    let mut cfg = match req.cfg.filter(|value| *value > 0.0) {
+        Some(cfg) => cfg.clamp(1.0, 20.0),
+        None => family.default_cfg(),
+    };
+    /* 老块上还留着 Qwen 那套默认（20 步 / cfg 6）。H3 是 6 步蒸馏，
+       按这两个数跑只会慢三倍、画面还容易过曝；两个都等于 Qwen 默认时当成没设过。 */
+    if family == Family::H3Image && steps == DEFAULT_STEPS && (cfg - DEFAULT_CFG).abs() < f32::EPSILON {
+        steps = family.default_steps();
+        cfg = family.default_cfg();
+    }
     let method = sd::sample_method_t::EULER_SAMPLE_METHOD;
     /* 输入图先全解出来捏在这儿：raw.data 指着它们的堆内存，
        必须活过 generate_image，所以不能是临时值 */
@@ -1639,6 +2233,9 @@ fn generate(ctx: Ctx, req: &GenRequest) -> Result<Out, String> {
     let mode = Mode::pick(req.mode.as_deref(), inputs.len());
     if mode != Mode::Text && inputs.is_empty() {
         return Err("这一档要输入图，但一块连过来的图都没有".to_string());
+    }
+    if family == Family::H3Image && inputs.len() > 16 {
+        return Err("H3-Image 最多吃 16 张参考图".to_string());
     }
     let strength = req.strength.unwrap_or(DEFAULT_STRENGTH).clamp(0.0, 1.0);
     /* 遮罩和输入图一样得活过 generate_image：raw.data 指着它的堆内存 */
@@ -1662,7 +2259,11 @@ fn generate(ctx: Ctx, req: &GenRequest) -> Result<Out, String> {
         params.seed = req.seed.unwrap_or(-1);
         params.batch_count = 1;
         params.sample_params.sample_method = method;
-        params.sample_params.scheduler = sd::sd_get_default_scheduler(ctx.0, method);
+        /* H3-Image 的 6 步蒸馏就配离散调度；Qwen 让它按模型自己选。 */
+        params.sample_params.scheduler = match family {
+            Family::Qwen21 => sd::sd_get_default_scheduler(ctx.0, method),
+            Family::H3Image => sd::scheduler_t::DISCRETE_SCHEDULER,
+        };
         params.sample_params.sample_steps = steps;
         params.sample_params.guidance.txt_cfg = cfg;
         // flow_shift / eta / img_cfg 留着不动：它们的默认值是 INFINITY，
@@ -1808,11 +2409,12 @@ fn png_data_url(pixels: &[u8], width: u32, height: u32, channel: u32) -> Option<
 }
 
 /// 尺寸必须是 32 的倍数（上游文档），面板给的下拉已经满足；agent 直传时在这儿兜住。
-fn fit_size(width: Option<i32>, height: Option<i32>) -> (i32, i32) {
+/// 上限按模型族走：Qwen 2048，H3-Image 4096（16MP 实测能出）。
+fn fit_size(width: Option<i32>, height: Option<i32>, max_side: i32) -> (i32, i32) {
     let snap = |value: i32| (value / 32).max(1) * 32;
     let w = snap(width.unwrap_or(DEFAULT_SIZE));
     let h = snap(height.unwrap_or(DEFAULT_SIZE));
-    (w.clamp(256, 2048), h.clamp(256, 2048))
+    (w.clamp(256, max_side), h.clamp(256, max_side))
 }
 
 fn cstring(text: &str) -> Result<CString, String> {
@@ -1825,14 +2427,91 @@ fn cpath(path: &Path) -> CString {
 
 /// 这一轮真会载入的文件里，哪些不在目录里。视觉投影不在必需名单上：
 /// 缺了它出不了图生图和编辑，纯文生图照样能跑，别拿它拦「开始」。
-fn missing_weights(dir: &Path, weights: &Weights) -> Vec<String> {
-    [
-        weights.dit.as_str(),
-        weights.encoder.as_str(),
-        DEFAULT_VAE,
-    ]
-    .into_iter()
-    .filter(|name| !dir.join(name).is_file())
-    .map(|name| (*name).to_string())
-    .collect()
+/// 目录里认到同名以外的文件时按种类解析，用户不必把文件改成内置名字。
+fn missing_weights(dir: &Path, weights: &Weights, family: Family) -> Vec<String> {
+    let resolved = resolve_weights(dir, family, weights);
+    let vae = resolve_vae(dir, family).unwrap_or_else(|| family.vae().0.to_string());
+    [resolved.dit, resolved.encoder, vae]
+        .into_iter()
+        .filter(|name| !dir.join(name).is_file())
+        .collect()
+}
+
+/// 目录里同一种类可能有多份（不同量化档）。给没有内置名字的文件打分挑一份：
+/// 高分辨率优先、贴近推荐档的加分，避免把 Q8 当默认。
+fn pick_kind(dir: &Path, want: Kind, family: Family) -> Option<String> {
+    let entries = fs::read_dir(dir).ok()?;
+    let mut best: Option<(i32, String)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+            continue;
+        };
+        if weight_kind(&name) != Some(want) {
+            continue;
+        }
+        let lower = name.to_ascii_lowercase();
+        let mut score = 0;
+        match want {
+            Kind::Dit => {
+                if family == Family::H3Image && lower.contains("minimax") {
+                    score += 40;
+                }
+                if lower.contains("ad") {
+                    score += 10;
+                }
+                if lower.contains("q4") {
+                    score += 10;
+                }
+            }
+            Kind::Encoder => {
+                if lower.contains("q2") || lower.contains("int8") {
+                    score += 10;
+                }
+                if lower.contains("minimax") || lower.contains("h3") {
+                    score += 20;
+                }
+            }
+            Kind::Vae => {
+                if lower.contains("fp16") {
+                    score += 10;
+                }
+                if family == Family::H3Image && lower.contains("h3") {
+                    score += 10;
+                }
+            }
+            _ => {}
+        }
+        if best.as_ref().is_none_or(|(current, _)| score > *current) {
+            best = Some((score, name));
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// 配置里的名字不在目录里就按种类换一份；在就照旧，绝不偷偷换掉用户点名的档。
+fn resolve_weights(dir: &Path, family: Family, base: &Weights) -> Weights {
+    let mut next = base.clone();
+    if !dir.join(&next.dit).is_file() {
+        if let Some(name) = pick_kind(dir, Kind::Dit, family) {
+            next.dit = name;
+        }
+    }
+    if !dir.join(&next.encoder).is_file() {
+        if let Some(name) = pick_kind(dir, Kind::Encoder, family) {
+            next.encoder = name;
+        }
+    }
+    next
+}
+
+fn resolve_vae(dir: &Path, family: Family) -> Option<String> {
+    let (name, _) = family.vae();
+    if dir.join(name).is_file() {
+        return Some(name.to_string());
+    }
+    pick_kind(dir, Kind::Vae, family)
 }

@@ -343,7 +343,7 @@ export function initSearch({ getItems, getSpaceId, focusBlock, jumpToSpace }) {
 
   document.addEventListener("keydown", (event) => {
     if (document.querySelector("#canvas-view")?.hidden) return;
-    /* 设置弹层开着的时候，快捷键归设置页管，别在它背后开搜索 */
+    /* 主窗口只有画布，搜索键始终归它管；设置窗口是另一个 webview，按键不会串过来 */
     if (window.__inspace?.route && window.__inspace.route !== "canvas") return;
     if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f") return;
     event.preventDefault();

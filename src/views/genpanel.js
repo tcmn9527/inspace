@@ -55,6 +55,8 @@ function hintText(run, item, mode) {
   if (run.phase === "running") {
     /* 补细节是一块一块补的，报片数比报「放大中」有用 */
     if (isUpscale) return upscaleRefine ? `补细节 ${run.step} / ${run.steps} 片` : "放大中…";
+    /* 走 API 没有步进，0/0 就是「在等远端」 */
+    if (!run.steps) return "生成中…";
     return `第 ${run.step} / ${run.steps} 步`;
   }
   if (run.phase === "failed") return run.error || "出图失败";

@@ -192,7 +192,7 @@ fn clear_legacy_undo_stash() {
 }
 
 /// 画布 id -> 目录。
-fn resolve_dir(state: &CanvasState, id: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_dir(state: &CanvasState, id: &str) -> Result<PathBuf, String> {
     canvas_dir(&state.root(), id)
 }
 
@@ -1693,22 +1693,29 @@ fn gen_of(raw: &Value) -> Value {
     json!({
         "prompt": gen_text(raw, "prompt", GEN_TEXT_MAX),
         "negative": gen_text(raw, "negative", GEN_TEXT_MAX),
-        "imageW": gen_int(raw, "imageW", 1024, 256, 2048),
-        "imageH": gen_int(raw, "imageH", 1024, 256, 2048),
-        "steps": gen_int(raw, "steps", 20, 1, 100),
+        "imageW": gen_int(raw, "imageW", 1024, 256, 4096),
+        "imageH": gen_int(raw, "imageH", 1024, 256, 4096),
+        /* 0 = 跟着当前模型走（Qwen 20 步 / H3 6 步）；只有真的写过步数才存正数 */
+        "steps": gen_int(raw, "steps", 0, 0, 100),
         "cfg": raw
             .get("cfg")
             .and_then(Value::as_f64)
-            .map(|value| value.clamp(1.0, 20.0))
-            .unwrap_or(6.0),
+            .map(|value| value.clamp(0.0, 20.0))
+            .unwrap_or(0.0),
         "seed": gen_int(raw, "seed", -1, -1, i64::MAX as i64),
         /* 出图那一档和改动幅度：认不出的一律回 auto / 0.75，
            别把写错的字符串原样存回去，下次读出来还是错的 */
         "mode": raw
             .get("mode")
             .and_then(Value::as_str)
-            .filter(|value| matches!(*value, "auto" | "t2i" | "i2i" | "edit" | "upscale"))
+            .filter(|value| matches!(*value, "auto" | "t2i" | "i2i" | "edit" | "upscale" | "inpaint"))
             .unwrap_or("auto"),
+        /* 空串 = 跟随设置里的当前模型 */
+        "model": raw
+            .get("model")
+            .and_then(Value::as_str)
+            .filter(|value| matches!(*value, "qwen21" | "h3image"))
+            .unwrap_or(""),
         "strength": raw
             .get("strength")
             .and_then(Value::as_f64)
@@ -2031,6 +2038,29 @@ pub async fn canvas_export_write(
 ) -> Result<String, String> {
     let path = export_write_target(&dir, &name, &ext)?;
     /* 同名不覆盖：同一个画布导第二遍，别把上一版悄悄顶掉 */
+    let path = unique_path(path);
+    let bytes = BASE64
+        .decode(data.as_bytes())
+        .map_err(|e| format!("导出数据有误：{e}"))?;
+    if bytes.is_empty() {
+        return Err("导出内容是空的".to_string());
+    }
+    fs::write(&path, &bytes).map_err(|e| format!("写入文件失败：{e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// agent 用的导出：不弹框，直接写到数据根下的 exports/ 里。
+/// UI 那条路要用户挑位置；agent 这条路只需要一个确定的落点。
+#[tauri::command]
+pub async fn canvas_export_auto(
+    state: tauri::State<'_, CanvasState>,
+    name: String,
+    ext: String,
+    data: String,
+) -> Result<String, String> {
+    let dir = state.data.dir("exports");
+    fs::create_dir_all(&dir).map_err(|e| format!("无法创建导出目录：{e}"))?;
+    let path = export_write_target(&dir.to_string_lossy(), &name, &ext)?;
     let path = unique_path(path);
     let bytes = BASE64
         .decode(data.as_bytes())

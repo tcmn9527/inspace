@@ -28,8 +28,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SD_SHA = "290148d2e31ca6ef9757d567905776b5f3646db5"; // master-1039，2026-11-01
-const GGML_SHA = "d49c49e1dd361ba3c0a77c90b5b1404b83969aa8"; // 上面那份提交里 ggml 指向的
+const SD_SHA = "b9d7176bf88fe465576e0aafbe47ba253ffcfc2c"; // master-1080，2026-11-12（H3-Image）
+const GGML_SHA = "d803c238f67915fb825a9aa4df27b99356d51597"; // 上面那份提交里 ggml 指向的
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEST = path.join(ROOT, "tools", "sdcpp");

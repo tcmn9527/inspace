@@ -4,11 +4,15 @@ mod cosmos;
 mod db;
 mod ebook;
 mod ffmpeg;
+mod imageapi;
 mod imagegen;
 mod mcp;
 mod models;
+mod modelscan;
 pub mod sdcpp; // 引擎绑定：examples 和后续的生图面板都从这里进
 mod store;
+mod videogen;
+mod videolocal;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -64,6 +68,40 @@ fn listen_f10_toggle(app: &tauri::AppHandle) {
     });
 }
 
+/* 设置是独立窗口：已经开着就把它提到前面，page 指定落在哪一页（如主题）。
+   窗口不带系统边框，标题栏和拖动区由 settings.html 自己画，和主窗口一套风格。
+   这个命令必须是 async：创建窗口要回主线程，同步命令会把 IPC 那条线程钉住等它，
+   主窗口的 WebView 也跟着一起卡死。 */
+#[tauri::command]
+async fn open_settings_window(app: tauri::AppHandle, page: Option<String>) -> Result<(), String> {
+    use tauri::Emitter;
+    let page = page.filter(|value| !value.is_empty());
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        if let Some(page) = page.as_deref() {
+            let _ = window.emit("inspace:settings-page", page);
+        }
+        return Ok(());
+    }
+    let url = match page {
+        Some(page) => tauri::WebviewUrl::App(format!("settings.html?page={page}").into()),
+        None => tauri::WebviewUrl::App("settings.html".into()),
+    };
+    tauri::WebviewWindowBuilder::new(&app, "settings", url)
+        .title("设置")
+        .inner_size(880.0, 620.0)
+        .min_inner_size(720.0, 520.0)
+        .resizable(true)
+        .decorations(false)
+        .shadow(true)
+        .center()
+        .build()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -97,6 +135,7 @@ pub fn run() {
             app.manage(Arc::new(cosmos::CosmosJobs::default()));
             // 生图引擎：一个常驻 sd_ctx，一次只出一张，空闲几分钟自己放掉
             app.manage(imagegen::init(data_root.clone(), &db_state));
+            app.manage(videogen::init(data_root.clone(), &db_state));
             // 3D 模型库：library/models/ 下的 .glb，产品卡只记文件名
             app.manage(models::init(data_root.clone())?);
             // 换数据目录的搬运同理：进度在后台线程报，停止只改标志
@@ -141,6 +180,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            open_settings_window,
             store::data_root,
             store::data_pick_root,
             store::data_default_root,
@@ -225,11 +265,30 @@ pub fn run() {
             cosmos::cosmos_tex_reset,
             cosmos::cosmos_tex_read,
             imagegen::gen_status,
+            imagegen::gen_family_set,
+            imagegen::gen_defaults,
+            imagegen::gen_defaults_set,
+            imagegen::gen_defaults_reset,
             imagegen::gen_models,
             imagegen::gen_models_set,
             imagegen::gen_models_dir_pick,
             imagegen::gen_models_dir_set,
             imagegen::gen_models_reveal,
+            imageapi::gen_api_get,
+            imageapi::gen_api_set,
+            imageapi::gen_api_models,
+            videogen::gen_video_api_get,
+            videogen::gen_video_api_set,
+            videogen::gen_video_models,
+            videogen::gen_video_status,
+            videogen::gen_video_start,
+            videogen::gen_video_cancel,
+            videolocal::gen_video_engine_get,
+            videolocal::gen_video_engine_set,
+            videolocal::gen_video_local_get,
+            videolocal::gen_video_local_set,
+            videolocal::gen_video_dir_pick,
+            videolocal::gen_video_dir_reveal,
             models::model_library_dir,
             models::model_library_list,
             models::model_library_reveal,
@@ -244,6 +303,7 @@ pub fn run() {
             canvas::canvas_export_pick_dir,
             canvas::canvas_export_write,
             canvas::canvas_export_write_path,
+            canvas::canvas_export_auto,
             canvas::canvas_export_reveal,
             capture::webview_capture,
             mcp::mcp_register_tools,

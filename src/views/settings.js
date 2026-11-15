@@ -1,7 +1,7 @@
-/* 设置页：数据文件夹 + 视频组件状态。
+/* 设置窗口的内容：数据文件夹、生图模型、模型库、宇宙贴图、航线、MCP、视频组件。
 
-   画布数据都存在这一个文件夹里；这里负责「选目录 → 问旧文件夹怎么处置 → 落地」
-   这三步。拷贝 / 剪贴 / 新建由用户当场决定，后端只在最后一步动手，中途失败原数据保持不动。
+   这个模块只管各页里的控件和状态，窗口长什么样、左侧菜单选哪一项由
+   settings-window.js 负责。所有路径/模型目录都在 Rust 侧，主窗口和这里读写同一份。
 
    视频组件只在没认到的时候才出现：那种情况下用户需要「把 ffmpeg.exe 放进哪个文件夹」
    和「放完了点一下重新检测」，整张卡就是为这两步存在的。认到了就一行都不显示，
@@ -12,12 +12,14 @@ import { currentTheme } from "./theme.js";
 import { cosmosRoute, cosmosRouteSet } from "./cosmos.js";
 
 const { invoke } = window.__TAURI__.core;
+const { emitTo } = window.__TAURI__.event;
 
 const ui = {};
 let statusTimer = 0;
 let currentRoot = "";
 let mcpInfo = null;
 let mcpStatusTimer = 0;
+let onFfmpegState = null;
 
 /* 搬运在后台线程跑，进度走 data-root-move 事件。命令一返回，线程就可能已经发过
    好几条了，所以监听器常驻、事件先按任务号攒着，等进度弹层挂上再补画。 */
@@ -43,19 +45,14 @@ function showStatus(message) {
   }, 3000);
 }
 
-/* 设置是浮在画布上的弹层：关掉就是回画布，和右上角齿轮走同一条路由 */
-function closeSettings() {
-  window.dispatchEvent(new CustomEvent("inspace:route", { detail: "canvas" }));
-}
-
 function setBusy(busy) {
   for (const button of [ui.pick, ui.reveal, ui.reset]) button.disabled = busy;
 }
 
-export function initSettings() {
-  ui.page = document.querySelector("#settings-view");
-  ui.scrim = document.querySelector("#settings-scrim");
-  ui.close = document.querySelector("#settings-close");
+/* options.onFfmpegState(found)：视频组件这一页只在缺 ffmpeg 时才出现在菜单里，
+   检测是异步的，检测完让窗口那边同步菜单。 */
+export function initSettings(options = {}) {
+  onFfmpegState = options.onFfmpegState || null;
   ui.path = document.querySelector("#settings-data-path");
   ui.pick = document.querySelector("#settings-data-pick");
   ui.reveal = document.querySelector("#settings-data-reveal");
@@ -86,6 +83,8 @@ export function initSettings() {
   ui.routeField = document.querySelector("#settings-route-field");
   ui.routeMinutes = document.querySelector("#settings-route-minutes");
   ui.routeStatus = document.querySelector("#settings-route-status");
+  ui.genFamilies = document.querySelector("#settings-gen-families");
+  ui.genNote = document.querySelector("#settings-gen-note");
   ui.genHint = document.querySelector("#settings-gen-hint");
   ui.genStatus = document.querySelector("#settings-gen-status");
   ui.genDir = document.querySelector("#settings-gen-dir");
@@ -95,6 +94,35 @@ export function initSettings() {
   ui.genDirPick = document.querySelector("#settings-gen-dir-pick");
   ui.genDirReset = document.querySelector("#settings-gen-dir-reset");
   ui.genError = document.querySelector("#settings-gen-error");
+  ui.genEngine = document.querySelector("#settings-gen-engine");
+  ui.genLocal = document.querySelector("#settings-gen-local");
+  ui.genApi = document.querySelector("#settings-gen-api");
+  ui.genApiProtocol = document.querySelector("#settings-gen-api-protocol");
+  ui.genApiUrl = document.querySelector("#settings-gen-api-url");
+  ui.genApiModel = document.querySelector("#settings-gen-api-model");
+  ui.genApiKey = document.querySelector("#settings-gen-api-key");
+  ui.genApiReload = document.querySelector("#settings-gen-api-reload");
+  ui.genApiStatus = document.querySelector("#settings-gen-api-status");
+  ui.genApiError = document.querySelector("#settings-gen-api-error");
+  ui.videoProtocol = document.querySelector("#settings-video-protocol");
+  ui.videoUrl = document.querySelector("#settings-video-url");
+  ui.videoKey = document.querySelector("#settings-video-key");
+  ui.videoModel = document.querySelector("#settings-video-model");
+  ui.videoReload = document.querySelector("#settings-video-reload");
+  ui.videoStatus = document.querySelector("#settings-video-status");
+  ui.videoError = document.querySelector("#settings-video-error");
+  ui.videoEngine = document.querySelector("#settings-video-engine");
+  ui.videoLocalBox = document.querySelector("#settings-video-local");
+  ui.videoCloudBox = document.querySelector("#settings-video-cloud");
+  ui.videoLocalStatus = document.querySelector("#settings-video-local-status");
+  ui.videoLocalError = document.querySelector("#settings-video-local-error");
+  ui.videoDir = document.querySelector("#settings-video-dir");
+  ui.videoRoles = document.querySelector("#settings-video-roles");
+  ui.videoNotes = document.querySelector("#settings-video-notes");
+  ui.videoRescan = document.querySelector("#settings-video-rescan");
+  ui.videoReveal = document.querySelector("#settings-video-reveal");
+  ui.videoDirPick = document.querySelector("#settings-video-dir-pick");
+  ui.videoDirReset = document.querySelector("#settings-video-dir-reset");
   ui.modelsStatus = document.querySelector("#settings-models-status");
   ui.modelsDir = document.querySelector("#settings-models-dir");
   ui.modelsReveal = document.querySelector("#settings-models-reveal");
@@ -104,22 +132,6 @@ export function initSettings() {
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
   ui.reset.addEventListener("click", reset);
-  ui.close.addEventListener("click", closeSettings);
-  ui.scrim.addEventListener("click", closeSettings);
-  document.addEventListener("keydown", (event) => {
-    if (!ui.page || ui.page.hidden) return;
-    if (event.key !== "Escape" || event.repeat) return;
-    const target = event.target;
-    /* 输入框里的 Esc 归它自己（取消编辑），不连设置弹层一起关 */
-    if (
-      target &&
-      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
-    ) {
-      return;
-    }
-    event.preventDefault();
-    closeSettings();
-  });
   ui.ffmpegReveal.addEventListener("click", revealFfmpegDir);
   ui.ffmpegRecheck.addEventListener("click", refreshFfmpeg);
   ui.mcpCopy.addEventListener("click", copyMcpConfig);
@@ -128,9 +140,64 @@ export function initSettings() {
   ui.cosmosCancel.addEventListener("click", cancelCosmosTextures);
   ui.cosmosClear.addEventListener("click", clearCosmosTextures);
   ui.genCheck.addEventListener("click", runGenCheck);
+  ui.genFamilies.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-family]");
+    if (button) pickFamily(button.dataset.family);
+  });
   ui.genReveal.addEventListener("click", revealGenDir);
   ui.genDirPick.addEventListener("click", pickGenDir);
   ui.genDirReset.addEventListener("click", () => setGenDir(null));
+  ui.genEngine.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-engine]");
+    if (button) pickGenEngine(button.dataset.engine);
+  });
+  for (const field of [ui.genApiUrl, ui.genApiKey]) {
+    /* 地址和 Key 填完就去把模型列表读回来：模型名不给手填，只能从列表里挑 */
+    field.addEventListener("blur", async () => {
+      if (!genApi.enabled) return;
+      await saveGenApiForm();
+      await reloadGenApiModels();
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        field.blur();
+      }
+    });
+  }
+  ui.genApiModel.addEventListener("change", saveGenApiForm);
+  ui.genApiProtocol.addEventListener("change", async () => {
+    await saveGenApiForm();
+    await reloadGenApiModels();
+  });
+  ui.genApiReload.addEventListener("click", reloadGenApiModels);
+  ui.videoProtocol.addEventListener("change", async () => {
+    paintVideoUrl();
+    await saveVideoForm();
+    await reloadVideoModels();
+  });
+  for (const field of [ui.videoUrl, ui.videoKey]) {
+    field.addEventListener("blur", async () => {
+      await saveVideoForm();
+      await reloadVideoModels();
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        field.blur();
+      }
+    });
+  }
+  ui.videoModel.addEventListener("change", saveVideoForm);
+  ui.videoReload.addEventListener("click", () => reloadVideoModels());
+  ui.videoEngine.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-video-engine]");
+    if (button) pickVideoEngine(button.dataset.videoEngine);
+  });
+  ui.videoRescan.addEventListener("click", () => refreshVideoLocal(false));
+  ui.videoReveal.addEventListener("click", revealVideoDir);
+  ui.videoDirPick.addEventListener("click", pickVideoDir);
+  ui.videoDirReset.addEventListener("click", () => setVideoDir(""));
   ui.modelsReveal.addEventListener("click", () => {
     invoke("model_library_reveal").catch((error) => showModelsError(String(error)));
   });
@@ -164,6 +231,7 @@ export async function refreshSettings() {
   refreshMcp();
   refreshCosmos();
   refreshGen();
+  refreshVideo();
   refreshModels();
   paintRouteCard();
   renderRoute();
@@ -254,10 +322,17 @@ function watchMove(job, mode) {
   });
 }
 
+/* 主窗口和设置窗口是两个 webview：换完数据根要让它重新进一次画布，
+   不然页面上还挂着旧目录那些内容。 */
+function broadcast(name, payload = {}) {
+  emitTo("main", name, payload).catch(() => {});
+}
+
 function applyRoot(path, mode) {
   currentRoot = path;
   ui.path.textContent = path;
   window.dispatchEvent(new Event("data-root-changed"));
+  broadcast("inspace:data-root-changed");
   showStatus(STATUS_TEXT[mode]);
 }
 
@@ -327,9 +402,11 @@ async function refreshFfmpeg() {
     const status = await invoke("ffmpeg_status");
     ui.ffmpegCard.hidden = status.found;
     if (!status.found) ui.ffmpegDir.textContent = status.componentsDir;
+    onFfmpegState?.(status.found);
   } catch (error) {
     ui.ffmpegCard.hidden = false;
     showFfmpegError(String(error));
+    onFfmpegState?.(false);
   }
 }
 
@@ -613,6 +690,444 @@ let genState = null;
 let genModels = null;
 let genChecked = false;
 let genBusy = false;
+let currentFamily = "qwen21";
+
+/* 两族各有一套权重和默认参数；切过去就把已载入的引擎放掉，下次出图按新族载入。 */
+const H3_NOTE =
+  "H3-Image 只支持文生图和参考图编辑（最多 16 张参考图）；1–2MP 出图约 5–8 秒，16MP 约 2 分钟。权重许可为 MiniMax 社区许可，商用需授权。";
+
+/* ---------- 生图引擎：本地模型 / API ----------
+   引擎是一道全局开关：选了 API，出图整条路走远端，本地权重一概不载。
+   Key 存在本机设置库里，这个窗口要能接着编辑所以原样带回；别的地方只报「配没配好」。 */
+let genApi = { enabled: false, protocol: "images", baseUrl: "", apiKey: "", model: "" };
+
+function showGenApiError(message) {
+  ui.genApiError.textContent = message;
+  ui.genApiError.hidden = !message;
+}
+
+function showGenApiStatus(message) {
+  ui.genApiStatus.textContent = message || "";
+  ui.genApiStatus.hidden = !message;
+}
+
+function apiProblem(config = genApi) {
+  if (!config.baseUrl.trim()) return "接口地址";
+  if (!config.model.trim()) return "模型名";
+  if (!(config.apiKey || "").trim()) return "API Key";
+  return "";
+}
+
+function fillGenApiForm() {
+  ui.genApiProtocol.value = genApi.protocol === "chat" ? "chat" : "images";
+  ui.genApiUrl.value = genApi.baseUrl || "";
+  ui.genApiKey.value = genApi.apiKey || "";
+  fillModelOptions([]);
+}
+
+/* 模型下拉只有列表里那几项；已保存的模型即使这次没读回来也要先占一项，
+   别让用户以为自己配的模型没了。 */
+function fillModelOptions(names) {
+  const current = genApi.model || "";
+  ui.genApiModel.replaceChildren();
+  const list = [...new Set(names)];
+  if (current && !list.includes(current)) list.unshift(current);
+  for (const name of list) ui.genApiModel.append(new Option(name, name));
+  ui.genApiModel.value = current || list[0] || "";
+  ui.genApiModel.disabled = !list.length || genBusy;
+}
+
+function paintGenEngine() {
+  const usingApi = Boolean(genApi.enabled);
+  for (const button of ui.genEngine.querySelectorAll("[data-engine]")) {
+    const on = button.dataset.engine === (usingApi ? "api" : "local");
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-selected", on ? "true" : "false");
+  }
+  ui.genApi.hidden = !usingApi;
+  ui.genLocal.hidden = usingApi;
+}
+
+async function pickGenEngine(engine) {
+  if (genBusy) return;
+  const want = engine === "api";
+  if (want === genApi.enabled) return;
+  showGenError("");
+  showGenApiError("");
+  try {
+    genApi = await invoke("gen_api_set", { config: { ...genApi, enabled: want } });
+    paintGenEngine();
+    if (want) {
+      if (!genApi.baseUrl.trim() || !genApi.apiKey.trim()) {
+        showGenApiStatus("填上接口地址和 API Key，模型列表会自己读回来");
+      } else {
+        await reloadGenApiModels();
+      }
+    } else {
+      showGenApiStatus("");
+    }
+  } catch (error) {
+    showGenError(String(error));
+  }
+}
+
+function readGenApiForm() {
+  return {
+    ...genApi,
+    protocol: ui.genApiProtocol.value === "chat" ? "chat" : "images",
+    baseUrl: ui.genApiUrl.value.trim(),
+    model: ui.genApiModel.value.trim(),
+    apiKey: ui.genApiKey.value,
+  };
+}
+
+async function saveGenApiForm() {
+  if (!genApi.enabled) return;
+  const next = readGenApiForm();
+  if (
+    next.protocol === genApi.protocol &&
+    next.baseUrl === genApi.baseUrl &&
+    next.model === genApi.model &&
+    next.apiKey === genApi.apiKey
+  ) {
+    return;
+  }
+  showGenApiError("");
+  try {
+    genApi = await invoke("gen_api_set", { config: next });
+    const missing = apiProblem();
+    showGenApiStatus(missing ? `还差：${missing}` : "");
+  } catch (error) {
+    showGenApiError(String(error));
+  }
+}
+
+async function reloadGenApiModels() {
+  if (!genApi.enabled) return;
+  const form = readGenApiForm();
+  if (!form.baseUrl.trim()) {
+    fillModelOptions([]);
+    showGenApiError("先把接口地址填上");
+    return;
+  }
+  if (!(form.apiKey || "").trim()) {
+    fillModelOptions([]);
+    showGenApiError("先把 API Key 填上");
+    return;
+  }
+  showGenApiError("");
+  ui.genApiReload.disabled = true;
+  ui.genApiModel.disabled = true;
+  showGenApiStatus("读取模型列表…");
+  try {
+    const names = await invoke("gen_api_models", { config: form });
+    fillModelOptions(names);
+    showGenApiStatus(`读到 ${names.length} 个模型；挑一个就能出图`);
+    /* 下拉里预选的不一定是已保存的那个：把它落库，界面显示的就是真会用的 */
+    if (ui.genApiModel.value && ui.genApiModel.value !== genApi.model) {
+      await saveGenApiForm();
+      showGenApiStatus(`读到 ${names.length} 个模型；现在用的是 ${ui.genApiModel.value}`);
+    }
+  } catch (error) {
+    fillModelOptions([]);
+    showGenApiStatus("");
+    showGenApiError(String(error));
+  } finally {
+    ui.genApiReload.disabled = false;
+    ui.genApiModel.disabled = !ui.genApiModel.options.length;
+  }
+}
+
+/* ---------- 视频生成 API ----------
+   视频没有本地兜底，配置好就能用。三家协议：OpenAI videos 拉 /models；
+   海螺和 DashScope 没有列表接口，模型清单在后端内置。 */
+let videoApi = { protocol: "openai", baseUrl: "", apiKey: "", model: "" };
+/* 视频引擎：api = 三家云协议；local = 本机 sd.cpp 跑 H3 */
+let videoEngine = "api";
+let videoLocal = { dir: "", diffusion: "", videoVae: "", audioVae: "", encoder: "", fps: 24 };
+let videoScan = { dir: "", ready: false, roles: [], notes: [] };
+let videoDefaultDir = "";
+
+function showVideoError(message) {
+  ui.videoError.textContent = message;
+  ui.videoError.hidden = !message;
+}
+
+function showVideoStatus(message) {
+  ui.videoStatus.textContent = message || "";
+  ui.videoStatus.hidden = !message;
+}
+
+function paintVideoUrl() {
+  const protocol = ui.videoProtocol.value;
+  ui.videoUrl.placeholder =
+    protocol === "minimax"
+      ? "https://api.minimax.cn"
+      : protocol === "dashscope"
+        ? "https://dashscope.aliyuncs.com"
+        : "https://api.openai.com/v1";
+}
+
+function fillVideoModels(names) {
+  const current = videoApi.model || "";
+  ui.videoModel.replaceChildren();
+  const list = [...new Set(names)];
+  if (current && !list.includes(current)) list.unshift(current);
+  for (const name of list) ui.videoModel.append(new Option(name, name));
+  ui.videoModel.value = current || list[0] || "";
+  ui.videoModel.disabled = !list.length;
+}
+
+function fillVideoForm() {
+  ui.videoProtocol.value =
+    videoApi.protocol === "minimax" || videoApi.protocol === "dashscope"
+      ? videoApi.protocol
+      : "openai";
+  ui.videoUrl.value = videoApi.baseUrl || "";
+  ui.videoKey.value = videoApi.apiKey || "";
+  paintVideoUrl();
+  fillVideoModels([]);
+}
+
+async function refreshVideo() {
+  videoEngine = await invoke("gen_video_engine_get").catch(() => videoEngine);
+  videoApi = await invoke("gen_video_api_get").catch(() => videoApi);
+  const local = await invoke("gen_video_local_get").catch(() => null);
+  if (local?.config) {
+    videoLocal = local.config;
+    videoScan = local.scan || videoScan;
+    videoDefaultDir = local.defaultDir || "";
+  }
+  fillVideoForm();
+  fillVideoLocal();
+  paintVideoEngine();
+  if (videoEngine === "api") await reloadVideoModels(true);
+}
+
+function paintVideoEngine() {
+  const local = videoEngine === "local";
+  for (const button of ui.videoEngine.querySelectorAll("[data-video-engine]")) {
+    const on = button.dataset.videoEngine === (local ? "local" : "api");
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-selected", on ? "true" : "false");
+  }
+  ui.videoLocalBox.hidden = !local;
+  ui.videoCloudBox.hidden = local;
+}
+
+async function pickVideoEngine(engine) {
+  const want = engine === "local" ? "local" : "api";
+  if (want === videoEngine) return;
+  showVideoLocalError("");
+  showVideoError("");
+  try {
+    videoEngine = await invoke("gen_video_engine_set", { engine: want });
+    paintVideoEngine();
+    if (videoEngine === "api") await reloadVideoModels(true);
+    else paintVideoLocal();
+  } catch (error) {
+    showVideoLocalError(String(error));
+  }
+}
+
+function fillVideoLocal() {
+  const dir = (videoScan.dir || videoLocal.dir || "").trim();
+  ui.videoDir.textContent = dir || "（还没定目录）";
+  ui.videoDir.title = dir;
+  ui.videoDirReset.hidden = !dir || dir === videoDefaultDir;
+  ui.videoRoles.replaceChildren();
+  for (const slot of videoScan.roles || []) {
+    const row = document.createElement("div");
+    row.className = `settings-gen-file${slot.missing ? " is-missing" : ""}`;
+    row.append(genSpan(slot.label, "settings-gen-role"));
+    if (slot.file) {
+      row.append(
+        genSpan(slot.file.name, "settings-gen-name"),
+        genSpan(formatBytes(slot.file.bytes), "settings-gen-size"),
+        genSpan("已识别", "settings-gen-state"),
+      );
+    } else {
+      row.append(
+        genSpan(slot.suggestName, "settings-gen-name"),
+        genSpan(formatBytes(slot.suggestBytes), "settings-gen-size"),
+        genSpan(slot.required ? "缺" : "缺（可空）", "settings-gen-state"),
+      );
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "settings-gen-link";
+      link.textContent = "下载页";
+      link.addEventListener("click", async () => {
+        try {
+          await invoke("plugin:opener|open_url", { url: slot.url });
+        } catch {
+          showVideoLocalError("打不开这个链接（系统浏览器调用失败）");
+        }
+      });
+      row.append(link);
+    }
+    ui.videoRoles.append(row);
+  }
+  ui.videoNotes.replaceChildren();
+  const notes = videoScan.notes || [];
+  ui.videoNotes.hidden = !notes.length;
+  for (const note of notes) {
+    const line = document.createElement("p");
+    line.className = "settings-model-note";
+    line.textContent = note;
+    ui.videoNotes.append(line);
+  }
+  paintVideoLocal();
+}
+
+function videoLocalProblem() {
+  if (!(videoScan.roles || []).length) return "还没找到模型目录";
+  if (videoScan.ready) return "";
+  const missing = (videoScan.roles || [])
+    .filter((slot) => slot.missing && slot.required)
+    .map((slot) => slot.label);
+  return missing.length ? `还缺 ${missing.join("、")}` : "";
+}
+
+function paintVideoLocal() {
+  const problem = videoLocalProblem();
+  showVideoLocalError("");
+  ui.videoLocalStatus.textContent = problem
+    ? `${problem}；把文件放进上面的文件夹后点「重新扫描」`
+    : "本地视频模型就绪；面板里点开始就走本机";
+  ui.videoLocalStatus.hidden = false;
+}
+
+function showVideoLocalError(message) {
+  ui.videoLocalError.textContent = message;
+  ui.videoLocalError.hidden = !message;
+}
+
+async function refreshVideoLocal(quiet = false) {
+  try {
+    const state = await invoke("gen_video_local_get");
+    if (state?.config) {
+      videoLocal = state.config;
+      videoScan = state.scan || videoScan;
+      videoDefaultDir = state.defaultDir || videoDefaultDir;
+    }
+  } catch (error) {
+    if (!quiet) showVideoLocalError(String(error));
+  }
+  fillVideoLocal();
+}
+
+async function setVideoDir(dir) {
+  showVideoLocalError("");
+  try {
+    const state = await invoke("gen_video_local_set", {
+      config: { ...videoLocal, dir: dir || "" },
+    });
+    if (state?.config) {
+      videoLocal = state.config;
+      videoScan = state.scan || videoScan;
+      videoDefaultDir = state.defaultDir || videoDefaultDir;
+    }
+    fillVideoLocal();
+  } catch (error) {
+    showVideoLocalError(String(error));
+  }
+}
+
+async function pickVideoDir() {
+  showVideoLocalError("");
+  let picked = null;
+  try {
+    picked = await invoke("gen_video_dir_pick");
+  } catch (error) {
+    showVideoLocalError(String(error));
+    return;
+  }
+  if (picked) await setVideoDir(picked);
+}
+
+async function revealVideoDir() {
+  showVideoLocalError("");
+  try {
+    await invoke("gen_video_dir_reveal");
+  } catch (error) {
+    showVideoLocalError(String(error));
+  }
+}
+
+function readVideoForm() {
+  return {
+    protocol: ui.videoProtocol.value,
+    baseUrl: ui.videoUrl.value.trim(),
+    apiKey: ui.videoKey.value,
+    model: ui.videoModel.value,
+  };
+}
+
+async function saveVideoForm() {
+  const next = readVideoForm();
+  if (
+    next.protocol === videoApi.protocol &&
+    next.baseUrl === videoApi.baseUrl &&
+    next.apiKey === videoApi.apiKey &&
+    next.model === videoApi.model
+  ) {
+    return;
+  }
+  showVideoError("");
+  try {
+    videoApi = await invoke("gen_video_api_set", { config: next });
+  } catch (error) {
+    showVideoError(String(error));
+  }
+}
+
+async function reloadVideoModels(quiet = false) {
+  const form = readVideoForm();
+  if (form.protocol === "openai" && !(form.apiKey || "").trim() && !form.baseUrl) {
+    fillVideoModels([]);
+    showVideoStatus("");
+    if (!quiet) showVideoError("先把接口地址或 API Key 填上");
+    return;
+  }
+  showVideoError("");
+  ui.videoReload.disabled = true;
+  ui.videoModel.disabled = true;
+  showVideoStatus("读取模型列表…");
+  try {
+    const names = await invoke("gen_video_models", { config: form });
+    fillVideoModels(names);
+    showVideoStatus(`读到 ${names.length} 个模型`);
+    if (ui.videoModel.value && ui.videoModel.value !== videoApi.model) {
+      await saveVideoForm();
+    }
+  } catch (error) {
+    fillVideoModels([]);
+    showVideoStatus("");
+    if (quiet) showVideoStatus("模型列表还没读出来，点「读取模型列表」重试");
+    else showVideoError(String(error));
+  } finally {
+    ui.videoReload.disabled = false;
+    ui.videoModel.disabled = !ui.videoModel.options.length;
+  }
+}
+
+async function pickFamily(family) {
+  if (genBusy || family === currentFamily) return;
+  lockGen(true);
+  showGenError("");
+  try {
+    await invoke("gen_family_set", { family });
+    genChecked = false;
+    genModels = null;
+    /* 主窗口那边缓存着「新建面板默认参数」和当前族，切完通知它一声 */
+    emitTo("main", "inspace:gen-family", { family }).catch(() => {});
+    await refreshGen();
+  } catch (error) {
+    showGenError(String(error));
+  } finally {
+    lockGen(false);
+  }
+}
 
 function showGenError(message) {
   ui.genError.textContent = message;
@@ -624,6 +1139,10 @@ function lockGen(on) {
   for (const button of [ui.genCheck, ui.genReveal, ui.genDirPick, ui.genDirReset]) {
     button.disabled = on;
   }
+  for (const button of ui.genFamilies.querySelectorAll("[data-family]")) {
+    button.disabled = on;
+  }
+  if (ui.genApiModel) ui.genApiModel.disabled = on || !ui.genApiModel.options.length;
   ui.genCheck.textContent = on ? "检测中…" : genChecked ? "重新检测" : "检测模型";
 }
 
@@ -631,6 +1150,9 @@ async function refreshGen() {
   showGenError("");
   /* 每次打开设置都从「收起」开始：健康态就一行状态加一个目录，摊开是他自己点出来的 */
   genChecked = false;
+  genApi = await invoke("gen_api_get").catch(() => genApi);
+  fillGenApiForm();
+  paintGenEngine();
   try {
     genState = await invoke("gen_status");
   } catch (error) {
@@ -650,6 +1172,14 @@ async function refreshGen() {
 function paintGen() {
   const s = genState;
   if (!s) return;
+  currentFamily = s.family || "qwen21";
+  for (const button of ui.genFamilies.querySelectorAll("[data-family]")) {
+    const on = button.dataset.family === currentFamily;
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-selected", on ? "true" : "false");
+  }
+  ui.genNote.hidden = currentFamily !== "h3image";
+  ui.genNote.textContent = currentFamily === "h3image" ? H3_NOTE : "";
   ui.genStatus.textContent = s.missing.length
     ? `缺 ${s.missing.length} 个模型文件，出图起不来：${s.missing.join("、")}`
     : `当前 ${s.dit} + ${s.encoder}`;

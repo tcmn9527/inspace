@@ -189,75 +189,101 @@ body.is-titlebar-hidden .titlebar {
   background: color-mix(in srgb, var(--fg) 10%, transparent);
 }
 
-/* ---------- 设置弹层 ---------- */
-.settings-page {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 28px;
-}
-
-.settings-scrim {
-  position: absolute;
-  inset: 0;
-  background: rgba(8, 12, 18, 0.38);
-}
-
-.settings-dialog {
-  position: relative;
+/* ---------- 设置窗口 ---------- */
+/* 独立窗口：自绘标题栏 + 左侧平铺菜单 + 右侧当前这一项的内容。
+   每页只有一张卡，所以不套卡片的边框和底色，标题直接落在内容面上。 */
+.settings-window {
   display: flex;
   flex-direction: column;
-  width: min(860px, 100%);
-  max-height: 100%;
-  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-  overflow: hidden;
+  height: 100%;
+  background: var(--bg);
 }
 
-/* 打开时由程序把焦点收进弹层（为了不再留在齿轮上），这层壳自己不要画焦点框 */
-.settings-dialog:focus {
-  outline: none;
-}
-
-.settings-head {
-  display: flex;
-  align-items: center;
+.settings-window-head {
   justify-content: space-between;
-  flex: 0 0 auto;
-  padding: 14px 16px 12px 20px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 28%, transparent);
+  padding-left: 14px;
 }
 
-.settings-close {
+/* 主窗口那条线分的是「工具条 | 窗口按钮」，设置窗口没有工具条，不画 */
+.settings-window-head .titlebar-right::before {
+  display: none;
+}
+
+.settings-window-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.settings-layout {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.settings-nav {
+  flex: 0 0 176px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px 14px;
+  border-right: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
+}
+
+.settings-nav-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
   cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-.settings-close:hover,
-.settings-close:focus-visible {
-  border-color: var(--line);
+.settings-nav-item:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
   color: var(--fg);
 }
 
-.settings-body {
+.settings-nav-item.is-active {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+
+.settings-content {
   flex: 1 1 auto;
-  min-height: 0;
+  min-width: 0;
   overflow-y: auto;
-  padding: 16px 20px 20px;
+  padding: 22px 26px 28px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
+}
+
+.settings-pane > .settings-card {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+/* 宇宙主题这一页里贴图和航线是两节，用一条细线分开 */
+.settings-pane > .settings-card + .settings-card {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+/* 窗口右侧比原来的弹层宽：色卡按可用宽度多排几列 */
+.settings-pane .theme-pop-grid {
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
 }
 
 .settings-card {
@@ -316,6 +342,101 @@ body.is-titlebar-hidden .titlebar {
 .settings-error {
   color: var(--danger);
 }
+
+/* 生图模型族切换：两族的槽位/默认参数/目录都各管各的 */
+.settings-gen-families {
+  display: inline-flex;
+  gap: 2px;
+  margin-top: 12px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.settings-gen-family {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.settings-gen-family:hover {
+  color: var(--fg);
+}
+
+.settings-gen-family.is-active {
+  background: color-mix(in srgb, var(--fg) 11%, transparent);
+  color: var(--fg);
+}
+
+.settings-gen-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 生图引擎切换：本地模型 / API。和模型族那组同一套视觉，只是管的事不同 */
+.settings-gen-engine {
+  display: inline-flex;
+  gap: 2px;
+  margin-top: 12px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.settings-gen-api {
+  margin-top: 4px;
+}
+
+.settings-gen-api .settings-field {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.settings-gen-api .settings-field > span {
+  align-self: center;
+}
+
+.settings-gen-api input,
+.settings-gen-api select {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.settings-gen-api input:focus,
+.settings-gen-api select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 视频本地引擎的四个文件行：名字、文件名（截断）、选择按钮 */
+.settings-video-files .settings-field {
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+}
+
+.settings-video-file {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 
 /* 生图档位：两列真文件，文件名在左、体积在右。当前那一档用左边一条光带标出来，
    不动文件名自己的颜色——他得看清选中的到底是哪个文件。名字宁可折行也不截尾，
@@ -470,6 +591,19 @@ body.is-titlebar-hidden .titlebar {
 
 .settings-gen-file.is-missing .settings-gen-state {
   color: var(--danger);
+}
+
+/* 识别说明：共享、改名建议、多余候选，都是「知道就好」的补充，不抢主状态 */
+.settings-model-notes {
+  margin-top: 6px;
+  max-width: 640px;
+}
+
+.settings-model-note {
+  margin: 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 /* 遨游星球：名单一行一颗。行尾的上移/下移/移除平时不出现，也不做按钮外壳——
@@ -1272,16 +1406,7 @@ body.is-titlebar-hidden .titlebar {
   user-select: text;
 }
 
-/* ---------- 主题选择弹窗 ---------- */
-/* 外壳、标题栏、关闭键全部复用设置弹层那套，只有宽度按四列色卡收窄 */
-.theme-dialog {
-  width: min(460px, 100%);
-}
-
-.theme-body {
-  padding: 16px 20px 20px;
-}
-
+/* ---------- 主题色卡 ---------- */
 .theme-pop-group {
   margin: 6px 2px 6px;
   font-size: 11px;
@@ -1968,6 +2093,19 @@ body.is-titlebar-hidden .titlebar {
   cursor: grabbing;
 }
 
+/* Ctrl 按住时的框选：光标变十字，拖出半透明选框；松开恢复 */
+.canvas-stage.is-marquee-ready {
+  cursor: crosshair;
+}
+
+.canvas-marquee {
+  position: fixed;
+  z-index: 40;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+}
+
 /* 从资源管理器拖文件进来时，给画布一圈提示 */
 .canvas-stage.is-file-over::after {
   content: "";
@@ -2425,6 +2563,11 @@ body.is-screen-capturing .canvas-scene-selection {
   border: 1px solid var(--canvas-border, #9a9a9a);
 }
 
+.canvas-item-genvideo {
+  cursor: default;
+  border: 1px solid var(--canvas-border, #9a9a9a);
+}
+
 .canvas-gen-card {
   display: flex;
   flex-direction: column;
@@ -2441,7 +2584,8 @@ body.is-screen-capturing .canvas-scene-selection {
   flex: 1 1 auto;
   align-items: center;
   justify-content: center;
-  min-height: 0;
+  /* 图的地板：面板再矮也不让取景窗被提示词挤没 */
+  min-height: 160px;
   background: color-mix(in srgb, var(--surface-2) 70%, var(--bg));
 }
 
@@ -2596,10 +2740,24 @@ body.is-screen-capturing .canvas-scene-selection {
   font-size: 12.5px;
   line-height: 18px;
   resize: none;
-  /* 高度由 JS 按内容撑开，永远不出滚动条 */
-  overflow: hidden;
-  scrollbar-width: none;
-  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+  /* 高度由 JS 按块高和内容算：够就撑开，块矮了就在框里滚 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+
+.canvas-gen-prompt::-webkit-scrollbar {
+  width: 4px;
+}
+
+.canvas-gen-prompt::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.canvas-gen-prompt::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
 }
 
 .canvas-gen-prompt:focus {
@@ -2615,17 +2773,248 @@ body.is-screen-capturing .canvas-scene-selection {
   opacity: 0.5;
 }
 
+/* 视频面板：取景窗换成播放器，参数只有时长和画幅 */
+.canvas-genvideo-stage video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.canvas-genvideo-stage video[hidden] {
+  display: none;
+}
+
+.canvas-genvideo-prompt {
+  min-height: 62px;
+}
+
+/* 参数两行：时长、像素尺寸。都能手改，右边「常用」给出用户认得的档位 */
+.canvas-genvideo-controls {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.canvas-genvideo-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.canvas-genvideo-label {
+  flex: 0 0 auto;
+  width: 28px;
+  font-size: 11.5px;
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-genvideo-input {
+  /* 输入框的固有宽度会撑爆这一行：基准归零，宽度全交给 flex 分 */
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+}
+
+.canvas-genvideo-unit {
+  flex: 0 0 auto;
+  color: var(--canvas-muted, #8b8b8b);
+  font-size: 11.5px;
+}
+
+/* 「秒」落在输入框里：右边留出文字的位置，输入数字不压到它 */
+.canvas-genvideo-seconds {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.canvas-genvideo-seconds .canvas-genvideo-input {
+  flex: 1 1 auto;
+  width: 100%;
+  padding-right: 24px;
+}
+
+.canvas-genvideo-unit-inside {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  color: var(--canvas-muted, #8b8b8b);
+  font-size: 11.5px;
+  pointer-events: none;
+}
+
+.canvas-genvideo-preset {
+  flex: 0 0 auto;
+}
+
+
+
 .canvas-gen-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
 }
 
+/* 按钮不参与压缩、文字不换行：面板窄时宁可挤弹性空位，也不能把「隐藏更多设置」折成两行 */
+.canvas-gen-actions > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 更多设置：面板内展开的参数表，两列紧凑排；值都就地改、失焦即存 */
+.canvas-gen-more {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+.canvas-gen-more[hidden] {
+  display: none;
+}
+
+.canvas-gen-more-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-gen-more-row.is-wide {
+  grid-column: 1 / -1;
+}
+
+.canvas-gen-more-row > span {
+  flex: 0 0 auto;
+}
+
+.canvas-gen-more-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 11.5px;
+}
+
+textarea.canvas-gen-more-input {
+  height: auto;
+  padding: 4px 6px;
+  resize: none;
+  line-height: 15px;
+}
+
+.canvas-gen-more-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.canvas-gen-more-size .canvas-gen-more-input {
+  width: 0;
+}
+
+.canvas-gen-more-size > span {
+  flex: 0 0 auto;
+}
+
+.canvas-gen-more-size-preset {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.canvas-gen-more-size-preset:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
+}
+
+.canvas-gen-more-tip {
+  grid-column: 1 / -1;
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+/* 走 API 时本地参数整行撤掉，只留尺寸；顶部一句话说清发的是什么 */
+.canvas-gen-more.is-api .is-local-only {
+  display: none;
+}
+
+.canvas-gen-more-api {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.canvas-gen-more-api[hidden] {
+  display: none;
+}
+
+.canvas-gen-more-check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.canvas-gen-more-check:disabled {
+  opacity: 0.35;
+}
+
+.canvas-gen-more-toggle,
+.canvas-gen-more-reset {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* 更多设置和恢复默认挨在左侧，开始/落块靠右 */
+.canvas-gen-spacer {
+  flex: 1 1 auto;
+}
+
+.canvas-gen-more-toggle:hover,
+.canvas-gen-more-reset:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+
+.canvas-gen-more-toggle.is-open {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
+}
+
 /* 两颗钮照弹层里那套规格：开始走强调色，落块是描边次要钮 */
 .canvas-gen-run,
 .canvas-gen-place {
   height: 26px;
-  padding: 0 12px;
+  padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: transparent;
@@ -4950,7 +5339,6 @@ body.is-screen-capturing .canvas-scene-selection {
   height: 15px;
 }
 
-.caption-theme svg,
 #settings-btn svg {
   width: 14px;
   height: 14px;
@@ -5205,7 +5593,11 @@ body.is-screen-capturing .canvas-scene-selection {
   font-size: 12px;
   /* 拖动途中数字一直在跳，等宽数字才不会左右抖 */
   font-variant-numeric: tabular-nums;
-  pointer-events: none;
+  /* 默认只报编号，点一下展开坐标尺寸；宽度跟内容走 */
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
 }
 
 /* 锁定块在 #N 前面挂的小锁，跟着 12px 字走 */
@@ -5315,42 +5707,6 @@ body.is-screen-capturing .canvas-scene-selection {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-/* ---- 空状态：还没有画布 ---- */
-.canvas-empty {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--surface) 75%, transparent), var(--bg) 65%);
-  pointer-events: none;
-}
-
-.canvas-empty-card {
-  width: 380px;
-  padding: 22px 24px 20px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
-  pointer-events: auto;
-  text-align: center;
-}
-
-.canvas-empty-card h2 {
-  margin: 0 0 8px;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.canvas-empty-card p {
-  margin: 0 0 16px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
 .canvas-error {
   position: absolute;
   z-index: 7;
@@ -5406,4 +5762,163 @@ body.is-screen-capturing .canvas-scene-selection {
 .canvas-connector.is-agent-target {
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 85%, transparent))
     drop-shadow(0 0 9px color-mix(in srgb, var(--accent) 55%, transparent));
+}
+
+/* ---------- 图片对比浮层 ---------- */
+/* 临时查看用：两张图完整显示（contain）叠在同一区域，拖中间分割线看差异 */
+.compare-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 12, 18, 0.72);
+}
+
+.compare-panel {
+  position: relative;
+  display: flex;
+  width: min(92vw, 1500px);
+  height: min(88vh, 1000px);
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.compare-panel:focus {
+  outline: none;
+}
+
+.compare-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  cursor: pointer;
+}
+
+.compare-close:hover {
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.compare-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+/* 图片内容一起缩放/平移；分割线留在屏幕上不跟着动 */
+.compare-canvas {
+  position: absolute;
+  inset: 0;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.compare-stage.is-zoomed {
+  cursor: grab;
+}
+
+.compare-stage.is-comparing-pan {
+  cursor: grabbing;
+}
+
+.compare-tools {
+  position: absolute;
+  top: 10px;
+  right: 48px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.compare-tool {
+  height: 26px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.compare-tool:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.compare-zoom-value {
+  min-width: 46px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+}
+
+.compare-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.compare-top {
+  clip-path: inset(0 0 0 50%);
+}
+
+.compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+.compare-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  background: rgba(18, 18, 18, 0.72);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
 }

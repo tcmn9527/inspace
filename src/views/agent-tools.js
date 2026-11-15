@@ -252,11 +252,17 @@ const SCENE_CAMERA = {
 const GEN_PROPS = {
   prompt: { type: "string", description: "生图面板的提示词（这一张要什么）" },
   negative: { type: "string", description: "生图面板的负向提示词（不想要什么）" },
-  imageW: { type: "number", description: "出图宽，256~2048，自己贴到 32 的倍数，默认 1024" },
+  imageW: { type: "number", description: "出图宽，256~2048（H3 到 4096），自己贴到 32 的倍数，默认 1024" },
   imageH: { type: "number", description: "出图高，同上" },
-  steps: { type: "number", description: "步数 1~100，默认 20" },
-  cfg: { type: "number", description: "提示词贴合度 1~20，默认 6" },
+  steps: { type: "number", description: "步数 1~100；0 或省略 = 按模型默认（Qwen 20 / H3 6）" },
+  cfg: { type: "number", description: "提示词贴合度 1~20；0 或省略 = 按模型默认（Qwen 6 / H3 1）" },
   seed: { type: "number", description: "种子；-1 每张换一个，给正数才能复现同一张" },
+  model: {
+    type: "string",
+    enum: ["", "qwen21", "h3image"],
+    description:
+      "用哪一族出图：qwen21=Qwen-Image 2.1（20 步，快，日常），h3image=MiniMax-H3-Image（6 步，质感更强、1MP 约 5 秒）；空串跟随设置里的当前模型。点名会顺带把当前模型切过去",
+  },
   mode: {
     type: "string",
     enum: ["auto", "t2i", "i2i", "edit", "upscale"],
@@ -412,6 +418,18 @@ const TOOL_DEFS = [
     ["id"],
   ),
   def(
+    "ui_select",
+    "调试用：直接设置选中的块 id 列表（不模拟鼠标点击），用于验证多选相关菜单和交互；传空数组清空选择。",
+    {
+      ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "要选中的块 id 列表；空数组清空选择",
+      },
+    },
+    ["ids"],
+  ),
+  def(
     "ui_menu",
     "调试用：按块 id 打开右键菜单（不展开子菜单），配合 ui_click 逐级点菜单项做验证。",
     { id: ID },
@@ -529,8 +547,8 @@ const TOOL_DEFS = [
       pseudo: { type: "string", description: "可选：要读的伪元素，如 ::after / ::before" },
       view: {
         type: "string",
-        enum: ["canvas", "settings", "current"],
-        description: "量之前先切到哪个页面；默认 canvas，current 表示保持当前页面不动",
+        enum: ["canvas", "current"],
+        description: "量之前先切到哪个页面；默认 canvas，current 表示保持当前页面不动。设置是独立窗口，这里的 DOM 量不到",
       },
     },
     ["selector"],
@@ -571,8 +589,11 @@ const TOOL_DEFS = [
   ),
   def("block_get", "看单个块的摘要。", { id: ID }, ["id"]),
   def("block_create", "在画布里新建一块。坐标不给就落在视野中央、连续创建自动错开。", {
-    type: { type: "string", description: "text/rect/ellipse/line/arrow/note/picture/scene/gen/product/quote/plan/page/image/audio/video/file/ebook/connector" },
+    type: { type: "string", description: "text/rect/ellipse/line/arrow/note/picture/scene/gen/genvideo/product/quote/plan/page/image/audio/video/file/ebook/connector" },
     x: X, y: Y, w: W, h: H,
+    seconds: { type: "number", description: "视频面板：时长（秒，1~60），默认 6" },
+    width: { type: "number", description: "视频面板：出片宽（64~4096，偶数），本地引擎还会对齐到 32" },
+    height: { type: "number", description: "视频面板：出片高，同宽" },
     text: { type: "string", description: "文字块的正文" },
     markdown: { type: "string", description: "笔记块的 Markdown 正文" },
     name: { type: "string", description: "笔记块的名字；产品卡也用它当名称" },
@@ -907,26 +928,32 @@ const TOOL_DEFS = [
     ...(PICTURE_LIGHT.properties || {}),
     off: { type: "boolean", description: "true 就是关掉这块的光，回到没有光的原样" },
   }, ["id"]),
-  def("gen_status", "问出图引擎现在什么状况：权重进没进内存、哪一块生图面板正占着它、要用的那几个文件在不在盘上、当前用的是哪一档（dit / encoder）、空闲多久自动放掉。顺带把这块画布里每一面生图面板的摘要都列出来（提示词、参数、那一档 mode 和改动幅度 strength、进料 feed={mode,label,count} 说清这次真会走哪档、接了几张输入图、相位、最近那张的相对路径）。"),
-  def("gen_models", "检测出图模型这一整套的现状，一次全给：模型目录（modelsDir，用户在设置页定的，可能在数据根之外）+ 目录里可换的两列文件（dit 画图模型、encoder 文本编码器，各带字节数，小的在前）+ fixed 两件跟着模型定死的 + 当前选的档 + missing 缺哪些 + machine 这台机器的数字（显卡名、显存、内存总量与空闲、该盘剩余）+ advice 为什么建议某一档 + needed 建议那一套要放的四个文件（名字、字节数、下载页、在不在盘上，视觉投影标 optional）+ tiers 全部量化档。头一次调用会探显卡，稍慢一两秒。这是引擎级的全局配置，和当前画布无关。"),
-  def("gen_models_set", "换出图档位：dit / encoder 各给一个模型文件夹里的文件名，没给的槽位不动。选了立刻落库并放掉已载入的权重——下一次出图按新档重新载入，头一次会慢一两分钟。正在出图时换不了（先 gen_cancel 或等这张跑完）。文件名必须是 gen_models 扫出来的那一个，且不能跨槽位（拿编码器当 DiT 会报回）。模型目录不由这条工具改：要挪地方是用户在设置页「换个目录」。", {
+  def("gen_status", "问出图引擎现在什么状况：权重进没进内存、哪一块生图面板正占着它、要用的那几个文件在不在盘上、当前用的是哪一档（dit / encoder）、空闲多久自动放掉。顺带把这块画布里每一面生图面板的摘要都列出来（提示词、参数、那一档 mode 和改动幅度 strength、进料 feed={mode,label,count} 说清这次真会走哪档、接了几张输入图、相位、最近那张的相对路径）。provider=local|api 说这一张走本地还是远端 API；apiModel 是 API 模式下的模型名，apiProblem 非空说明 API 配置缺东西、出图会直接报错。走 API 时本地档位和缺件都不用管。"),
+  def("gen_models", "检测出图模型这一整套的现状，一次全给：模型目录（modelsDir，用户在设置窗口定的，可能在数据根之外）+ 目录里可换的两列文件（dit 画图模型、encoder 文本编码器，各带字节数，小的在前）+ fixed 两件跟着模型定死的 + 当前选的档 + missing 缺哪些 + machine 这台机器的数字（显卡名、显存、内存总量与空闲、该盘剩余）+ advice 为什么建议某一档 + needed 建议那一套要放的四个文件（名字、字节数、下载页、在不在盘上，视觉投影标 optional）+ tiers 全部量化档。头一次调用会探显卡，稍慢一两秒。这是引擎级的全局配置，和当前画布无关。"),
+  def("gen_models_set", "换出图档位：dit / encoder 各给一个模型文件夹里的文件名，没给的槽位不动。选了立刻落库并放掉已载入的权重——下一次出图按新档重新载入，头一次会慢一两分钟。正在出图时换不了（先 gen_cancel 或等这张跑完）。文件名必须是 gen_models 扫出来的那一个，且不能跨槽位（拿编码器当 DiT 会报回）。模型目录不由这条工具改：要挪地方是用户在设置窗口「换个目录」。", {
     dit: { type: "string", description: "画图模型文件名，取自 gen_models 的 dit 列" },
     encoder: { type: "string", description: "文本编码器文件名，取自 gen_models 的 encoder 列" },
   }),
-  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个画布的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。mode 给 upscale 是另一条路：纯 ESRGAN 放大，连一张图、不读提示词也不看步数，出来就是 4× 那张（864×1152 那种输入约十秒）。", {
+  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个画布的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。mode 给 upscale 是另一条路：纯 ESRGAN 放大，连一张图、不读提示词也不看步数，出来就是 4× 那张（864×1152 那种输入约十秒）。设置里选了 API 引擎时整条路走远端：family/steps/cfg/seed/negative 都不生效，只发提示词、尺寸和参考图；i2i/inpaint 降级成「参考图+提示词」，upscale 直接报不支持。", {
     id: ID,
     prompt: { type: "string", description: "这一张要什么，一句话到一段话" },
     negative: { type: "string", description: "不想要什么" },
-    imageW: { type: "number", description: "出图宽，256~2048，自己贴到 32 的倍数，默认 1024" },
+    imageW: { type: "number", description: "出图宽，256~2048（H3 到 4096），自己贴到 32 的倍数，默认 1024" },
     imageH: { type: "number", description: "出图高，同上" },
-    steps: { type: "number", description: "步数 1~100，默认 20" },
-    cfg: { type: "number", description: "提示词贴合度 1~20，默认 6" },
+    steps: { type: "number", description: "步数 1~100；0 或省略 = 按模型默认（Qwen 20 / H3 6）" },
+    cfg: { type: "number", description: "提示词贴合度 1~20；0 或省略 = 按模型默认（Qwen 6 / H3 1）" },
     seed: { type: "number", description: "种子；-1 每张换一个，给正数才能同一张复现" },
+    model: {
+      type: "string",
+      enum: ["", "qwen21", "h3image"],
+      description:
+        "用哪一族出图：qwen21=Qwen-Image 2.1，h3image=MiniMax-H3-Image（6 步，1MP 约 5 秒、16MP 约 2 分钟，参考图编辑最多 16 张）；空串跟随设置里的当前模型。点名会顺带切过去",
+    },
     mode: {
       type: "string",
       enum: ["auto", "t2i", "i2i", "edit", "upscale", "inpaint"],
       description:
-        "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑。upscale 是纯 ESRGAN 高清放大，不参与推断、要明说：连一张图进来，出不带提示词的 4× 那张。inpaint 是局部重绘：连一张底图、再带 mask，白的地方按 prompt 重画",
+        "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑。upscale 是纯 ESRGAN 高清放大，不参与推断、要明说：连一张图进来，出不带提示词的 4× 那张。inpaint 是局部重绘：连一张底图、再带 mask，白的地方按 prompt 重画。注意 H3 只支持 t2i / edit / upscale，i2i 和 inpaint 会报回",
     },
     mask: {
       type: "string",
@@ -940,8 +967,54 @@ const TOOL_DEFS = [
     wait: { type: "boolean", description: "false 只起一轮就返回（马上拿 phase 判断），默认 true 等到出完" },
     timeout: { type: "number", description: "等多少秒，默认 300，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问" },
   }, ["id"], 630),
-  def("gen_cancel", "掐掉正在出的那一张。载入权重那几分钟也能停（那边一出来看到取消标志就自己收）。没有图在跑返回 canceled:false。"),
+  def(
+    "gen_family",
+    "看/切当前生图模型族。不传 family 只返回现在的设置：族 id、名称、支持的模式、出图边长上限、模型目录、当前档位和缺件。传 qwen21（Qwen-Image 2.1，20 步，日常）或 h3image（MiniMax-H3-Image，6 步，1MP 约 5 秒、16MP 约 2 分钟）就切过去——会放掉已载入的权重，下一次出图按新族重新载入；正在出图时切换会被拒绝。设置里选了 API 引擎时，切族只影响以后切回本地时的配置，不影响 API 出图。",
+    {
+      family: {
+        type: "string",
+        enum: ["qwen21", "h3image"],
+        description: "要切到哪一族；不传只看当前设置",
+      },
+    },
+  ),
+  def("gen_cancel", "掐掉正在出的那一张。载入权重那几分钟也能停（那边一出来看到取消标志就自己收）。没有图在跑返回 canceled:false。走 API 时网络那头掐不断：界面立刻显示已取消，请求回来那张会作废丢弃。"),
   def("gen_place", "把一块生图面板最近出的那张落成一块独立图片块，落在面板右边。落出去的是复制：面板接着显示它那张、也接着能改词重出，图片块自己带一份文件，删哪一块都不影响另一块。", { id: ID }, ["id"]),
+  def("gen_video", "生成一条视频（文生视频 / 图生视频）。走哪个引擎由设置 → 视频生成里的「本地模型 / 云端 API」决定：本地用本机 sd.cpp 跑 MiniMax-H3（1–20 秒、带音频、每条几分钟），云端用配置好的 API 协议；平台是异步任务，一次只跑一条，通常 1-5 分钟。firstFrame 给画布块 id（图片块、画面块、已出图的生图面板）或直接给 PNG 的 base64/data URL，给了就是图生视频；DashScope 协议（万相/百炼可灵）只收公网图片 URL，本地首帧会被拒。给了 block（genvideo 面板 id）就按面板走：提示词/秒数/尺寸/首帧优先用面板上的，状态和结果也写回面板，出完可 gen_video_place 落块。返回视频缓存文件的绝对路径（gen/videos/ 下）。等太久到 timeout 返回 timedOut:true，任务还在平台那边跑，用 gen_video_status 接着看。", {
+    prompt: { type: "string", description: "视频要什么：画面、动作、镜头；挂面板时可省略，用面板上的提示词" },
+    block: { type: "string", description: "genvideo 面板块 id：给了就按面板的参数和首帧跑，状态/结果写回面板" },
+    firstFrame: { type: "string", description: "首帧图：画布块 id，或 PNG 的 base64 / data URL；不给就是文生视频" },
+    seconds: { type: "number", description: "秒数，默认 6；OpenAI 4-12、海螺 6/10、DashScope 3-15、本地最长 20" },
+    ratio: { type: "string", enum: ["16:9", "9:16", "1:1"], description: "没给宽高时按画幅推默认尺寸" },
+    imageW: { type: "number", description: "出片宽（32 对齐），本地引擎会再对齐一次" },
+    imageH: { type: "number", description: "出片高" },
+    model: { type: "string", description: "覆盖设置里的模型名（可选）" },
+    timeout: { type: "number", description: "等多少秒，默认 600，最大 1800" },
+  }, ["prompt"]),
+  def("gen_video_status", "问视频任务现在什么状况：busy、当前引擎（local/api）、正在跑的那一条的块号、状态（载入权重/采样/排队中/下载中）、等了多久、平台任务号。"),
+  def("gen_video_cancel", "取消正在等的那条视频任务。注意：任务提交后平台停不掉，费用照算，这里只是本地不再等。"),
+  def("gen_video_local", "看/换本地视频模型的文件夹。四件套（扩散模型、视频 VAE、音频 VAE、文本编码器）放进这个目录后自动扫描识别，文件名不一样也能认。不传 dir 只返回当前识别结果（每个槽位用了哪个文件、缺什么、建议改名、下载链接）；传 dir 就换目录并重新扫描，空串收回默认位置。", {
+    dir: { type: "string", description: "模型目录的绝对路径；空串回到默认位置" },
+  }, [], 30),
+  def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen 生图模型、video 视频生成、models 3D 模型库、mcp Agent 连接、shortcuts 快捷键。", {
+    page: {
+      type: "string",
+      enum: ["theme", "data", "gen", "video", "models", "mcp", "shortcuts"],
+      description: "要打开的那一页；不给就是主题页",
+    },
+  }),
+  def("export_canvas", "把当前画布导出成成品文件，直接写进数据目录的 exports/，不弹保存框。wechat 对版式画布（有大面积画面块打底）出整版长图页，和画布长得一模一样；纯文字画布出文章流 HTML。html 是交互网页，png / pdf 是整张图，toutiao 是 Word 文档。", {
+    format: {
+      type: "string",
+      enum: ["wechat", "html", "png", "pdf", "toutiao"],
+      description: "导出格式，默认 wechat",
+    },
+    quality: {
+      type: "string",
+      enum: ["normal", "high", "ultra"],
+      description: "png / pdf 的清晰度档位，默认 high",
+    },
+  }, []),
   def("gen_screenshot", "看一块生图面板现在是什么样，返回一张 PNG——取景窗里就是最近那张成品，正在跑的时候是逐步预览的那一帧。比 space_snapshot 近得多，改完提示词、出了图想确认画面对不对，调它。", {
     id: ID,
     maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
@@ -1028,6 +1101,7 @@ const BLOCK_FIELDS = [
   "x", "y", "w", "h", "x2", "y2", "fontSize", "align", "vAlign", "radius", "borderWidth", "locked",
   "borderColor", "fillColor", "color", "textColor", "text", "markdown",
   "name", "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
+  "seconds", "width", "height",
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
   "cmds", "symbols", "paperColor", "hidden", "light",
   "parts", "surfaces", "camera", "groundColor",
@@ -1128,7 +1202,7 @@ async function cosmosTextures(args) {
     return { ...(await invoke("cosmos_tex_status")), note: "8K 已进系统回收站，回到内置 2K" };
   }
   const status = await invoke("cosmos_tex_status");
-  /* 设置页没开着时没人通知渲染层档位变了；agent 轮到这里发现盘上的张数
+  /* 设置窗口没开着时没人通知渲染层档位变了；agent 轮到这里发现盘上的张数
      和渲染层以为的不一样，就提醒它重问一次——不然新下的 8K 要等下次进主题才生效 */
   if (!status.running && status.got !== (cosmosFlight().textures?.hi ?? -1)) {
     window.dispatchEvent(new CustomEvent("cosmos-textures-changed"));
@@ -1157,7 +1231,7 @@ async function genModelsTool() {
       note:
         `模型目录 ${models.modelsDir} 里还缺 ${lacking.length} 件：${want}。这台机器的建议档是 ${advised}，` +
         "文件名、字节数、下载页都在 needed 里，量化档对照表在 tiers 里——把这些报给用户，" +
-        "下载和「换个目录」都是他在设置页做的事，你别代劳。",
+        "下载和「换个目录」都是他在设置窗口做的事，你别代劳。",
     };
   }
   if (models.missing.length) {
@@ -1364,6 +1438,8 @@ async function dispatch(name, args) {
       return runBatch(args);
     case "ui_color_picker":
       return onCanvas(args, () => canvasAgent.debugColorPicker({ id: args.id, prop: args.prop }));
+    case "ui_select":
+      return canvasAgent.debugSelect({ ids: args.ids });
     case "ui_menu":
       return onCanvas(args, () => canvasAgent.debugMenu({ id: args.id }));
     case "ui_menu_color":
@@ -1441,6 +1517,7 @@ async function dispatch(name, args) {
             "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
             "paperColor", "cmds", "symbols", "light", "parts", "surfaces", "camera", "groundColor",
             ...GEN_KEYS,
+            "seconds", "width", "height",
             "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
           ]),
         ),
@@ -1578,12 +1655,24 @@ async function dispatch(name, args) {
       return onCanvas(args, () =>
         canvasAgent.genRun(args.id, pick(args, [...GEN_KEYS, "wait", "timeout", "refine"]), args.mask || ""),
       );
+    case "gen_family":
+      return canvasAgent.genFamily(args.family);
     case "gen_cancel":
       return onCanvas(args, () => canvasAgent.genCancel());
     case "gen_place":
       return onCanvas(args, () => canvasAgent.genPlace(args.id));
-    case "gen_screenshot":
-      return blockScreenshot(args, "gen", "生图面板");
+    case "gen_video":
+      return onCanvas(args, () => canvasAgent.genVideo(args));
+    case "gen_video_status":
+      return onCanvas(args, () => canvasAgent.genVideoStatus());
+    case "gen_video_cancel":
+      return onCanvas(args, () => canvasAgent.genVideoCancel());
+    case "gen_video_local":
+      return onCanvas(args, () => canvasAgent.genVideoLocal(args.dir));
+    case "open_settings":
+      return canvasAgent.openSettings(args.page);
+    case "export_canvas":
+      return onCanvas(args, () => canvasAgent.exportCanvas(args.format, { quality: args.quality }));
     case "note_read":
       return onCanvas(args, () => canvasAgent.noteRead(args.id));
     case "note_write":

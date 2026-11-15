@@ -110,7 +110,8 @@ export const GEN_DEFAULT_HEIGHT = GEN_MIN_HEIGHT;
 /* 提示词给到 4000 字：够写一整段画面描述，又不至于把这份内容文件当笔记使 */
 export const GEN_TEXT_MAX = 4000;
 export const GEN_IMAGE_MIN = 256;
-export const GEN_IMAGE_MAX = 2048;
+/* H3-Image 能出到 4096（16MP）；Qwen 那侧后端再压回 2048 */
+export const GEN_IMAGE_MAX = 4096;
 /* 引擎要 32 的倍数，差一个就整条调度错位 */
 export const GEN_IMAGE_STEP = 32;
 export const GEN_IMAGE_DEFAULT = 1024;
@@ -120,6 +121,18 @@ export const GEN_STEPS_DEFAULT = 20;
 export const GEN_CFG_MIN = 1.0;
 export const GEN_CFG_MAX = 20.0;
 export const GEN_CFG_DEFAULT = 6.0;
+/* 0 = 跟着当前模型走：Qwen 20 步 / cfg 6，H3-Image 6 步 / cfg 1。
+   块上没显式设过就是它，面板点「开始」不吃死某一族的默认。 */
+export const GEN_STEPS_AUTO = 0;
+export const GEN_CFG_AUTO = 0;
+/* 视频面板：一块远端出片的取景窗。参数比生图少——时长和画幅就够，
+   步数/种子这些本地引擎参数在视频 API 上不存在。 */
+export const GEN_VIDEO_MIN_WIDTH = 320;
+export const GEN_VIDEO_MIN_HEIGHT = 360;
+export const GEN_VIDEO_DEFAULT_WIDTH = GEN_VIDEO_MIN_WIDTH;
+export const GEN_VIDEO_DEFAULT_HEIGHT = GEN_VIDEO_MIN_HEIGHT;
+export const GEN_VIDEO_SECONDS_DEFAULT = 6;
+
 /* 出图那一档：auto 是「看连线自己定」——没接图就文生图，接一张当底图，接多张当参考。
    明写 t2i / i2i / edit 才能盖掉这个推断（画风锚点那种「只有一张但它是参考图」就得明写）。
    upscale 不参与推断：它不扩散、不读提示词，只有明选才有。 */
@@ -525,8 +538,10 @@ function normalizeBlock(raw) {
       negative: typeof raw.negative === "string" ? raw.negative.slice(0, GEN_TEXT_MAX) : "",
       imageW: snapGenSize(num(raw.imageW, GEN_IMAGE_DEFAULT)),
       imageH: snapGenSize(num(raw.imageH, GEN_IMAGE_DEFAULT)),
-      steps: Math.round(clamp(num(raw.steps, GEN_STEPS_DEFAULT), GEN_STEPS_MIN, GEN_STEPS_MAX)),
-      cfg: clamp(num(raw.cfg, GEN_CFG_DEFAULT), GEN_CFG_MIN, GEN_CFG_MAX),
+      steps: Math.round(clamp(num(raw.steps, GEN_STEPS_AUTO), 0, GEN_STEPS_MAX)),
+      cfg: clamp(num(raw.cfg, GEN_CFG_AUTO), 0, GEN_CFG_MAX),
+      /* 用哪一族出图：空串 = 跟设置里的当前模型走 */
+      model: raw.model === "qwen21" || raw.model === "h3image" ? raw.model : "",
       /* -1 在引擎里是「每张换一个」的哨兵；认不出别的数一律退回它 */
       seed: Number.isFinite(raw.seed) && raw.seed >= 0 ? Math.trunc(raw.seed) : -1,
       /* 取景窗自己的高度：提示词框变高时块跟着长，这一截不动 */
@@ -546,9 +561,34 @@ function normalizeBlock(raw) {
       z: layerOf(raw),
     };
   }
-  if (type === "product") {
-    const dims = raw.dims && typeof raw.dims === "object" ? raw.dims : {};
+  if (type === "genvideo") {
+    const seconds = Math.round(num(raw.seconds, GEN_VIDEO_SECONDS_DEFAULT));
+    /* 老块只有 ratio；新块直接存像素宽高。视频编码要偶数边。 */
+    const legacy =
+      raw.ratio === "9:16" ? [720, 1280] : raw.ratio === "1:1" ? [1024, 1024] : [1280, 720];
+    const width = Math.max(64, Math.min(4096, Math.round(num(raw.width, legacy[0]))));
+    const height = Math.max(64, Math.min(4096, Math.round(num(raw.height, legacy[1]))));
     return {
+      ...base,
+      x: num(raw.x),
+      y: num(raw.y),
+      w: Math.max(GEN_VIDEO_MIN_WIDTH, num(raw.w, GEN_VIDEO_DEFAULT_WIDTH)),
+      h: Math.max(GEN_VIDEO_MIN_HEIGHT, num(raw.h, GEN_VIDEO_DEFAULT_HEIGHT)),
+      prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, GEN_TEXT_MAX) : "",
+      seconds: Math.max(1, Math.min(60, seconds)),
+      width: width - (width % 2),
+      height: height - (height % 2),
+      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
+      borderWidth: Math.min(
+        BORDER_MAX_WIDTH,
+        Math.max(0, Math.round(num(raw.borderWidth, CARD_DEFAULT_BORDER_WIDTH))),
+      ),
+      radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),
+      z: layerOf(raw),
+    };
+  }
+  if (type === "product") {
+    const dims = raw.dims && typeof raw.dims === "object" ? raw.dims : {};    return {
       ...base,
       x: num(raw.x),
       y: num(raw.y),
@@ -1197,12 +1237,33 @@ export function makeGen(x, y, w = GEN_DEFAULT_WIDTH, h = GEN_DEFAULT_HEIGHT) {
     negative: "",
     imageW: GEN_IMAGE_DEFAULT,
     imageH: GEN_IMAGE_DEFAULT,
-    steps: GEN_STEPS_DEFAULT,
-    cfg: GEN_CFG_DEFAULT,
+    steps: GEN_STEPS_AUTO,
+    cfg: GEN_CFG_AUTO,
     seed: -1,
     mode: GEN_MODE_DEFAULT,
+    model: "",
     strength: GEN_STRENGTH_DEFAULT,
     src: "",
+    borderColor: DEFAULT_BORDER,
+    borderWidth: CARD_DEFAULT_BORDER_WIDTH,
+    radius: CARD_DEFAULT_RADIUS,
+  };
+}
+
+/* 视频面板：远端出片，取景窗里放播放器；参数是时长和像素尺寸（都能手改，也能从常用里挑）。 */
+export function makeVideoGen(x, y, w = GEN_VIDEO_DEFAULT_WIDTH, h = GEN_VIDEO_DEFAULT_HEIGHT) {
+  return {
+    id: newId(),
+    internal: true,
+    type: "genvideo",
+    x,
+    y,
+    w,
+    h,
+    prompt: "",
+    seconds: GEN_VIDEO_SECONDS_DEFAULT,
+    width: 1280,
+    height: 720,
     borderColor: DEFAULT_BORDER,
     borderWidth: CARD_DEFAULT_BORDER_WIDTH,
     radius: CARD_DEFAULT_RADIUS,
@@ -3002,6 +3063,78 @@ export function createItemElement(item, mediaSrc, options = {}) {
     prompt.rows = 3;
     prompt.spellcheck = false;
     promptWrap.append(prompt);
+    const more = document.createElement("div");
+    more.className = "canvas-gen-more";
+    more.hidden = true;
+    {
+      const row = (labelText, control, wide = false) => {
+        const label = document.createElement("label");
+        label.className = wide ? "canvas-gen-more-row is-wide" : "canvas-gen-more-row";
+        const name = document.createElement("span");
+        name.textContent = labelText;
+        label.append(name, control);
+        more.append(label);
+      };
+      const field = (tag, name, attrs = {}) => {
+        const control = document.createElement(tag);
+        control.className = "canvas-gen-more-input";
+        control.dataset.genField = name;
+        Object.assign(control, attrs);
+        return control;
+      };
+      const select = (name, entries, wide = false) => {
+        const control = document.createElement("select");
+        control.className = "canvas-gen-more-input";
+        control.dataset.genField = name;
+        for (const [value, text] of entries) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = text;
+          control.append(option);
+        }
+        row(name === "model" ? "模型" : "模式", control, wide);
+      };
+      select("model", [["qwen21", "Qwen-Image 2.1"], ["h3image", "MiniMax-H3-Image"]], true);
+      const width = field("input", "imageW", { inputMode: "numeric", spellcheck: false });
+      const height = field("input", "imageH", { inputMode: "numeric", spellcheck: false });
+      const size = document.createElement("div");
+      size.className = "canvas-gen-more-size";
+      const times = document.createElement("span");
+      times.textContent = "×";
+      const sizePreset = document.createElement("button");
+      sizePreset.type = "button";
+      sizePreset.className = "canvas-gen-more-size-preset";
+      sizePreset.textContent = "常用";
+      sizePreset.title = "选一个常用尺寸（手机壁纸、电脑壁纸等），也可以直接改左右两个数";
+      size.append(width, times, height, sizePreset);
+      row("尺寸", size, true);
+      row("步数", field("input", "steps", { inputMode: "numeric" }));
+      row("CFG", field("input", "cfg", { inputMode: "decimal" }));
+      const seedInput = field("input", "seed", { inputMode: "numeric" });
+      seedInput.title = "-1=随机，固定种子=复原提示词和参数都相同时的图";
+      row("种子", seedInput);
+      const seedTip = document.createElement("p");
+      seedTip.className = "canvas-gen-more-tip";
+      seedTip.textContent = "-1=随机，固定种子=复原提示词和参数都相同时的图";
+      more.append(seedTip);
+      row("改动幅度", field("input", "strength", { inputMode: "decimal" }));
+      const negative = field("textarea", "negative", { rows: 2, spellcheck: false });
+      negative.placeholder = "不想要的东西（可选）";
+      row("负向", negative, true);
+      /* 走 API 时这些本地参数没有对应字段：整行撤掉，只留尺寸。
+         在哪些行上生效由 paintGenMore 决定，这里先打上标记。 */
+      for (const name of ["model", "steps", "cfg", "seed", "strength", "negative"]) {
+        more
+          .querySelector(`[data-gen-field="${name}"]`)
+          ?.closest(".canvas-gen-more-row")
+          ?.classList.add("is-local-only");
+      }
+      seedTip.classList.add("is-local-only");
+      const apiNote = document.createElement("p");
+      apiNote.className = "canvas-gen-more-api";
+      apiNote.hidden = true;
+      more.insertBefore(apiNote, more.firstChild);
+    }
     const actions = document.createElement("div");
     actions.className = "canvas-gen-actions";
     const brush = document.createElement("button");
@@ -3019,6 +3152,18 @@ export function createItemElement(item, mediaSrc, options = {}) {
     refine.className = "canvas-gen-refine";
     refine.textContent = "补细节";
     refine.title = "放大后再按提示词低强度重绘一遍，把纹理长回来";
+    const moreToggle = document.createElement("button");
+    moreToggle.type = "button";
+    moreToggle.className = "canvas-gen-more-toggle";
+    moreToggle.textContent = "更多设置";
+    moreToggle.title = "展开尺寸、步数、CFG、种子、模式等参数";
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "canvas-gen-more-reset";
+    reset.textContent = "恢复默认";
+    reset.title = "把这套参数恢复成该模型的出厂值";
+    /* 只在展开更多设置时出现：收起状态这颗按钮没有意义 */
+    reset.hidden = true;
     const run = document.createElement("button");
     run.type = "button";
     run.className = "canvas-gen-run";
@@ -3026,8 +3171,97 @@ export function createItemElement(item, mediaSrc, options = {}) {
     place.type = "button";
     place.className = "canvas-gen-place";
     place.textContent = "落块";
-    actions.append(brush, clear, refine, run, place);
-    bar.append(controls, feed, promptWrap, actions);
+    /* 左侧一组参数按钮、右侧开始/落块，中间用弹性空位隔开 */
+    const spacer = document.createElement("span");
+    spacer.className = "canvas-gen-spacer";
+    actions.append(brush, clear, refine, moreToggle, reset, spacer, run, place);
+    bar.append(controls, feed, promptWrap, more, actions);
+    card.append(stage, bar);
+    el.append(card);
+  } else if (item.type === "genvideo") {
+    /* 视频面板：上半截是播放器/等待区，下半截提示词 + 时长画幅 + 开始/落块。
+       版式借用生图面板那套类，视觉上是一家人；产物不落在这块上：
+       出片留在缓存里直接播，点「落块」才拷一份成视频块。 */
+    const card = document.createElement("div");
+    card.className = "canvas-gen-card canvas-genvideo-card";
+    const stage = document.createElement("div");
+    stage.className = "canvas-gen-stage canvas-genvideo-stage";
+    const video = document.createElement("video");
+    video.className = "canvas-genvideo-video";
+    video.controls = true;
+    video.playsInline = true;
+    video.hidden = true;
+    const hint = document.createElement("p");
+    hint.className = "canvas-gen-hint canvas-genvideo-hint";
+    stage.append(video, hint);
+    const bar = document.createElement("div");
+    bar.className = "canvas-gen-bar canvas-genvideo-bar";
+    const feed = document.createElement("p");
+    feed.className = "canvas-gen-feed canvas-genvideo-feed";
+    const prompt = document.createElement("textarea");
+    prompt.className = "canvas-gen-prompt canvas-genvideo-prompt";
+    prompt.placeholder = "写下这段视频要什么：画面、动作、镜头";
+    prompt.rows = 3;
+    prompt.spellcheck = false;
+    const controls = document.createElement("div");
+    controls.className = "canvas-gen-controls canvas-genvideo-controls";
+    const input = (fieldName, extra = "") => {
+      const control = document.createElement("input");
+      control.className = `canvas-gen-more-input canvas-genvideo-input${extra}`;
+      control.dataset.videoField = fieldName;
+      control.inputMode = "numeric";
+      control.spellcheck = false;
+      return control;
+    };
+    const preset = (kind, title) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "canvas-gen-more-size-preset canvas-genvideo-preset";
+      button.dataset.videoPreset = kind;
+      button.textContent = "常用";
+      button.title = title;
+      return button;
+    };
+    const secondsRow = document.createElement("div");
+    secondsRow.className = "canvas-genvideo-row";
+    const secondsLabel = document.createElement("span");
+    secondsLabel.className = "canvas-genvideo-label";
+    secondsLabel.textContent = "时长";
+    /* 「秒」是输入框里的后缀：放外面会把这一行撑得比尺寸行短，两个常用按钮就对不齐 */
+    const secondsWrap = document.createElement("div");
+    secondsWrap.className = "canvas-genvideo-seconds";
+    const seconds = input("seconds");
+    const secondsUnit = document.createElement("span");
+    secondsUnit.className = "canvas-genvideo-unit-inside";
+    secondsUnit.textContent = "秒";
+    secondsWrap.append(seconds, secondsUnit);
+    secondsRow.append(secondsLabel, secondsWrap, preset("seconds", "挑一个常用时长，也可以直接改左边的数"));
+    const sizeRow = document.createElement("div");
+    sizeRow.className = "canvas-genvideo-row";
+    const sizeLabel = document.createElement("span");
+    sizeLabel.className = "canvas-genvideo-label";
+    sizeLabel.textContent = "尺寸";
+    const width = input("width");
+    const times = document.createElement("span");
+    times.className = "canvas-genvideo-unit";
+    times.textContent = "×";
+    const height = input("height");
+    sizeRow.append(sizeLabel, width, times, height, preset("size", "挑一个常用尺寸（720p、1080p），也可以直接改像素"));
+    controls.append(secondsRow, sizeRow);
+    const actions = document.createElement("div");
+    actions.className = "canvas-gen-actions canvas-genvideo-actions";
+    const spacer = document.createElement("span");
+    spacer.className = "canvas-gen-spacer";
+    const run = document.createElement("button");
+    run.type = "button";
+    run.className = "canvas-gen-run canvas-genvideo-run";
+    const place = document.createElement("button");
+    place.type = "button";
+    place.className = "canvas-gen-place canvas-genvideo-place";
+    place.textContent = "落块";
+    place.hidden = true;
+    actions.append(spacer, run, place);
+    bar.append(feed, prompt, controls, actions);
     card.append(stage, bar);
     el.append(card);
   } else if (item.type === "file") {
@@ -7001,6 +7235,15 @@ export function syncItemElement(el, item) {
     el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
     el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
     syncGen(el, item);
+    return;
+  }
+
+  if (item.type === "genvideo") {
+    el.style.width = `${item.w}px`;
+    el.style.height = `${item.h}px`;
+    el.style.borderColor = item.borderColor || "transparent";
+    el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
+    el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
     return;
   }
 

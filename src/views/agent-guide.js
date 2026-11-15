@@ -41,7 +41,7 @@ const SECTIONS = [
     body: `## 应用与画布（16 个工具）
 
 ### app_state
-一眼看全局，不切页。返回 route（canvas/settings）、dataRoot、theme、mcp 状态、当前画布（id/名字/块数/相机/选中）。新接手先调它。
+一眼看全局，不切页。返回 route（现在只有 canvas：设置是独立窗口）、dataRoot、theme、mcp 状态、当前画布（id/名字/块数/相机/选中）。新接手先调它。
 
 ### theme_list
 列出全部主题 [{id,name,mode}]，mode 是 dark 或 light；current 标出当前用的那套。
@@ -782,7 +782,7 @@ src 是这张图在这个画布 images/ 里的相对路径。
   「魔愁涧」成了「鹰愁洞」、「白骨精」成了「白骨稿」。ESRGAN 是按纹理补细节，不认字形。
   海报、截图、扫描件这种要放大，先跟用户说一句这个风险；插画和照片不受影响。
 - 缺文件会直接报回**绝对路径**。那份 .pth 在数据根的 gen/upscale/RealESRGAN_x4plus.pth（67 MB），
-  它跟着数据根走，不在设置页「检测模型」那套可换档位里——**别自己去下载或挪**，把报错里那个路径原样报给用户。
+  它跟着数据根走，不在设置窗口「检测模型」那套可换档位里——**别自己去下载或挪**，把报错里那个路径原样报给用户。
 
 ### 出完看一眼
 gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一帧逐步预览。
@@ -792,8 +792,25 @@ gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一�
 面板上那张不会自己变成图片块。gen_place {id} 在面板右边落一块独立图片块：是复制不是搬走，
 面板接着显示它那张、也接着能改词重出，两份 PNG 各自独立，删一块不动另一块。
 
+### 走 API：配置在设置窗口
+设置 → 生图模型的顶部可以选「本地模型 / API」。选了 API 并填好接口地址、模型名、Key，出图整条路走远端：
+- gen_status 的 provider 说这一张走 local 还是 api；apiModel 是远端模型名，apiProblem 非空说明配置还缺东西、出图会直接报错。
+- 只发提示词、尺寸和参考图：steps / cfg / seed / negative / model（族）都不生效，别拿这些参数做「能复现」的承诺。
+- i2i / inpaint 降级成「参考图 + 提示词」（Images 协议会尽量带 mask）；upscale 在 API 下直接报不支持。
+- gen_cancel 只是「回来不要这张」，HTTP 请求本身掐不断。
+- API 配置归用户：地址、Key、模型名只让他在设置里改，agent 不代填、也读不到 Key。
+
+### 两族模型：gen_family
+生图引擎里有两族模型，同一时刻只用一族：
+- **qwen21** = Qwen-Image 2.1（默认）：20 步、cfg 6，t2i / i2i / edit / inpaint / upscale 全都支持。
+- **h3image** = MiniMax-H3-Image：33B DiT + 32B 编码器，6 步、cfg 1，只支持 t2i / edit / upscale（i2i 和局部重绘会报回）；
+  1MP 约 5 秒、2MP 约 8 秒、16MP 约 2 分钟（4096 边长，16GB 显卡实测）。
+gen_family 不带参数看当前族、支持的模式、边长上限、目录和缺件；传 qwen21 / h3image 切过去（会放掉已载入的权重，下一张重新读盘）。
+gen_run 的 model 参数也能点名，点名会顺带把当前族切过去。块上的 steps / cfg 写 0 或省略 = 跟着模型走，
+别把 Qwen 的 20 步 / cfg 6 照搬给 H3。两族权重分开放：Qwen 在数据根的 gen/models/，H3 在 gen/h3image/。
+
 ### 档位可换：gen_models / gen_models_set
-模型文件夹里可以并存几档 Qwen-Image 2.1 的权重，同一时刻只吃其中一档。gen_models 不带参数，就是设置页上那颗「检测模型」：
+模型文件夹里可以并存几档 Qwen-Image 2.1 的权重，同一时刻只吃其中一档。gen_models 不带参数，就是设置窗口上那颗「检测模型」：
 回两列可换的文件（dit 画图模型、encoder 文本编码器，都带字节数、小的在前）+ fixed 那两件跟着模型定死的 + 当前档 currentDit / currentEncoder
 + machine（显卡名、显存、内存总量与空闲、模型目录那个盘还剩多少）+ advice（为什么建议某一档）
 + needed（建议那一套要放的四个文件：名字、字节数、下载页、在不在盘上，视觉投影标 optional）+ tiers（全部量化档，从小到大，标了建议那一个）。
@@ -802,15 +819,47 @@ gen_models_set {dit|encoder} 只传要动的那个槽位，文件名必须原样
 - 正在出图时换不了，先 gen_cancel 或等这张跑完。
 - 大档更清晰也更吃内存（权重住内存条，按显存预算现搬上卡），但出图速度由算力决定，别拿体积当质量承诺；改档是为了画质，得用户点头，别自己挑一档就换。
 - advice 那句「这台机器装得下」是拿检测那一刻的空闲内存和该盘剩余算的，用户开着大程序时数字会偏小——别照着它劝人换档。
-- 这两个工具不进批量，也不该顺手改：它们是设置页上明摆着的东西。
+- 这两个工具不进批量，也不该顺手改：它们是设置窗口上明摆着的东西。
 
 ### 权重不在盘上
 needed 里有缺、或 missing 非空，就是这台机器还没备好模型文件。把 needed 的文件名、字节数和 modelsDir 报给用户，
-让他在设置页点「检测模型」看一眼、自己下载了扔进那个文件夹——别自己去下载，也别改路径：
+让他在设置窗口点「检测模型」看一眼、自己下载了扔进那个文件夹——别自己去下载，也别改路径：
 模型目录归用户（他可能只有一个盘装得下这十几 GB），「换个目录」那颗按钮就是给他按的。
 当前档位选过一个后来被删掉的文件，也是这儿报出来。
 视觉投影（mmproj）那行标着 optional 是真的：纯文生图缺了照跑，**但图生图和参考图编辑要靠它读输入图**，
 真要走带图的档却缺这个文件，报回的话就照 needed 那行说清楚。`,
+  },
+  {
+    id: "video",
+    title: "视频生成",
+    body: `## 视频生成：文生视频 / 图生视频
+
+### 两个引擎：本机 sd.cpp 或云端 API
+设置 → 视频生成 顶部选「本地模型 / 云端 API」：
+- **本地模型**：本机 sd.cpp 的 MiniMax-H3（T2VA/I2VA），四个文件（DiT、视频 VAE、音频 VAE、编码器）由用户在设置里各选一次。1–20 秒、默认带音频、每条几分钟；和本地生图引擎抢显存，同时只能用一个。首帧就是连线进来的第一张图。
+- **云端 API**：三家协议如下，需要协议、Key 和模型：
+- **openai**（OpenAI videos 兼容：Sora 2、Azure、聚合网关、vLLM-Omni）：
+  提交 POST /videos，带首帧图时 multipart 的 input_reference，轮询 /videos/{id}，/content 下载。
+- **minimax**（海螺）：/v1/video_generation，首帧走 first_frame_image，直接吃 base64 Data URL。
+- **dashscope**（通义万相、百炼托管的可灵）：异步任务，**图生视频只收公网图片 URL**，本地首帧会被拒。
+
+### gen_video：提交并等出片
+~~~json
+{ "prompt": "海面上一艘纸船缓缓漂向灯塔，晨雾，镜头缓慢推进",
+  "firstFrame": "<图片块 id 或 PNG base64>", "seconds": 6, "ratio": "16:9" }
+~~~
+- firstFrame 给块 id（图片块、画面块、已出图的生图面板）或直接给 base64；不给就是文生视频。
+- 一次只跑一条：另一条在跑时提交会直接报错。
+- 平台任务通常 1-5 分钟。默认等 600 秒；到点返回 timedOut:true，任务还在平台跑，用 gen_video_status 接着看。
+- 返回的 path 是 gen/videos/ 下的缓存文件绝对路径（截图/预览可以直接用它）。
+
+### 取消与费用
+- gen_video_cancel 只是本地不再等：任务已经提交到平台，服务端停不掉，**费用照算**。
+- 视频按秒计费，提交前把 seconds 说清楚，别默认拉满。
+
+### 设备与协议选择
+- 用户没配视频 API 时，gen_video 会报配置不完整——让他自己去设置里配，agent 不代填 Key。
+- 首帧在画布上、用户又要用万相/可灵（dashscope）时，提前说明本地图传不过去，建议换 openai 或海螺协议。`,
   },
   {
     id: "product",
@@ -1083,7 +1132,7 @@ block_select {ids:[...]} 选中那一批 → 让用户右键选「对齐 / 分�
 - 删除去向：space_delete 整个画布文件夹进回收站；block_delete 删掉的块退不回来，拷进画布的媒体文件进回收站。
 - 盲铺是大忌：一次要建的块超过五块，就开 space_batch；铺完 space_snapshot 看一眼再交活。
 - 批量里拿不到前一项的 id：id 是执行时才生成的。要连线就分两批。
-- 设置页换数据目录和窗口控制没有工具；改主题用 theme_set，先 theme_list 拿 id。
+- 设置窗口换数据目录和窗口控制没有工具；改主题用 theme_set，先 theme_list 拿 id。
 - 宇宙主题的航线不能用相机工具驱动：camera_pan / camera_zoom 只是小幅转头和长焦，要改飞行节奏请用 flight_control，要改遇星顺序和间隔请用 cosmos_route。
 - 文件选择对话框不存在，改为直接传 path。
 - pace:"instant" 只跳过演示，不改变结果；默认 normal 更适合让用户看着你干活。`,

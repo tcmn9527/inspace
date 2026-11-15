@@ -86,7 +86,7 @@ const H3_DEFAULTS_KEY: &str = "gen_defaults_h3image";
 /// 负向提示词存这么长就够，再长也是白占
 const NEGATIVE_MAX: usize = 2000;
 /// 显存预算（GiB）：留出的那一截是给 three.js 的
-const VRAM_BUDGET: &str = "12";
+const VRAM_BUDGET: &str = "14";
 
 /// 两套模型：Qwen-Image 2.1（日常，20 步）和 MiniMax-H3-Image（高质量，6 步）。
 /// 各自有独立的槽位、目录、默认参数和空闲卸载时长。
@@ -214,12 +214,10 @@ impl Family {
         }
     }
 
-    /// 25GB 权重每次重读要十几秒，H3 停手后多热一会儿再放。
+    /// 25GB 权重重读要几分钟：以前 45 秒/5 分钟就放，用户看图改词的间隙一过就得整套重载，
+    /// 看起来像「每张都从头加载」。两族统一给 30 分钟，权重只常驻内存、不常驻显存。
     fn idle_seconds(self) -> u64 {
-        match self {
-            Family::Qwen21 => 45,
-            Family::H3Image => 300,
-        }
+        1800
     }
 
     fn defaults_key(self) -> &'static str {

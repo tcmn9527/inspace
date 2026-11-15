@@ -4101,6 +4101,28 @@ function openItemMenu(item, x, y) {
   openMenu(x, y, itemMenuEntries(item, x, y));
 }
 
+/* 图片块和有图的生图面板：另存一份到用户自己的目录，只复制、不挪动画布里那份 */
+async function saveImageAs(item) {
+  if (!current || !item.src) {
+    showToast("这块还没有图");
+    return;
+  }
+  const canvasId = current.meta.id;
+  try {
+    const target = await store.saveCanvasImageAs(canvasId, item.id);
+    if (!target) return;
+    if (!current || current.meta.id !== canvasId) return;
+    showToast(`已另存到 ${target}`);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function imageSaveAsEntry(item) {
+  if (!((item.type === "image" || item.type === "gen") && item.src)) return null;
+  return { label: "另存为…", onClick: () => void saveImageAs(item) };
+}
+
 /* 选中里恰好有两张能看的图（图片块或有图的生图面板）时，菜单才出现「对比」：
    临时叠图看差异，不落画布。选中里顺带带了文字块/连线也不影响。 */
 function compareImagesEntry(item) {
@@ -4148,6 +4170,8 @@ function itemMenuEntries(item, x, y, depth = 0) {
     if (revealTarget(item)) {
       entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
     }
+    const lockedSave = imageSaveAsEntry(item);
+    if (lockedSave) entries.push(lockedSave);
     /* 对比是只读查看，锁着也允许 */
     const compare = compareImagesEntry(item);
     if (compare) entries.push(compare);
@@ -4395,6 +4419,8 @@ function itemMenuEntries(item, x, y, depth = 0) {
   if (revealTarget(item)) {
     entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
   }
+  const saveAs = imageSaveAsEntry(item);
+  if (saveAs) entries.push(saveAs);
   /* 属性：笔记报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行 */
   if (PROP_KIND[item.type]) {
     entries.push({ label: "属性", onClick: () => openItemProps(item) });

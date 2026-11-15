@@ -207,6 +207,7 @@ pub fn run() {
             canvas::canvas_import_image,
             canvas::canvas_image_url,
             canvas::canvas_open_image,
+            canvas::canvas_image_save_as,
             canvas::canvas_delete_image,
             canvas::canvas_save_note_image,
             canvas::canvas_read_note_image,

@@ -1392,6 +1392,60 @@ pub fn canvas_open_image(
     open::that(&path).map_err(|e| format!("打不开这张图：{e}"))
 }
 
+/// 把图片块/生图面板上的图另存到用户挑的位置：只复制一份，画布里那份不动。
+#[tauri::command]
+pub async fn canvas_image_save_as(
+    id: String,
+    item_id: String,
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<Option<String>, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let items = read_items(&dir)?;
+    let found = items
+        .as_array()
+        .and_then(|list| {
+            list.iter()
+                .find(|it| it.get("id").and_then(Value::as_str) == Some(item_id.as_str()))
+        })
+        .ok_or_else(|| "这块已经不在画布上了".to_string())?;
+    let kind = found.get("type").and_then(Value::as_str).unwrap_or_default();
+    if kind != "image" && kind != "gen" {
+        return Err("这块不是图片".to_string());
+    }
+    let src = found.get("src").and_then(Value::as_str).unwrap_or_default();
+    if src.is_empty() {
+        return Err("这块还没有图".to_string());
+    }
+    let linked = kind == "image" && found.get("linked").and_then(Value::as_bool) == Some(true);
+    let source = if linked {
+        PathBuf::from(src)
+    } else {
+        media_path(&dir, src, IMAGE_DIR, "图片")?
+    };
+    if !source.is_file() {
+        return Err("图片不在了".to_string());
+    }
+    let name = source
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "image.png".to_string());
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("图片另存为")
+        .set_parent(&window)
+        .set_file_name(&name)
+        .add_filter("图片", &["png", "jpg", "jpeg", "webp"])
+        .blocking_save_file();
+    let Some(target) = picked.and_then(|value| value.into_path().ok()) else {
+        return Ok(None);
+    };
+    fs::copy(&source, &target).map_err(|e| format!("保存失败：{e}"))?;
+    Ok(Some(target.to_string_lossy().to_string()))
+}
+
 /// 删图片块：拷贝态把画布里那份副本送进回收站；引用态只断链接，原图是用户自己的东西。
 #[tauri::command]
 pub fn canvas_delete_image(

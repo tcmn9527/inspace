@@ -9686,7 +9686,11 @@ function agentFitView() {
 async function agentFindSpace(ref) {
   await loadList();
   const key = String(ref ?? "").trim();
-  const target = canvases.find((meta) => meta.id === key || meta.name === key);
+  /* 先按 id 精确匹配，再按名字兜底：复制出来的画布和原画布同名，
+     若混在一次 find 里，名字命中会抢在 id 前面，删/开都会落到重名的那份上 */
+  const target =
+    canvases.find((meta) => meta.id === key) ||
+    canvases.find((meta) => meta.name === key);
   if (!target) throw new Error(`找不到画布「${key}」`);
   return target;
 }

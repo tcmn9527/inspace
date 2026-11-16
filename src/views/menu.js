@@ -96,6 +96,8 @@ export function closeMenu() {
     for (const el of menu.querySelectorAll("button.is-open")) el.classList.remove("is-open");
     menu.hidden = true;
   }
+  /* 右键打开时给来源行加的悬停保持，菜单一收就撤 */
+  document.dispatchEvent(new CustomEvent("inspace:menu-closed"));
 }
 
 /* 主菜单是不是正开着。给「同一个按钮再点一下收起」那种入口用；

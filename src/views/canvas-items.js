@@ -276,6 +276,10 @@ function normalizeBlock(raw) {
   const base = { id: raw.id, type, seq: Number.isFinite(raw.seq) ? Math.trunc(raw.seq) : 0 };
   /* 客户版隐藏：所有能出现在页面上的块都认，连线不参与 */
   if (type !== "connector") base.internal = raw.internal !== false;
+  /* 面板树自定义名：只影响树显示，不动块本身的语义名字 */
+  if (type !== "connector" && typeof raw.treeName === "string" && raw.treeName.trim()) {
+    base.treeName = raw.treeName.trim().slice(0, 60);
+  }
   if (type === "connector") {
     const from = normalizeEnd(raw.from);
     const to = normalizeEnd(raw.to);

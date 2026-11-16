@@ -68,6 +68,32 @@ fn listen_f10_toggle(app: &tauri::AppHandle) {
     });
 }
 
+/// 初始化窗口不许比屏幕大：先把最小尺寸压到屏幕以内（否则最小值会顶着窗口超出屏幕），
+/// 再把当前客户区物理尺寸夹到显示器物理尺寸内。位置/居中由调用方自己定。
+fn fit_window_to_screen(w: &tauri::WebviewWindow, min_w: f64, min_h: f64) {
+    let monitor = w
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| w.app_handle().primary_monitor().ok().flatten());
+    let Some(m) = monitor else { return };
+    let ms = m.size();
+    let scale = m.scale_factor().max(0.1);
+    let logical_w = ms.width as f64 / scale;
+    let logical_h = ms.height as f64 / scale;
+    let _ = w.set_min_size(Some(tauri::LogicalSize::new(
+        logical_w.min(min_w),
+        logical_h.min(min_h),
+    )));
+    if let Ok(inner) = w.inner_size() {
+        let cw = inner.width.min(ms.width);
+        let ch = inner.height.min(ms.height);
+        if cw != inner.width || ch != inner.height {
+            let _ = w.set_size(tauri::PhysicalSize::new(cw, ch));
+        }
+    }
+}
+
 /* 设置是独立窗口：已经开着就把它提到前面，page 指定落在哪一页（如主题）。
    窗口不带系统边框，标题栏和拖动区由 settings.html 自己画，和主窗口一套风格。
    这个命令必须是 async：创建窗口要回主线程，同步命令会把 IPC 那条线程钉住等它，
@@ -99,6 +125,10 @@ async fn open_settings_window(app: tauri::AppHandle, page: Option<String>) -> Re
         .center()
         .build()
         .map_err(|error| error.to_string())?;
+    if let Some(window) = app.get_webview_window("settings") {
+        fit_window_to_screen(&window, 720.0, 520.0);
+        let _ = window.center();
+    }
     Ok(())
 }
 
@@ -150,12 +180,28 @@ pub fn run() {
             app.manage(mcp::start(app.handle().clone(), config_dir));
             match app.get_webview_window("main") {
                 Some(w) => {
-                    /* 仅开发时按用户记录的布局开窗：左上角 (0,0)、客户区 2723×1200 物理像素。
-                       release 打包不编译这段，窗口仍按配置居中。 */
+                    /* 初始化一律不许比屏幕大：先压最小尺寸再夹当前尺寸 */
+                    fit_window_to_screen(&w, 1000.0, 640.0);
+                    /* 仅开发时按用户记录的布局开窗：左上角 (0,0)、客户区 2723×1200 物理像素，
+                       但同样夹在屏幕以内。release 打包不编译这段，窗口按配置居中。 */
                     #[cfg(debug_assertions)]
                     {
+                        let (mw, mh) = w
+                            .current_monitor()
+                            .ok()
+                            .flatten()
+                            .or_else(|| app.primary_monitor().ok().flatten())
+                            .map(|m| {
+                                let s = m.size();
+                                (s.width, s.height)
+                            })
+                            .unwrap_or((2723, 1200));
                         let _ = w.set_position(tauri::PhysicalPosition::new(0, 0));
-                        let _ = w.set_size(tauri::PhysicalSize::new(2723, 1200));
+                        let _ = w.set_size(tauri::PhysicalSize::new(2723u32.min(mw), 1200u32.min(mh)));
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        let _ = w.center();
                     }
                     eprintln!(
                         "[diag] scale_factor={:.3} inner={:?} outer={:?}",

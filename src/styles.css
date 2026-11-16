@@ -344,6 +344,35 @@ body.is-titlebar-hidden .titlebar {
 }
 
 /* 生图模型族切换：两族的槽位/默认参数/目录都各管各的 */
+.settings-gen-device {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+  max-width: 460px;
+}
+
+.settings-gen-device > span {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-gen-device select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+
+.settings-gen-device select:focus {
+  border-color: var(--accent);
+}
+
 .settings-gen-families {
   display: inline-flex;
   gap: 2px;

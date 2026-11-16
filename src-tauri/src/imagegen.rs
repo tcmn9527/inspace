@@ -88,7 +88,7 @@ const NEGATIVE_MAX: usize = 2000;
 /// 显存预算（GiB）：留出的那一截是给 three.js 的
 const VRAM_BUDGET: &str = "14";
 
-/// 两套模型：Qwen-Image 2.1（日常，20 步）和 MiniMax-H3-Image（高质量，6 步）。
+/// 两套模型：Qwen-Image 2.1（日常，30 步）和 MiniMax-H3-Image（高质量，6 步）。
 /// 各自有独立的槽位、目录、默认参数和空闲卸载时长。
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Family {
@@ -312,8 +312,11 @@ const DISK_RESERVE_MB: u64 = 2048;
 const IDLE_POLL: Duration = Duration::from_secs(10);
 
 const DEFAULT_SIZE: i32 = 1024;
-const DEFAULT_STEPS: i32 = 20;
+const DEFAULT_STEPS: i32 = 30;
 const DEFAULT_CFG: f32 = 6.0;
+/// 2026-11 之前 Qwen 的出厂步数是 20。老 H3 块上可能还留着这一对默认值，
+/// 迁移判断不能跟着 DEFAULT_STEPS 一起变。
+const LEGACY_QWEN_STEPS: i32 = 20;
 /// 图生图的改动幅度默认值，跟上游 `sd_img_gen_params_init` 那个 0.75 保持一致
 const DEFAULT_STRENGTH: f32 = 0.75;
 /// 面板上的图最短的一条边也得有这个数，再小就是糊的
@@ -376,6 +379,8 @@ struct Engine {
     ctx: *mut sd::sd_ctx_t,
     busy: bool,
     last_used: Instant,
+    /// "gpu"=显卡(快,推荐)；"cpu"=全内存(慢,显存不够时用)。格纹与设备无关,是 H3 本地解码固有
+    device: String,
 }
 
 unsafe impl Send for Engine {}
@@ -762,6 +767,7 @@ pub fn init(data: DataRoot, db: &DbState) -> GenState {
             ctx: null_mut(),
             busy: false,
             last_used: Instant::now(),
+            device: read_device(db),
         })),
         cancel: Arc::new(AtomicBool::new(false)),
         family: Arc::new(Mutex::new(read_family(db))),
@@ -805,6 +811,14 @@ pub fn init(data: DataRoot, db: &DbState) -> GenState {
 
 /// 启动时把「用哪一族」读回来。读不到或值不合法就回到 Qwen——
 /// 那是原来一直在跑的那套，升级后行为不变。
+fn read_device(db: &DbState) -> String {
+    let Ok(conn) = db.0.lock() else { return "gpu".into() };
+    match db::read_setting(&conn, "gen_device").as_deref() {
+        Some("cpu") => "cpu".into(),
+        _ => "gpu".into(),
+    }
+}
+
 fn read_family(db: &DbState) -> Family {
     let Some(conn) = db.0.lock().ok() else {
         return Family::Qwen21;
@@ -864,6 +878,41 @@ fn check_weight_name(name: &str) -> Result<(), String> {    if name.is_empty() |
         return Err(format!("“{name}”不是个文件名"));
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn gen_device_get(state: tauri::State<GenState>) -> String {
+    state.0.lock().device.clone()
+}
+
+/// 换运行设备：gpu=显卡(快)，cpu=全内存(慢,显存不够时用)。换设备放掉旧 ctx。
+#[tauri::command]
+pub fn gen_device_set(
+    app: tauri::AppHandle,
+    state: tauri::State<GenState>,
+    device: String,
+) -> Result<String, String> {
+    let next = if device == "cpu" { "cpu" } else { "gpu" };
+    let mut engine = state.0.lock();
+    if engine.busy {
+        return Err("正在出图，等这一张跑完再换运行设备".to_string());
+    }
+    {
+        let db = app.state::<DbState>();
+        let conn = db
+            .0
+            .lock()
+            .map_err(|_| "数据库连接状态异常".to_string())?;
+        db::write_setting(&conn, "gen_device", next)?;
+    }
+    if engine.device != next {
+        engine.device = next.to_string();
+        if !engine.ctx.is_null() {
+            unsafe { sd::free_sd_ctx(engine.ctx) };
+            engine.ctx = null_mut();
+        }
+    }
+    Ok(next.to_string())
 }
 
 #[tauri::command]
@@ -1719,8 +1768,10 @@ fn ensure_ctx(core: &GenCore, engine: &mut Engine) -> Result<*mut sd::sd_ctx_t, 
     } else {
         None
     };
+    let cpu_mode = engine.device == "cpu";
     let budget = CString::new(VRAM_BUDGET).expect("常量串");
-    let backend = CString::new("cpu").expect("常量串");
+    let params_backend = CString::new("cpu").expect("常量串");
+    let main_backend = CString::new(if cpu_mode { "cpu" } else { "" }).expect("常量串");
     unsafe {
         let mut raw = std::mem::MaybeUninit::<sd::sd_ctx_params_t>::uninit();
         sd::sd_ctx_params_init(raw.as_mut_ptr());
@@ -1731,10 +1782,11 @@ fn ensure_ctx(core: &GenCore, engine: &mut Engine) -> Result<*mut sd::sd_ctx_t, 
             params.llm_vision_path = vision.as_ptr();
         }
         params.vae_path = vae.as_ptr();
-        params.flash_attn = true;
-        params.diffusion_flash_attn = true;
-        params.max_vram = budget.as_ptr();
-        params.params_backend = backend.as_ptr();
+        params.flash_attn = !cpu_mode;
+        params.diffusion_flash_attn = !cpu_mode;
+        params.max_vram = if cpu_mode { std::ptr::null() } else { budget.as_ptr() };
+        params.backend = main_backend.as_ptr();
+        params.params_backend = params_backend.as_ptr();
         let ctx = sd::new_sd_ctx(&params);
         if ctx.is_null() {
             return Err("引擎起不来：new_sd_ctx 返回空，看后端日志".to_string());
@@ -1787,6 +1839,124 @@ fn run_job(
     finish(&core, &app, block, outcome, started.elapsed().as_secs_f32());
 }
 
+/// 对已落盘的旧图原地去网格：修复前生成的图像素里还带棋盘，重出才会换掉；
+/// 这个命令让旧图不重出构图也能清干净。只读 images/ 里指定的相对路径。
+#[tauri::command]
+pub fn gen_degrid(
+    app: tauri::AppHandle,
+    id: String,
+    srcs: Vec<String>,
+) -> Result<u32, String> {
+    let data = app.state::<crate::store::DataRoot>();
+    let dir = data
+        .dir(crate::store::SPACE_DIR)
+        .join(&id)
+        .join("images");
+    let mut done = 0u32;
+    for src in srcs {
+        let rel = src.trim();
+        if rel.is_empty() || rel.contains("..") || rel.starts_with('/') || rel.contains(':') {
+            continue;
+        }
+        let path = dir.join(rel);
+        if !path.is_file() {
+            continue;
+        }
+        let img = image::open(&path).map_err(|e| format!("读图失败 {rel}: {e}"))?;
+        let rgb = img.to_rgb8();
+        let (w, h) = rgb.dimensions();
+        let mut pixels = rgb.into_raw();
+        dechecker(&mut pixels, w, h, 3);
+        let out = image::RgbImage::from_raw(w, h, pixels)
+            .ok_or_else(|| format!("尺寸不合 {rel}"))?;
+        out.save(&path).map_err(|e| format!("写图失败 {rel}: {e}"))?;
+        done += 1;
+    }
+    Ok(done)
+}
+
+/// 消解码网格：H3 的 VAE 会在平坦区（皮肤/墙/纯色布）留一层细棋盘网格，周期随图变化，
+/// 单一陷波滤不干净。改用 sigma≈2 的高斯平滑，但按局部梯度做边缘感知混合：
+/// 平坦区全力平滑把网格抹掉，头发/衣纹/轮廓等高频处保持原样不糊。
+fn dechecker(pixels: &mut [u8], width: u32, height: u32, channel: u32) {
+    let w = width as usize;
+    let h = height as usize;
+    let ch = channel.max(1) as usize;
+    if w < 9 || h < 9 || pixels.len() < w * h * ch {
+        return;
+    }
+    // sigma=2 的高斯核（-4..4 归一化）
+    const K: [f32; 5] = [0.0276, 0.0663, 0.1238, 0.1802, 0.2042];
+    let luma = |p: &[u8], at: usize| -> f32 {
+        if ch >= 3 {
+            0.299 * p[at] as f32 + 0.587 * p[at + 1] as f32 + 0.114 * p[at + 2] as f32
+        } else {
+            p[at] as f32
+        }
+    };
+    // 可分离高斯：横 -> tmp，竖 -> blurred
+    let mut tmp = vec![0f32; pixels.len()];
+    for y in 0..h {
+        for x in 0..w {
+            for k in 0..ch {
+                let mut s = 0f32;
+                for d in 0..5 {
+                    let xx = (x + d).saturating_sub(4).min(w - 1);
+                    // 对称核：中心权重 K[4]，两侧 K[3..0]
+                    let wt = if d == 4 { K[4] } else { K[d] };
+                    s += pixels[(y * w + xx) * ch + k] as f32 * wt;
+                    if d != 4 {
+                        let xx2 = (x + (4 - d)).min(w - 1);
+                        s += pixels[(y * w + xx2) * ch + k] as f32 * wt;
+                    }
+                }
+                tmp[(y * w + x) * ch + k] = s;
+            }
+        }
+    }
+    let mut blurred = vec![0f32; pixels.len()];
+    for y in 0..h {
+        for x in 0..w {
+            for k in 0..ch {
+                let mut s = 0f32;
+                for d in 0..5 {
+                    let yy = (y + d).saturating_sub(4).min(h - 1);
+                    let wt = if d == 4 { K[4] } else { K[d] };
+                    s += tmp[(yy * w + x) * ch + k] * wt;
+                    if d != 4 {
+                        let yy2 = (y + (4 - d)).min(h - 1);
+                        s += tmp[(yy2 * w + x) * ch + k] * wt;
+                    }
+                }
+                blurred[(y * w + x) * ch + k] = s;
+            }
+        }
+    }
+    // 边缘感知混合
+    for y in 0..h {
+        for x in 0..w {
+            let at = (y * w + x) * ch;
+            let xl = (y * w + x.saturating_sub(1)) * ch;
+            let xr = (y * w + (x + 1).min(w - 1)) * ch;
+            let yu = (y.saturating_sub(1) * w + x) * ch;
+            let yd = ((y + 1).min(h - 1) * w + x) * ch;
+            let grad = (luma(pixels, xr) - luma(pixels, xl)).abs()
+                + (luma(pixels, yd) - luma(pixels, yu)).abs();
+            let t = if grad < 8.0 {
+                1.0
+            } else if grad > 32.0 {
+                0.0
+            } else {
+                (32.0 - grad) / 24.0
+            };
+            for k in 0..ch {
+                let o = pixels[at + k] as f32;
+                pixels[at + k] = (o * (1.0 - t) + blurred[at + k] * t).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+}
+
 /// 两条路（扩散、放大）跑完都从这儿收尾：交还 busy，再把这一张或这条错发回前端。
 fn finish(
     core: &GenCore,
@@ -1814,7 +1984,11 @@ fn finish(
                 },
             );
         }
-        Ok(image) => {
+        Ok(mut image) => {
+            /* H3 的 VAE 解码会在平坦区留一层约 4px 的棋盘网格（转置卷积固有伪影），
+               与提示词和尺寸无关。用 2px 间隔的四点平均消掉该周期分量：
+               对周期 4 的网格正好反相抵消，对正常细节只极轻微软化。 */
+            dechecker(&mut image.pixels, image.width, image.height, image.channel);
             let _ = app.emit(
                 "gen-done",
                 DoneEvent {
@@ -2205,7 +2379,7 @@ fn generate(ctx: Ctx, req: &GenRequest, family: Family) -> Result<Out, String> {
     let prompt = cstring(&req.prompt)?;
     let negative = cstring(req.negative.as_deref().unwrap_or(""))?;
     let (width, height) = fit_size(req.width, req.height, family.max_side());
-    /* 0 或没给 = 跟着模型走（Qwen 20 步 / cfg 6，H3 6 步 / cfg 1）。 */
+    /* 0 或没给 = 跟着模型走（Qwen 30 步 / cfg 6，H3 6 步 / cfg 1）。 */
     let mut steps = match req.steps.filter(|value| *value > 0) {
         Some(steps) => steps.clamp(1, 100),
         None => family.default_steps(),
@@ -2214,9 +2388,9 @@ fn generate(ctx: Ctx, req: &GenRequest, family: Family) -> Result<Out, String> {
         Some(cfg) => cfg.clamp(1.0, 20.0),
         None => family.default_cfg(),
     };
-    /* 老块上还留着 Qwen 那套默认（20 步 / cfg 6）。H3 是 6 步蒸馏，
-       按这两个数跑只会慢三倍、画面还容易过曝；两个都等于 Qwen 默认时当成没设过。 */
-    if family == Family::H3Image && steps == DEFAULT_STEPS && (cfg - DEFAULT_CFG).abs() < f32::EPSILON {
+    /* 老块上还留着 Qwen 那套老默认（20 步 / cfg 6）。H3 是 6 步蒸馏，
+       按这两个数跑只会慢三倍、画面还容易过曝；两个都等于老 Qwen 默认时当成没设过。 */
+    if family == Family::H3Image && steps == LEGACY_QWEN_STEPS && (cfg - DEFAULT_CFG).abs() < f32::EPSILON {
         steps = family.default_steps();
         cfg = family.default_cfg();
     }

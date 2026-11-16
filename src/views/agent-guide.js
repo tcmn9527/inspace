@@ -724,7 +724,7 @@ off:true 关掉，画面回到没有光的原样（和没做这功能时逐字�
 ### 先有一块
 block_create {type:"gen", x, y, w, h, prompt, imageW, imageH, steps, cfg, seed, mode, strength}。
 面板上摆着提示词框和一颗「开始」；尺寸 / 步数 / 贴合度 / 种子 / 那一档 / 改动幅度都没有控件——想调就调块上这几个字段，
-gen_run 和 block_update 都收这九个。默认 1024×1024、20 步、cfg 6、seed -1、mode auto、strength 0.75。
+gen_run 和 block_update 都收这九个。默认 1024×1024、30 步、cfg 6、seed -1、mode auto、strength 0.75。
 出图时不另外拼画风前缀，agent 想指定画风直接在 prompt 里写清楚就行。
 
 ### gen_run：一条命令出一张
@@ -802,12 +802,12 @@ gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一�
 
 ### 两族模型：gen_family
 生图引擎里有两族模型，同一时刻只用一族：
-- **qwen21** = Qwen-Image 2.1（默认）：20 步、cfg 6，t2i / i2i / edit / inpaint / upscale 全都支持。
+- **qwen21** = Qwen-Image 2.1（默认）：30 步、cfg 6，t2i / i2i / edit / inpaint / upscale 全都支持。
 - **h3image** = MiniMax-H3-Image：33B DiT + 32B 编码器，6 步、cfg 1，只支持 t2i / edit / upscale（i2i 和局部重绘会报回）；
   1MP 约 5 秒、2MP 约 8 秒、16MP 约 2 分钟（4096 边长，16GB 显卡实测）。
 gen_family 不带参数看当前族、支持的模式、边长上限、目录和缺件；传 qwen21 / h3image 切过去（会放掉已载入的权重，下一张重新读盘）。
 gen_run 的 model 参数也能点名，点名会顺带把当前族切过去。块上的 steps / cfg 写 0 或省略 = 跟着模型走，
-别把 Qwen 的 20 步 / cfg 6 照搬给 H3。两族权重分开放：Qwen 在数据根的 gen/models/，H3 在 gen/h3image/。
+别把 Qwen 的 30 步 / cfg 6 照搬给 H3。两族权重分开放：Qwen 在数据根的 gen/models/，H3 在 gen/h3image/。
 
 ### 档位可换：gen_models / gen_models_set
 模型文件夹里可以并存几档 Qwen-Image 2.1 的权重，同一时刻只吃其中一档。gen_models 不带参数，就是设置窗口上那颗「检测模型」：

@@ -1749,7 +1749,7 @@ fn gen_of(raw: &Value) -> Value {
         "negative": gen_text(raw, "negative", GEN_TEXT_MAX),
         "imageW": gen_int(raw, "imageW", 1024, 256, 4096),
         "imageH": gen_int(raw, "imageH", 1024, 256, 4096),
-        /* 0 = 跟着当前模型走（Qwen 20 步 / H3 6 步）；只有真的写过步数才存正数 */
+        /* 0 = 跟着当前模型走（Qwen 30 步 / H3 6 步）；只有真的写过步数才存正数 */
         "steps": gen_int(raw, "steps", 0, 0, 100),
         "cfg": raw
             .get("cfg")

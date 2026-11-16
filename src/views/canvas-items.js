@@ -117,11 +117,11 @@ export const GEN_IMAGE_STEP = 32;
 export const GEN_IMAGE_DEFAULT = 1024;
 export const GEN_STEPS_MIN = 1;
 export const GEN_STEPS_MAX = 100;
-export const GEN_STEPS_DEFAULT = 20;
+export const GEN_STEPS_DEFAULT = 30;
 export const GEN_CFG_MIN = 1.0;
 export const GEN_CFG_MAX = 20.0;
 export const GEN_CFG_DEFAULT = 6.0;
-/* 0 = 跟着当前模型走：Qwen 20 步 / cfg 6，H3-Image 6 步 / cfg 1。
+/* 0 = 跟着当前模型走：Qwen 30 步 / cfg 6，H3-Image 6 步 / cfg 1。
    块上没显式设过就是它，面板点「开始」不吃死某一族的默认。 */
 export const GEN_STEPS_AUTO = 0;
 export const GEN_CFG_AUTO = 0;

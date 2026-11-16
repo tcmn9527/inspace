@@ -5748,7 +5748,7 @@ function saveGenDefaults(item) {
     const value = {
       width: item.imageW,
       height: item.imageH,
-      steps: item.steps > 0 ? item.steps : fallback.steps ?? 20,
+      steps: item.steps > 0 ? item.steps : fallback.steps ?? 30,
       cfg: item.cfg > 0 ? item.cfg : fallback.cfg ?? 6,
       seed: item.seed,
       mode: item.mode,
@@ -5793,7 +5793,7 @@ function paintGenMore(item, el) {
   set("model", family);
   set("imageW", item.imageW);
   set("imageH", item.imageH);
-  set("steps", genEffective(item, "steps", fallback.steps ?? 20));
+  set("steps", genEffective(item, "steps", fallback.steps ?? 30));
   set("cfg", genEffective(item, "cfg", fallback.cfg ?? 6));
   set("seed", item.seed);
   set("strength", item.strength);
@@ -13101,6 +13101,9 @@ export const canvasAgent = {
     });
   },
   openSettings: (page) => invoke("open_settings_window", page ? { page } : {}),
+  genDegrid: (id, srcs) => store.genDegrid(id, srcs),
+  genDeviceGet: () => store.genDeviceGet(),
+  genDeviceSet: (device) => store.genDeviceSet(device),
   noteRead: agentNoteRead,
   noteWrite: agentNoteWrite,
   fileRead: agentFileRead,

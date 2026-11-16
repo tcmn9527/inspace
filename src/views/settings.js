@@ -84,6 +84,7 @@ export function initSettings(options = {}) {
   ui.routeMinutes = document.querySelector("#settings-route-minutes");
   ui.routeStatus = document.querySelector("#settings-route-status");
   ui.genFamilies = document.querySelector("#settings-gen-families");
+  ui.genDevice = document.querySelector("#settings-gen-device");
   ui.genNote = document.querySelector("#settings-gen-note");
   ui.genHint = document.querySelector("#settings-gen-hint");
   ui.genStatus = document.querySelector("#settings-gen-status");
@@ -140,6 +141,14 @@ export function initSettings(options = {}) {
   ui.cosmosCancel.addEventListener("click", cancelCosmosTextures);
   ui.cosmosClear.addEventListener("click", clearCosmosTextures);
   ui.genCheck.addEventListener("click", runGenCheck);
+  ui.genDevice.addEventListener("change", async () => {
+    showGenError("");
+    try {
+      await invoke("gen_device_set", { device: ui.genDevice.value });
+    } catch (error) {
+      showGenError(String(error));
+    }
+  });
   ui.genFamilies.addEventListener("click", (event) => {
     const button = event.target.closest("[data-family]");
     if (button) pickFamily(button.dataset.family);
@@ -1153,6 +1162,8 @@ async function refreshGen() {
   genApi = await invoke("gen_api_get").catch(() => genApi);
   fillGenApiForm();
   paintGenEngine();
+  const dev = await invoke("gen_device_get").catch(() => "gpu");
+  if (ui.genDevice) ui.genDevice.value = dev === "cpu" ? "cpu" : "gpu";
   try {
     genState = await invoke("gen_status");
   } catch (error) {

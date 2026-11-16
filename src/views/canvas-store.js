@@ -31,6 +31,10 @@ export const openCanvasImage = (id, itemId) =>
 /* 另存为：把这块的图复制到用户挑的目录，画布里那份不动。 */
 export const saveCanvasImageAs = (id, itemId) =>
   invoke("canvas_image_save_as", { id, itemId });
+/* 旧图原地去网格：不重出构图，直接清掉解码棋盘 */
+export const genDegrid = (id, srcs) => invoke("gen_degrid", { id, srcs });
+export const genDeviceGet = () => invoke("gen_device_get");
+export const genDeviceSet = (device) => invoke("gen_device_set", { device });
 /* 删图：文件当场进系统回收站，引用态的原图不碰。 */
 export const deleteCanvasImage = (id, src, linked) =>
   invoke("canvas_delete_image", { id, src, linked: Boolean(linked) });

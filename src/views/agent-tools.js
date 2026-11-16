@@ -254,14 +254,14 @@ const GEN_PROPS = {
   negative: { type: "string", description: "生图面板的负向提示词（不想要什么）" },
   imageW: { type: "number", description: "出图宽，256~2048（H3 到 4096），自己贴到 32 的倍数，默认 1024" },
   imageH: { type: "number", description: "出图高，同上" },
-  steps: { type: "number", description: "步数 1~100；0 或省略 = 按模型默认（Qwen 20 / H3 6）" },
+  steps: { type: "number", description: "步数 1~100；0 或省略 = 按模型默认（Qwen 30 / H3 6）" },
   cfg: { type: "number", description: "提示词贴合度 1~20；0 或省略 = 按模型默认（Qwen 6 / H3 1）" },
   seed: { type: "number", description: "种子；-1 每张换一个，给正数才能复现同一张" },
   model: {
     type: "string",
     enum: ["", "qwen21", "h3image"],
     description:
-      "用哪一族出图：qwen21=Qwen-Image 2.1（20 步，快，日常），h3image=MiniMax-H3-Image（6 步，质感更强、1MP 约 5 秒）；空串跟随设置里的当前模型。点名会顺带把当前模型切过去",
+      "用哪一族出图：qwen21=Qwen-Image 2.1（30 步，快，日常），h3image=MiniMax-H3-Image（6 步，质感更强、1MP 约 5 秒）；空串跟随设置里的当前模型。点名会顺带把当前模型切过去",
   },
   mode: {
     type: "string",
@@ -940,7 +940,7 @@ const TOOL_DEFS = [
     negative: { type: "string", description: "不想要什么" },
     imageW: { type: "number", description: "出图宽，256~2048（H3 到 4096），自己贴到 32 的倍数，默认 1024" },
     imageH: { type: "number", description: "出图高，同上" },
-    steps: { type: "number", description: "步数 1~100；0 或省略 = 按模型默认（Qwen 20 / H3 6）" },
+    steps: { type: "number", description: "步数 1~100；0 或省略 = 按模型默认（Qwen 30 / H3 6）" },
     cfg: { type: "number", description: "提示词贴合度 1~20；0 或省略 = 按模型默认（Qwen 6 / H3 1）" },
     seed: { type: "number", description: "种子；-1 每张换一个，给正数才能同一张复现" },
     model: {
@@ -969,7 +969,7 @@ const TOOL_DEFS = [
   }, ["id"], 630),
   def(
     "gen_family",
-    "看/切当前生图模型族。不传 family 只返回现在的设置：族 id、名称、支持的模式、出图边长上限、模型目录、当前档位和缺件。传 qwen21（Qwen-Image 2.1，20 步，日常）或 h3image（MiniMax-H3-Image，6 步，1MP 约 5 秒、16MP 约 2 分钟）就切过去——会放掉已载入的权重，下一次出图按新族重新载入；正在出图时切换会被拒绝。设置里选了 API 引擎时，切族只影响以后切回本地时的配置，不影响 API 出图。",
+    "看/切当前生图模型族。不传 family 只返回现在的设置：族 id、名称、支持的模式、出图边长上限、模型目录、当前档位和缺件。传 qwen21（Qwen-Image 2.1，30 步，日常）或 h3image（MiniMax-H3-Image，6 步，1MP 约 5 秒、16MP 约 2 分钟）就切过去——会放掉已载入的权重，下一次出图按新族重新载入；正在出图时切换会被拒绝。设置里选了 API 引擎时，切族只影响以后切回本地时的配置，不影响 API 出图。",
     {
       family: {
         type: "string",
@@ -996,6 +996,13 @@ const TOOL_DEFS = [
   def("gen_video_local", "看/换本地视频模型的文件夹。四件套（扩散模型、视频 VAE、音频 VAE、文本编码器）放进这个目录后自动扫描识别，文件名不一样也能认。不传 dir 只返回当前识别结果（每个槽位用了哪个文件、缺什么、建议改名、下载链接）；传 dir 就换目录并重新扫描，空串收回默认位置。", {
     dir: { type: "string", description: "模型目录的绝对路径；空串回到默认位置" },
   }, [], 30),
+  def("gen_device", "看/换生图计算设备。gpu=显卡(快,推荐)；cpu=全内存(慢,显存不够时用)。注意:H3 本地解码的格纹与设备无关,两种设备都可能有;要无格用 Qwen21 或云端 API。不传 device 只返回当前值。换设备会放掉已载入权重,下一张重新加载。", {
+    device: { type: "string", enum: ["gpu", "cpu"], description: "目标设备;省略只查询" },
+  }),
+  def("gen_degrid", "对画布里已落盘的旧图原地去网格（清掉 H3 解码棋盘），不重出构图。srcs 给 images/ 下的相对路径列表；返回处理了几张。处理完画面需刷新才见新像素。", {
+    id: { type: "string", description: "画布 id" },
+    srcs: { type: "array", items: { type: "string" }, description: "images/ 下相对路径列表" },
+  }, ["id", "srcs"], 120),
   def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen 生图模型、video 视频生成、models 3D 模型库、mcp Agent 连接、shortcuts 快捷键。", {
     page: {
       type: "string",
@@ -1669,6 +1676,10 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.genVideoCancel());
     case "gen_video_local":
       return onCanvas(args, () => canvasAgent.genVideoLocal(args.dir));
+    case "gen_device":
+      return args.device ? canvasAgent.genDeviceSet(args.device) : canvasAgent.genDeviceGet();
+    case "gen_degrid":
+      return canvasAgent.genDegrid(args.id, args.srcs || []);
     case "open_settings":
       return canvasAgent.openSettings(args.page);
     case "export_canvas":

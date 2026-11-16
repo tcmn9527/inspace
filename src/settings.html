@@ -114,6 +114,13 @@
                 <button class="settings-gen-family" data-family="qwen21" type="button" role="tab">Qwen-Image 2.1</button>
                 <button class="settings-gen-family" data-family="h3image" type="button" role="tab">MiniMax-H3-Image</button>
               </div>
+              <label class="settings-field settings-gen-device">
+                <span>运行设备</span>
+                <select id="settings-gen-device">
+                  <option value="gpu">显卡（快，推荐）</option>
+                  <option value="cpu">内存 / CPU（慢，显存不够时用）</option>
+                </select>
+              </label>
               <p class="settings-gen-note" id="settings-gen-note" hidden></p>
               <p class="settings-hint" id="settings-gen-hint" hidden>
                 模型文件都放在下面这个文件夹里，扔进去就能用。点「检测模型」看这台机器装得下哪一档、还缺哪几个文件。

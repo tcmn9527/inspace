@@ -26,24 +26,28 @@ export function genRunOf(id) {
 export function patchGenRun(id, patch) {
   const next = { ...(runs.get(id) || IDLE_RUN), ...patch };
   runs.set(id, next);
+  runChange?.();
   return next;
 }
 
 export function dropGenRun(id) {
   runs.delete(id);
   feeds.delete(id);
+  runChange?.();
 }
 
-/* 哪一块正占着引擎：一次只出一张，所以最多一个。 */
+/* 运行态一变，canvas 那边要跟着刷新别的面板的「开始」灰化 */
+let runChange = null;
+export function onGenRunChange(listener) {
+  runChange = listener;
+}
+
+/* 当前在跑的块（API 并行时可能不止一块，取第一块给老调用用）。 */
 export function genBusyId() {
   for (const [id, run] of runs) {
     if (run.phase === "loading" || run.phase === "running") return id;
   }
   return "";
-}
-
-export function isGenBusy() {
-  return Boolean(genBusyId());
 }
 
 /* 取景窗里那句话：正常态最多一行小字，出问题或在等才多说。 */
@@ -82,7 +86,8 @@ function genModeOf(item, info) {
   return info?.mode || (item.mode && item.mode !== "auto" ? item.mode : "");
 }
 
-export function syncGen(el, item, feed) {
+export function syncGen(el, item, feed, options = {}) {
+  const blocked = Boolean(options.blocked);
   const run = genRunOf(item.id);
   const image = el.querySelector(".canvas-gen-image");
   const hint = el.querySelector(".canvas-gen-hint");
@@ -169,10 +174,10 @@ export function syncGen(el, item, feed) {
   if (document.activeElement !== prompt && prompt.value !== item.prompt) {
     prompt.value = item.prompt || "";
   }
-  prompt.disabled = Boolean(item.locked);
+  prompt.disabled = false;
 
   runButton.textContent = busy ? "停止" : "开始";
-  /* 一次一张：别的块在出图，这儿的开始就按不动 */
-  runButton.disabled = Boolean(item.locked) || (!busy && isGenBusy());
-  placeButton.hidden = !run.imageUrl || busy || Boolean(item.locked);
+  /* 本地引擎一次只吃一张：别的面板在跑时这块的开始灰掉；API 通道按并行数放开 */
+  runButton.disabled = !busy && blocked;
+  placeButton.hidden = !run.imageUrl || busy;
 }

@@ -92,6 +92,20 @@ id 从 theme_list 拿。调 "cosmos" 会给画布页打开一条自动飞行的�
 ### space_delete
 删除整个画布，文件夹进系统回收站。删的是当前画布时，会自动切到列表里的下一个。
 
+### space_export
+把画布或整个分组打包成 .inspace 容器（标准 zip，包根带 inspace.json 清单）。group=true 导出整个分组（含子分组和里面的画布）；out 必须是绝对路径。
+
+~~~json
+{ "id": "壁纸/3/宇宙英雄十二生肖", "out": "D:\\备份\\生肖.inspace" }
+~~~
+
+### space_import
+把 .inspace 解压导入到指定分组：画布包变成一个画布目录，分组件包变成一个子分组；重名自动加后缀不覆盖。返回 {kind, id, name}，不会自动切过去。
+
+~~~json
+{ "parent": "备份", "path": "D:\\备份\\生肖.inspace" }
+~~~
+
 ### group_create
 新建分组（真文件夹），返回 {id}。parent 给分组 id 或名字就建在它里面，不给建在根级。
 
@@ -732,7 +746,8 @@ gen_run {id, prompt} 默认等到出完再回（本机一张约 30 秒）。返�
 src 是这张图在这个画布 images/ 里的相对路径。
 - 头一次跑（或者闲过 45 秒引擎自己放掉权重之后）要从盘上读十来 GB 权重，那一两分钟也算在同一个等待里；
   timeout 别压太小，默认 300 秒，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问。
-- 引擎一次只吃一张。别的面板正占着它会直接报回「引擎正被 xxx 占着」，先 gen_cancel 或者等它完事。
+- 本地引擎一次只吃一张。别的面板正占着它会直接报回「引擎正被 xxx 占着」，先 gen_cancel 或者等它完事。
+  走 API 时可以并行：同时最多跑几张在设置 → 生图模型里配（1–10），超过了会报「API 并行已满」。
 - 想边跑边干别的就 wait:false 只起一轮，之后看 phase。
 - 同一张要复现就给正数 seed；-1 是每张换一个。
 - 这一步不进批量：一次一张、每张几十秒，排在批量里没有意义。
@@ -796,7 +811,7 @@ gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一�
 设置 → 生图模型的顶部可以选「本地模型 / API」。选了 API 并填好接口地址、模型名、Key，出图整条路走远端：
 - gen_status 的 provider 说这一张走 local 还是 api；apiModel 是远端模型名，apiProblem 非空说明配置还缺东西、出图会直接报错。
 - 只发提示词、尺寸和参考图：steps / cfg / seed / negative / model（族）都不生效，别拿这些参数做「能复现」的承诺。
-- i2i / inpaint 降级成「参考图 + 提示词」（Images 协议会尽量带 mask）；upscale 在 API 下直接报不支持。
+- i2i / inpaint 降级成「参考图 + 提示词」（Images 协议会尽量带 mask）；upscale 自动走本地放大模型（不受 API 开关影响）。
 - gen_cancel 只是「回来不要这张」，HTTP 请求本身掐不断。
 - API 配置归用户：地址、Key、模型名只让他在设置里改，agent 不代填、也读不到 Key。
 
@@ -849,7 +864,7 @@ needed 里有缺、或 missing 非空，就是这台机器还没备好模型文�
   "firstFrame": "<图片块 id 或 PNG base64>", "seconds": 6, "ratio": "16:9" }
 ~~~
 - firstFrame 给块 id（图片块、画面块、已出图的生图面板）或直接给 base64；不给就是文生视频。
-- 一次只跑一条：另一条在跑时提交会直接报错。
+- 云端 API 可以并行跑多条（条数在设置 → 视频生成里配，1–10）；本地引擎一次只跑一条，另一条在跑时提交会直接报错。
 - 平台任务通常 1-5 分钟。默认等 600 秒；到点返回 timedOut:true，任务还在平台跑，用 gen_video_status 接着看。
 - 返回的 path 是 gen/videos/ 下的缓存文件绝对路径（截图/预览可以直接用它）。
 

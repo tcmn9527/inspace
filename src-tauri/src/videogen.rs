@@ -13,6 +13,7 @@
 
    任务提交出去之后服务端停不掉：取消只是本地不再等，费用已经发生。 */
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,6 +54,9 @@ pub struct VideoApiConfig {
     pub api_key: String,
     #[serde(default)]
     pub model: String,
+    /// 同时最多跑几条。0 = 老配置没这项，按默认 2 算。
+    #[serde(default)]
+    pub parallel: u32,
 }
 
 fn default_protocol() -> String {
@@ -66,11 +70,17 @@ impl Default for VideoApiConfig {
             base_url: String::new(),
             api_key: String::new(),
             model: String::new(),
+            parallel: 2,
         }
     }
 }
 
 impl VideoApiConfig {
+    /// 并行上限：0（老配置/没填）当 2，最多 10。
+    fn parallel_limit(&self) -> usize {
+        let value = if self.parallel == 0 { 2 } else { self.parallel };
+        value.clamp(1, 10) as usize
+    }
     fn base(&self) -> String {
         let text = self.base_url.trim().trim_end_matches('/');
         if !text.is_empty() {
@@ -114,17 +124,21 @@ fn save(db: &DbState, config: &VideoApiConfig) -> Result<(), String> {
 
 /* ---------- 状态 ---------- */
 
-pub(crate) struct Busy {
+/// 一条在跑的视频任务。API 通道可以同时有多条（上限由配置决定），本地引擎只有一条。
+pub(crate) struct Job {
     pub(crate) block: String,
     pub(crate) status: String,
     pub(crate) task_id: String,
     pub(crate) started: Instant,
+    /// API 任务自己的取消标志；本地任务直接用 core.cancel（和 sd.cpp 取消共用）
+    pub(crate) cancel: Arc<AtomicBool>,
+    pub(crate) local: bool,
 }
 
 pub(crate) struct Core {
     pub(crate) data: DataRoot,
     pub(crate) cancel: Arc<AtomicBool>,
-    pub(crate) busy: Arc<Mutex<Option<Busy>>>,
+    pub(crate) jobs: Arc<Mutex<HashMap<String, Job>>>,
     pub(crate) config: Arc<Mutex<VideoApiConfig>>,
     pub(crate) engine: Arc<Mutex<String>>,
     pub(crate) local: LocalEngine,
@@ -178,27 +192,34 @@ impl VideoState {
 
     pub(crate) fn is_busy(&self) -> bool {
         self.core
-            .busy
+            .jobs
             .lock()
-            .map(|busy| busy.is_some())
+            .map(|jobs| !jobs.is_empty())
             .unwrap_or(true)
     }
 
     fn busy_json(&self) -> Value {
-        let busy = self.core.busy.lock().ok().and_then(|value| {
-            value.as_ref().map(|busy| {
-                json!({
-                    "block": busy.block,
-                    "status": busy.status,
-                    "taskId": busy.task_id,
-                    "waitedSeconds": busy.started.elapsed().as_secs(),
-                })
+        let jobs: Vec<Value> = self
+            .core
+            .jobs
+            .lock()
+            .map(|jobs| {
+                jobs.values()
+                    .map(|job| {
+                        json!({
+                            "block": job.block,
+                            "status": job.status,
+                            "taskId": job.task_id,
+                            "waitedSeconds": job.started.elapsed().as_secs(),
+                            "local": job.local,
+                        })
+                    })
+                    .collect()
             })
-        });
-        match busy {
-            Some(value) => json!({ "busy": true, "job": value }),
-            None => json!({ "busy": false, "job": null }),
-        }
+            .unwrap_or_default();
+        /* job 留成第一条，老的调用方（含 agent）不用改 */
+        let first = jobs.first().cloned();
+        json!({ "busy": !jobs.is_empty(), "jobs": jobs, "job": first })
     }
 }
 
@@ -220,7 +241,7 @@ pub fn init(data: DataRoot, db: &DbState) -> VideoState {
         core: Arc::new(Core {
             data,
             cancel: Arc::new(AtomicBool::new(false)),
-            busy: Arc::new(Mutex::new(None)),
+            jobs: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(load(db))),
             engine: Arc::new(Mutex::new(engine)),
             local: videolocal::init(db),
@@ -405,15 +426,32 @@ pub fn gen_video_status(state: tauri::State<VideoState>) -> Value {
 }
 
 #[tauri::command]
-pub fn gen_video_cancel(state: tauri::State<VideoState>) -> bool {
-    let Some(core) = busy_guard(&state) else {
-        return false;
-    };
-    core.cancel.store(true, Ordering::Relaxed);
-    if core.engine() == "local" {
+pub fn gen_video_cancel(state: tauri::State<VideoState>, block: Option<String>) -> bool {
+    let core = Arc::clone(&state.core);
+    let mut hit = false;
+    let mut hit_local = false;
+    if let Ok(mut jobs) = core.jobs.lock() {
+        match block.as_deref() {
+            Some(target) => {
+                if let Some(job) = jobs.get(target) {
+                    job.cancel.store(true, Ordering::Relaxed);
+                    hit_local = job.local;
+                    hit = true;
+                }
+            }
+            None => {
+                for job in jobs.values() {
+                    job.cancel.store(true, Ordering::Relaxed);
+                    hit_local |= job.local;
+                }
+                hit = !jobs.is_empty();
+            }
+        }
+    }
+    if hit_local {
         core.local_engine().cancel();
     }
-    true
+    hit
 }
 
 #[tauri::command]
@@ -443,16 +481,6 @@ pub async fn gen_video_start(
         }
         Some(config)
     };
-    {
-        let busy = state
-            .core
-            .busy
-            .lock()
-            .map_err(|_| "视频任务状态异常".to_string())?;
-        if busy.is_some() {
-            return Err("正在出一个视频，等这一条跑完".to_string());
-        }
-    }
     if let Some(config) = &config {
         if config.protocol == "dashscope"
             && req.image.as_deref().is_some_and(|text| !text.trim().is_empty())
@@ -460,62 +488,68 @@ pub async fn gen_video_start(
             return Err("DashScope 协议的图生视频只收公网图片 URL，本地首帧暂不支持；换成 OpenAI 或海螺协议".to_string());
         }
     }
-    state.core.cancel.store(false, Ordering::Relaxed);
-    {
-        let mut busy = state
+    /* 任务名额：本地只有一张卡，一次一条；API 按设置的并行上限放行 */
+    let cancel = {
+        let mut jobs = state
             .core
-            .busy
+            .jobs
             .lock()
             .map_err(|_| "视频任务状态异常".to_string())?;
-        *busy = Some(Busy {
-            block: req.block.clone(),
-            status: "提交中…".to_string(),
-            task_id: String::new(),
-            started: Instant::now(),
-        });
-    }
+        if jobs.contains_key(&req.block) {
+            return Err("这块正在出视频，等这一条跑完".to_string());
+        }
+        let (cancel, local) = if config.is_none() {
+            if !jobs.is_empty() {
+                return Err("正在出一个视频，等这一条跑完".to_string());
+            }
+            state.core.cancel.store(false, Ordering::Relaxed);
+            (Arc::clone(&state.core.cancel), true)
+        } else {
+            let limit = config.as_ref().map(|c| c.parallel_limit()).unwrap_or(1);
+            if jobs.len() >= limit {
+                return Err(format!("视频 API 并行已满（{limit} 条），等一条跑完再点"));
+            }
+            (Arc::new(AtomicBool::new(false)), false)
+        };
+        jobs.insert(
+            req.block.clone(),
+            Job {
+                block: req.block.clone(),
+                status: "提交中…".to_string(),
+                task_id: String::new(),
+                started: Instant::now(),
+                cancel: Arc::clone(&cancel),
+                local,
+            },
+        );
+        cancel
+    };
     let core = Arc::clone(&state.core);
-    thread::spawn(move || run_job(core, app, config, req));
+    thread::spawn(move || run_job(core, app, config, req, cancel));
     Ok(())
 }
 
 /* ---------- 任务线程 ---------- */
 
-/// 只有当前任务能清 busy：取消后马上又起一条时，旧线程别把新任务的占位抹掉。
-fn busy_guard(state: &tauri::State<VideoState>) -> Option<Arc<Core>> {
-    let core = Arc::clone(&state.core);
-    let guard = core.busy.lock().ok()?;
-    guard.as_ref()?;
-    drop(guard);
-    Some(core)
-}
-
 pub(crate) fn set_status(core: &Core, block: &str, status: &str) {
-    if let Ok(mut busy) = core.busy.lock() {
-        if let Some(job) = busy.as_mut() {
-            if job.block == block {
-                job.status = status.to_string();
-            }
+    if let Ok(mut jobs) = core.jobs.lock() {
+        if let Some(job) = jobs.get_mut(block) {
+            job.status = status.to_string();
         }
     }
 }
 
 fn set_task(core: &Core, block: &str, task_id: &str) {
-    if let Ok(mut busy) = core.busy.lock() {
-        if let Some(job) = busy.as_mut() {
-            if job.block == block {
-                job.task_id = task_id.to_string();
-            }
+    if let Ok(mut jobs) = core.jobs.lock() {
+        if let Some(job) = jobs.get_mut(block) {
+            job.task_id = task_id.to_string();
         }
     }
 }
 
-fn clear_busy(core: &Core, block: &str) {
-    if let Ok(mut busy) = core.busy.lock() {
-        let mine = busy.as_ref().is_some_and(|job| job.block == block);
-        if mine {
-            *busy = None;
-        }
+fn clear_job(core: &Core, block: &str) {
+    if let Ok(mut jobs) = core.jobs.lock() {
+        jobs.remove(block);
     }
 }
 
@@ -536,15 +570,16 @@ fn run_job(
     app: tauri::AppHandle,
     config: Option<VideoApiConfig>,
     req: VideoRequest,
+    cancel: Arc<AtomicBool>,
 ) {
     let block = req.block.clone();
     let started = Instant::now();
     let outcome = match config {
-        Some(config) => execute(&core, &app, &config, &req),
+        Some(config) => execute(&core, &app, &config, &req, &cancel),
         None => videolocal::execute(&core, &app, &req),
     };
-    clear_busy(&core, &block);
-    let canceled = core.cancel.load(Ordering::Relaxed);
+    clear_job(&core, &block);
+    let canceled = cancel.load(Ordering::Relaxed);
     match outcome {
         Ok(path) if !canceled => {
             let _ = app.emit(
@@ -585,6 +620,7 @@ fn execute(
     app: &tauri::AppHandle,
     config: &VideoApiConfig,
     req: &VideoRequest,
+    cancel: &AtomicBool,
 ) -> Result<String, String> {
     let block = &req.block;
     let model = req
@@ -605,7 +641,7 @@ fn execute(
 
     let mut label = "排队中".to_string();
     loop {
-        if core.cancel.load(Ordering::Relaxed) {
+        if cancel.load(Ordering::Relaxed) {
             return Err("已取消".to_string());
         }
         let poll_started = Instant::now();
@@ -642,13 +678,12 @@ fn execute(
 }
 
 pub(crate) fn started_secs(core: &Core, block: &str) -> u64 {
-    core.busy
+    core.jobs
         .lock()
         .ok()
-        .and_then(|busy| {
-            busy.as_ref().and_then(|job| {
-                (job.block == block).then(|| job.started.elapsed().as_secs())
-            })
+        .and_then(|jobs| {
+            jobs.get(block)
+                .map(|job| job.started.elapsed().as_secs())
         })
         .unwrap_or(0)
 }

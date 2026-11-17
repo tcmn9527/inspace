@@ -38,6 +38,9 @@ pub struct ApiConfig {
     pub api_key: String,
     #[serde(default)]
     pub model: String,
+    /// 同时最多跑几轮。0 = 老配置没这项，按默认 2 算。
+    #[serde(default)]
+    pub parallel: u32,
 }
 
 fn default_protocol() -> String {
@@ -52,11 +55,18 @@ impl Default for ApiConfig {
             base_url: String::new(),
             api_key: String::new(),
             model: String::new(),
+            parallel: 2,
         }
     }
 }
 
 impl ApiConfig {
+    /// 并行上限：0（老配置/没填）当 2，最多 10。
+    pub fn parallel_limit(&self) -> usize {
+        let value = if self.parallel == 0 { 2 } else { self.parallel };
+        value.clamp(1, 10) as usize
+    }
+
     /// 缺哪样在 `problem()` 里说清楚。
     pub fn problem(&self) -> Option<String> {
         if self.base_url.trim().is_empty() {

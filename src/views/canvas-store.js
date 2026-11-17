@@ -17,6 +17,11 @@ export const createGroup = (parent, name) => invoke("canvas_group_create", { par
 export const renameGroup = (id, name) => invoke("canvas_group_rename", { id, name });
 export const deleteGroup = (id) => invoke("canvas_group_delete", { id });
 export const revealGroup = (id) => invoke("canvas_group_reveal", { id });
+/* .inspace 容器：标准 zip，导出画布或整个分组；不给 target/source 时后端弹系统文件框 */
+export const exportSpace = (id, group, target) =>
+  invoke("canvas_export", { id, group: Boolean(group), target: target || null });
+export const importSpace = (parent, source) =>
+  invoke("canvas_import", { parent: parent || "", source: source || null });
 export const saveCanvasImage = (id, data, ext) => invoke("canvas_save_image", { id, data, ext });
 /* 图片和音频都不走 base64：后端确认文件还在、开一次 asset 读权限，这里换成地址。
    拷贝态 src 是画布目录里的相对路径，引用态是原文件绝对路径。 */
@@ -142,11 +147,11 @@ export const genDefaultsSet = (defaults, family) =>
   invoke("gen_defaults_set", { defaults, family: family || null });
 export const genDefaultsReset = (family) => invoke("gen_defaults_reset", { family: family || null });
 export const genStart = (req) => invoke("gen_start", { req });
-export const genCancel = () => invoke("gen_cancel");
+export const genCancel = (block) => invoke("gen_cancel", block ? { block } : {});
 /* 视频生成：一次一条，进度和成品走事件（video-progress / video-done / video-failed），
    成品是缓存文件的绝对路径，落块时再拷进画布 video/。 */
 export const genVideoStart = (req) => invoke("gen_video_start", { req });
-export const genVideoCancel = () => invoke("gen_video_cancel");
+export const genVideoCancel = (block) => invoke("gen_video_cancel", block ? { block } : {});
 export const genVideoStatus = () => invoke("gen_video_status");
 export const genVideoApiGet = () => invoke("gen_video_api_get");
 export const genVideoLocalGet = () => invoke("gen_video_local_get");

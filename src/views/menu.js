@@ -391,7 +391,21 @@ export function openMenu(x, y, items, options = {}) {
 }
 
 /* 点菜单外部、按 Esc 都收起。用 composedPath 而不是 contains(e.target)：菜单项点击时
-   可能已经重建/摘掉了被点的那颗按钮，contains 会误判成「外部点击」。 */
+   可能已经重建/摘掉了被点的那颗按钮，contains 会误判成「外部点击」。
+   用 pointerdown 的捕获阶段：画布那边 pointerdown 会 preventDefault 把 click 吞掉，
+   挂在 click 上时点画布收不掉菜单。 */
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    const menu = document.getElementById("ctx-menu");
+    if (!menu || menu.hidden) return;
+    const path = e.composedPath();
+    const inside = path.includes(menu) || slots.some((slot) => slot?.el && path.includes(slot.el));
+    if (!inside) closeMenu();
+  },
+  true,
+);
+/* click 兜底：程序化点击（没有 pointerdown）也收 */
 document.addEventListener("click", (e) => {
   const menu = document.getElementById("ctx-menu");
   if (!menu || menu.hidden) return;

@@ -27,15 +27,15 @@ import {
   dropGenRun,
   genBusyId,
   genRunOf,
-  isGenBusy,
+  onGenRunChange,
   patchGenRun,
   syncGen,
 } from "./genpanel.js";
 import {
   dropVideoRun,
-  isVideoBusy,
   patchVideoRun,
   syncVideoPanel,
+  videoBusyId,
   videoRunOf,
 } from "./videopanel.js";
 import { openVideoHelp } from "./video-help.js";
@@ -895,6 +895,9 @@ async function switchTo(id) {
     await loadPictureImages();
     if (token !== loadToken || !active) return;
     renderAll();
+    /* 块的容器归属按新画布重算：重叠的框先到先得 */
+    rebuildContainerOwners();
+    refreshTitlebarPath();
     /* 源 .md 读不到的笔记块整块换成丢文件卡，不再拿最后一次缓存的正文糊弄用户 */
     for (const item of staleNotes) {
       renderMissing(itemEls.get(item.id), item, current.meta.path || "");
@@ -1209,6 +1212,10 @@ function treeRootEntries() {
   return [
     { label: "新建画布", onClick: () => createFlowIn(null) },
     { label: "新建分组", onClick: () => createGroupFlow(null) },
+    "-",
+    { label: "导入画布", onClick: () => void importIntoGroup("") },
+    /* 根级导出 = 整个 spaces 一次打包成一个 .inspace */
+    { label: "导出画布", onClick: () => void exportTreeSpace({ id: "", name: "全部画布" }, true) },
   ];
 }
 
@@ -1509,7 +1516,8 @@ function treeContainerKids(container) {
       b.x >= box.x - 1 &&
       b.y >= box.y - 1 &&
       b.x + b.w <= box.x + box.w + 1 &&
-      b.y + b.h <= box.y + box.h + 1
+      b.y + b.h <= box.y + box.h + 1 &&
+      ownedByContainer(item, container, box)
     ) out.push(item);
   }
   return out;
@@ -1598,6 +1606,17 @@ function renderPanelTree(body) {
       const chevron = document.createElement("span");
       chevron.className = `space-tree-chevron${expanded ? " is-open" : ""}`;
       chevron.innerHTML = TREE_CHEVRON;
+      /* 三角单独管展开/收起：单击它不连带选中这一行 */
+      chevron.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (treePanelCollapsed.has(item.id)) treePanelCollapsed.delete(item.id);
+        else treePanelCollapsed.add(item.id);
+        treeSavePrefs();
+        renderTree();
+      });
+      chevron.addEventListener("dblclick", (event) => {
+        event.stopPropagation();
+      });
       row.append(chevron);
     }
     const label = document.createElement("span");
@@ -1614,18 +1633,30 @@ function renderPanelTree(body) {
       row.append(lock);
     }
     row.addEventListener("click", () => {
-      if (isCont) {
-        if (treePanelCollapsed.has(item.id)) treePanelCollapsed.delete(item.id);
-        else treePanelCollapsed.add(item.id);
-        treeSavePrefs();
-        renderTree();
-        return;
-      }
       select(item.id);
       agentRevealBlock(item.id);
       /* 从面板树点选：给画布上那块打一圈 1 秒的光带，锁定块没有常规选中标记，
          靠这一下知道点的是谁；直接在画布上选不走这里，就没有这效果 */
       agentHighlight([item.id], 1000);
+      renderTree();
+    });
+    /* 双击：容器展开/收起；Ctrl+双击：锁定/解锁（和 Ctrl+L 同一套语义） */
+    row.addEventListener("dblclick", (event) => {
+      const now = findItem(item.id);
+      if (!now) return;
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        setLockedMany([now.id], !now.locked);
+        renderTree();
+        return;
+      }
+      if (!isCont) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (treePanelCollapsed.has(now.id)) treePanelCollapsed.delete(now.id);
+      else treePanelCollapsed.add(now.id);
+      treeSavePrefs();
       renderTree();
     });
     row.addEventListener("contextmenu", (event) => {
@@ -1658,6 +1689,8 @@ function openTreeGroupMenu(node, x, y) {
   openMenu(x, y, [
     { label: "新建画布", onClick: () => createFlowIn(node.id) },
     { label: "新建子分组", onClick: () => createGroupFlow(node.id) },
+    { label: "导入画布", onClick: () => void importIntoGroup(node.id) },
+    { label: "导出画布", onClick: () => void exportTreeSpace(node, true) },
     "-",
     ...treeMoveEntries(node),
     "-",
@@ -1679,6 +1712,8 @@ function openTreeCanvasMenu(node, x, y) {
     })),
   ];
   openMenu(x, y, [
+    { label: "导出画布", onClick: () => void exportTreeSpace(node, false) },
+    "-",
     ...treeMoveEntries(node),
     "-",
     { label: "重命名", onClick: () => startTreeRename("canvas", node.id, node.name) },
@@ -1772,6 +1807,56 @@ async function copyCanvasFlow(id, parent) {
     const meta = await store.copyCanvas(id, parent);
     await loadList();
     await switchTo(meta.id);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+/* ---------- .inspace 容器导入导出 ----------
+   导出成标准 zip：画布包解压是一个画布目录，分组件包解压是一个子分组。
+   导出会打开系统保存框，导入会打开系统打开框；重名由后端自动加后缀，不覆盖。 */
+
+async function exportTreeSpace(node, group) {
+  try {
+    if (!group && current?.meta.id === node.id) {
+      if (editingId || edgeLabelEditor) commitEditing();
+      await flushBlockContents();
+      await flushItems();
+      await flushCamera();
+    }
+    await store.exportSpace(node.id, group);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function importIntoGroup(parent) {
+  try {
+    if (current) {
+      if (editingId || edgeLabelEditor) commitEditing();
+      await flushBlockContents();
+      await flushItems();
+      await flushCamera();
+    }
+    const result = await store.importSpace(parent);
+    if (!result) return;
+    const reveal = (id) => {
+      let prefix = id;
+      while (prefix) {
+        treeCollapsed.delete(prefix);
+        const cut = prefix.lastIndexOf("/");
+        if (cut < 0) break;
+        prefix = prefix.slice(0, cut);
+      }
+    };
+    reveal(parent || "");
+    if (result.kind === "canvas") {
+      await loadList();
+      await switchTo(result.id);
+    } else {
+      reveal(result.id);
+      await loadList();
+    }
   } catch (error) {
     showError(error);
   }
@@ -2456,6 +2541,64 @@ function syncSelectedClasses() {
   }
 }
 
+/* 画布上选中的块如果藏在折叠的容器里，把容器逐级展开，让人在树里看得见选中行 */
+function revealSelectionInTree() {
+  const body = treeUi?.body;
+  if (!body || !current) return;
+  let changed = false;
+  for (const id of selectedIds) {
+    const item = findItem(id);
+    if (!item || item.type === "connector") continue;
+    let ownerId = item.containerId;
+    let guard = 0;
+    while (ownerId && guard < 8) {
+      if (treePanelCollapsed.has(ownerId)) {
+        treePanelCollapsed.delete(ownerId);
+        changed = true;
+      }
+      const owner = findItem(ownerId);
+      ownerId = owner?.containerId || "";
+      guard += 1;
+    }
+  }
+  if (changed) {
+    treeSavePrefs();
+    renderTree();
+  }
+}
+
+/* 标题栏：当前画布路径；单选面板时跟上 #N 名称（没自定义名就是类型） */
+function refreshTitlebarPath() {
+  const el = document.getElementById("titlebar-path");
+  if (!el) return;
+  if (!current) {
+    el.textContent = "";
+    el.title = "";
+    return;
+  }
+  const parts = [String(current.meta.id || "").replace(/\//g, "\\")];
+  const ids = [...selectedIds].filter((id) => findItem(id)?.type !== "connector");
+  if (ids.length === 1) {
+    const item = findItem(ids[0]);
+    if (item && Number.isFinite(item.seq) && item.seq > 0) parts.push(panelTreeLabel(item));
+  } else if (ids.length > 1) {
+    parts.push(`已选 ${ids.length} 项`);
+  }
+  const text = parts.filter(Boolean).join("\\");
+  el.textContent = text;
+  el.title = text;
+}
+
+/* 画布上选中的块，面板树里对应的行跟着亮底；容器折叠时子块行不在 DOM，自然没有可亮的 */
+function syncTreeSelection() {
+  const body = treeUi?.body;
+  if (!body) return;
+  revealSelectionInTree();
+  for (const row of body.querySelectorAll('.space-tree-row[data-kind="panel"]')) {
+    row.classList.toggle("is-selected", selectedIds.has(row.dataset.id));
+  }
+}
+
 /* 只选了一个时才有的「那一个」；多选时返回 null，缩放和端口这些单块操作照旧不出现 */
 function loneSelected() {
   return selectedIds.size === 1 ? [...selectedIds][0] : null;
@@ -2509,6 +2652,8 @@ function updateMetrics() {
 
 function updateSelection() {
   if (!ui) return;
+  syncTreeSelection();
+  refreshTitlebarPath();
   refreshConnectors();
   for (const stale of ui.world.querySelectorAll(".canvas-sel-box")) stale.remove();
   ui.endpointLayer.textContent = "";
@@ -2909,7 +3054,7 @@ function tidySelected() {
   for (const id of selectedIds) {
     const container = findItem(id);
     if (!container || !isContainer(container)) continue;
-    for (const child of containedBlocks(container, seen)) push(child.id);
+    for (const child of moveMembers(container, seen)) push(child.id);
   }
   return group;
 }
@@ -2921,14 +3066,16 @@ function isContainer(item) {
   return item.type === "rect" && item.container === true;
 }
 
-/* 框里装着的块。exclude 是已经算进去的（多选时别重复带上） */
-function containedBlocks(container, exclude = new Set()) {
+/* 框里装着的块。exclude 是已经算进去的（多选时别重复带上）。
+   includeLocked 给复制用：锁定的子块也算容器的一部分，粘出去再统一解锁。 */
+function containedBlocks(container, exclude = new Set(), includeLocked = false) {
   const el = itemEls.get(container.id);
   if (!el || !current) return [];
   const box = itemBounds(container, el);
   const out = [];
   for (const item of current.items) {
-    if (item.id === container.id || item.type === "connector" || item.locked) continue;
+    if (item.id === container.id || item.type === "connector") continue;
+    if (!includeLocked && item.locked) continue;
     if (exclude.has(item.id)) continue;
     const childEl = itemEls.get(item.id);
     if (!childEl) continue;
@@ -2947,6 +3094,102 @@ function applyContainerClass(item) {
   itemEls.get(item.id)?.classList.toggle("is-container", isContainer(item));
 }
 
+/* ---------- 容器成员归属 ----------
+   重叠的两个框里几何判定分不清谁是谁，拖动时就会互相吸走子块。
+   block.containerId 记住每块归哪个容器：粘贴容器时新容器立刻认领自己的子块，
+   拖动后只重算动过的块，没主的老数据开画布时按容器顺序先到先得。 */
+function containerBoxOf(container) {
+  const el = itemEls.get(container.id);
+  if (!el) return null;
+  return itemBounds(container, el);
+}
+
+function insideBox(item, box) {
+  const el = itemEls.get(item.id);
+  if (!el) return false;
+  const b = itemBounds(item, el);
+  return (
+    b.x >= box.x - 1 &&
+    b.y >= box.y - 1 &&
+    b.x + b.w <= box.x + box.w + 1 &&
+    b.y + b.h <= box.y + box.h + 1
+  );
+}
+
+/* 开画布：有主的、容器还在且仍框着它就算数；没主的按容器顺序先到先得 */
+function rebuildContainerOwners() {
+  if (!current) return;
+  const containers = current.items.filter((item) => isContainer(item));
+  for (const item of current.items) {
+    if (item.type === "connector" || !item.containerId) continue;
+    const container = findItem(item.containerId);
+    const box = container && container.id !== item.id ? containerBoxOf(container) : null;
+    if (!box || !insideBox(item, box)) item.containerId = "";
+  }
+  for (const container of containers) {
+    const box = containerBoxOf(container);
+    if (!box) continue;
+    for (const item of current.items) {
+      if (item.id === container.id || item.type === "connector" || item.containerId) continue;
+      if (insideBox(item, box)) item.containerId = container.id;
+    }
+  }
+}
+
+/* 拖完重算：还在原容器里就保持，换了框就换主，拖出去就脱组 */
+function reassignContainerOwners(items) {
+  if (!current) return;
+  const containers = current.items.filter((item) => isContainer(item));
+  for (const item of items) {
+    if (!item || item.type === "connector") continue;
+    const owner = item.containerId;
+    if (owner) {
+      const container = findItem(owner);
+      const box = container && container.id !== item.id ? containerBoxOf(container) : null;
+      if (box && insideBox(item, box)) continue;
+      item.containerId = "";
+    }
+    const host = containers.find((container) => {
+      if (container.id === item.id) return false;
+      const box = containerBoxOf(container);
+      return box ? insideBox(item, box) : false;
+    });
+    if (host) item.containerId = host.id;
+  }
+}
+
+/* 这块归不归 container 管：没主或认的就是它；认了别的容器、但那个容器
+   本身就在这个框里（嵌套）时算它管。拖动和树里的展开用同一套判定。 */
+function ownedByContainer(item, container, box) {
+  const owner = item.containerId;
+  if (!owner || owner === container.id) return true;
+  const ownerItem = findItem(owner);
+  return !ownerItem || insideBox(ownerItem, box);
+}
+
+/* 容器自己认的成员（几何在框里 + 归属不是别的容器）。拖动、复制、删除都用它；
+   includeLocked 给复制/删除用：锁定的子块也带着走。 */
+function ownedMembers(container, exclude = new Set(), includeLocked = false) {
+  const box = containerBoxOf(container);
+  if (!box) return [];
+  const out = [];
+  for (const item of current.items) {
+    if (item.id === container.id || item.type === "connector") continue;
+    if (!includeLocked && item.locked) continue;
+    if (exclude.has(item.id)) continue;
+    if (!insideBox(item, box)) continue;
+    if (!ownedByContainer(item, container, box)) continue;
+    out.push(item);
+  }
+  return out;
+}
+
+/* 拖容器时跟走的成员：框里的块、且它认这个容器；认了别的容器、而那个容器
+   不在这个框里的就不跟——重叠的两个容器各带走各的子块，互不串门。 */
+function moveMembers(container, exclude = new Set()) {
+  return ownedMembers(container, exclude, false);
+}
+
 /* 右键「编为容器 / 取消容器」 */
 function toggleContainer(item) {
   if (item.type !== "rect") return;
@@ -2961,12 +3204,18 @@ function toggleContainer(item) {
       const el = itemEls.get(item.id);
       if (el) el.style.zIndex = String(item.z);
     }
+    for (const kid of kids) {
+      if (!kid.containerId) kid.containerId = item.id;
+    }
     applyContainerClass(item);
     scheduleItemsSave();
     showToast(`已编为容器：框里 ${kids.length} 块会跟着它走`);
     return;
   }
   delete item.container;
+  for (const it of current.items) {
+    if (it.containerId === item.id) it.containerId = "";
+  }
   applyContainerClass(item);
   scheduleItemsSave();
   showToast("已取消容器，这块回到普通矩形");
@@ -3820,6 +4069,12 @@ function settlePointerUp(e) {
   }
 
   if (!finished.moved) return;
+  /* 拖完重算这几块的容器归属：拖出就脱组、拖进就入组，重叠区各认各的 */
+  if (finished.kind === "move" && finished.group) {
+    reassignContainerOwners(finished.group.map((member) => member.item));
+  } else if (finished.kind === "resize") {
+    reassignContainerOwners([item]);
+  }
   scheduleItemsSave();
 }
 
@@ -4281,8 +4536,7 @@ function onStageContextMenu(e) {
         ? { label: "解锁", onClick: () => setLockedMany(ids, false) }
         : { label: "锁定", onClick: () => setLockedMany(ids, true) },
     );
-    /* 全锁住时没有可删的，不摆一个点了没反应的删除 */
-    if (!allLocked) entries.push({ label: "删除", danger: true, onClick: () => deleteItems(ids) });
+    entries.push({ label: "删除", danger: true, onClick: () => deleteItems(ids) });
     openMenu(e.clientX, e.clientY, entries);
     return;
   }
@@ -4541,7 +4795,7 @@ async function openCompareFor(pair) {
 /* 一块的右键菜单内容。单独拆出来是为了「选择下层」：
    鼠标停在某一层上时，直接把这一层的菜单当子菜单挂出去。 */
 function itemMenuEntries(item, x, y, depth = 0) {
-  /* 锁住的块菜单只剩解锁和只读项：锁上之后要改什么都得先解开 */
+  /* 锁住的块菜单只剩解锁、只读项和删除：锁只锁坐标，菜单里的改动先解开 */
   if (item.locked) {
     const entries = [];
     entries.push({ label: "解锁", onClick: () => setLocked(item, false) });
@@ -4556,6 +4810,8 @@ function itemMenuEntries(item, x, y, depth = 0) {
     /* 对比是只读查看，锁着也允许 */
     const compare = compareImagesEntry(item);
     if (compare) entries.push(compare);
+    entries.push("-");
+    entries.push({ label: "删除", danger: true, onClick: () => deleteItems([item.id]) });
     return entries;
   }
   const entries = [];
@@ -4827,7 +5083,7 @@ const PROP_KIND = {
   note: { name: "笔记", hint: "Markdown 笔记卡，双击进入编辑。" },
   picture: { name: "画面（矢量）", hint: "矢量画面：绘制指令、素材和手绘笔画都在这块里。" },
   scene: { name: "场景（真 3D）", hint: "真 3D 场景：可摆家具、调光与机位，Ctrl 转、Shift 平移。" },
-  gen: { name: "生图面板", hint: "提示词 + 开始，出图参数由 agent 调。" },
+  gen: { name: "生图面板", hint: "提示词 + 开始，出图参数也可以由 agent 设置。" },
   product: { name: "产品卡", hint: "一件家具 / 材料：名称、价格、数量和真实尺寸。" },
   quote: { name: "清单", hint: "汇总画布内所有产品卡的金额，可导 CSV / XLSX。" },
   plan: { name: "户型图", hint: "两点定标后能量面积、摆家具脚印和 3D 机位。" },
@@ -4860,17 +5116,42 @@ function showPropsCard(item) {
         <p class="dialog-title">属性</p>
         <button class="dialog-close" type="button" aria-label="关闭">${CLOSE_X_SVG}</button>
         <p class="dialog-message props-kind"></p>
-        <p class="dialog-message props-hint"></p>
+        <p class="dialog-message props-seq"></p>
+        <p class="dialog-message props-geometry"></p>
         <p class="dialog-message props-path" hidden></p>
       </div>
     `;
     const dialog = mask.querySelector(".dialog");
     const kindEl = mask.querySelector(".props-kind");
-    const hintEl = mask.querySelector(".props-hint");
+    const seqEl = mask.querySelector(".props-seq");
+    const geometryEl = mask.querySelector(".props-geometry");
     const pathEl = mask.querySelector(".props-path");
     const closeBtn = mask.querySelector(".dialog-close");
-    kindEl.textContent = kind?.name || item.type;
-    hintEl.textContent = kind?.hint || "";
+    /* 类型名和这句说明排在同一行：名字加粗，说明用小一号的灰字 */
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = kind?.name || item.type;
+    kindEl.append(nameSpan);
+    if (kind?.hint) {
+      const hintSpan = document.createElement("span");
+      hintSpan.className = "props-hint-inline";
+      hintSpan.textContent = `　${kind.hint}`;
+      kindEl.append(hintSpan);
+    }
+    if (Number.isFinite(item.seq) && item.seq > 0) {
+      seqEl.textContent = `编号：#${item.seq}`;
+    } else {
+      seqEl.hidden = true;
+    }
+    /* 坐标和宽高：量画面上的实际尺寸，文字块这类高度由 DOM 定的块也准 */
+    if (item.type === "connector") {
+      geometryEl.hidden = true;
+    } else {
+      const el = itemEls.get(item.id);
+      const b = el ? itemBounds(item, el) : { x: item.x, y: item.y, w: item.w, h: item.h };
+      geometryEl.innerHTML =
+        `坐标：(${Math.round(b.x)}, ${Math.round(b.y)})<br>` +
+        `宽高：${Math.round(b.w)} × ${Math.round(b.h)}`;
+    }
     if (path) {
       pathEl.textContent = path;
       pathEl.hidden = false;
@@ -5069,14 +5350,16 @@ function applyColor(item, prop, color) {
 
 function deleteItems(ids) {
   if (!current || !ids.length) return;
-  /* 锁住的块不删；连在它身上的线也就没有理由跟着走 */
-  const doomed = new Set(
-    ids.filter((id) => {
-      const item = findItem(id);
-      return item && !item.locked;
-    }),
-  );
+  /* 锁定只锁坐标，不拦删除：锁着的块照样能删 */
+  const doomed = new Set(ids.filter((id) => Boolean(findItem(id))));
   if (!doomed.size) return;
+  /* 删容器连带框里的块：容器是一组东西的框，框没了，里面的面板也不该留着。
+     锁定的子块同样带走——锁不是删除的保护伞。 */
+  for (const id of [...doomed]) {
+    const container = findItem(id);
+    if (!container || !isContainer(container)) continue;
+    for (const kid of ownedMembers(container, doomed, true)) doomed.add(kid.id);
+  }
   /* 删块时，挂在它身上的连线一起删，不留悬空线 */
   for (const item of current.items) {
     if (item.type === "connector" && (doomed.has(item.from.item) || doomed.has(item.to.item))) {
@@ -5143,11 +5426,17 @@ function deleteItems(ids) {
       genTimers.delete(item.id);
       /* 这一轮的运行态（第几步、预览图）跟着块走：不留，否则「一次一张」会被一块已经不存在的图卡住 */
       dropGenRun(item.id);
+      /* 正在跑的任务也停掉：块都没了，结果回来只会被丢掉，API 调用别白花钱 */
+      void store.genCancel(item.id).catch(() => {});
       void store.deleteGen(canvasId, item.id).catch(() => {});
       /* 出的那张图没人指着才回收：落块落出去的那张图片块还用它 */
       if (item.src && !srcInUse(item.src)) {
         void store.deleteCanvasImage(canvasId, item.src, false).catch(() => {});
       }
+    }
+    if (item.type === "genvideo") {
+      dropVideoRun(item.id);
+      void store.genVideoCancel(item.id).catch(() => {});
     }
     if (item.type === "note") {
       const prefix = `notes/${item.id}/`;
@@ -5617,7 +5906,7 @@ function attachGenMask(el, item) {
   canvas.addEventListener("pointerdown", (e) => {
     e.stopPropagation();
     const target = findItem(item.id);
-    if (!target || target.locked) return;
+    if (!target) return;
     if (genModeFor(target, genInputItems(target).length) !== "inpaint") return;
     if (!genMaskModes.get(item.id)) return;
     e.preventDefault();
@@ -5718,6 +6007,8 @@ async function refreshGenDefaults() {
   if (status?.defaults) genDefaultsCache.set(genFamily, status.defaults);
   const other = genFamily === "qwen21" ? "h3image" : "qwen21";
   loadGenDefaults(other);
+  /* 引擎换了（本地 ↔ API）：并行规则跟着换，把面板的开始按钮重排一遍 */
+  refreshGenRunButtons();
 }
 
 /* 新建面板：把当前模型那套默认参数带上，用户不用每块重新设。 */
@@ -5823,6 +6114,18 @@ function paintGenMore(item, el) {
 
 /* 常用尺寸：宽高都是 32 的倍数；超出当前模型边长上限的项在菜单里自动过滤 */
 const GEN_SIZE_PRESETS = [
+  {
+    label: "1K",
+    items: [
+      { label: "1:1 · 1024×1024", w: 1024, h: 1024 },
+      { label: "3:4 · 896×1152", w: 896, h: 1152 },
+      { label: "4:3 · 1152×896", w: 1152, h: 896 },
+      { label: "9:16 · 768×1344", w: 768, h: 1344 },
+      { label: "16:9 · 1344×768", w: 1344, h: 768 },
+      { label: "2:3 · 832×1248", w: 832, h: 1248 },
+      { label: "3:2 · 1248×832", w: 1248, h: 832 },
+    ],
+  },
   {
     label: "手机壁纸",
     items: [
@@ -5942,7 +6245,7 @@ function attachGenPanel(el, item) {
     button.addEventListener("click", (e) => {
       e.stopPropagation();
       const target = findItem(item.id);
-      if (!target || target.locked) return;
+      if (!target) return;
       const rect = button.getBoundingClientRect();
       openMenu(rect.left, rect.bottom + 6, makeEntries(target), { kind: "gen-select" });
     });
@@ -5991,7 +6294,7 @@ function attachGenPanel(el, item) {
   refineButton?.addEventListener("click", (e) => {
     e.stopPropagation();
     const target = findItem(item.id);
-    if (!target || target.locked) return;
+    if (!target) return;
     target.refine = !target.refine;
     scheduleItemsSave();
     refreshGenPanel(target.id);
@@ -6039,7 +6342,7 @@ function attachGenPanel(el, item) {
       if (!control) return;
       event.stopPropagation();
       const target = findItem(item.id);
-      if (!target || target.locked) return;
+      if (!target) return;
       const field = control.dataset.genField;
       if (field === "model") {
         switchGenFamily(target, control.value);
@@ -6065,7 +6368,7 @@ function attachGenPanel(el, item) {
     reset?.addEventListener("click", async (event) => {
       event.stopPropagation();
       const target = findItem(item.id);
-      if (!target || target.locked) return;
+      if (!target) return;
       const family = target.model === "h3image" || target.model === "qwen21" ? target.model : genFamily;
       const value = await store.genDefaultsReset(family).catch((error) => {
         showError(error);
@@ -6095,7 +6398,7 @@ function attachGenPanel(el, item) {
     sizePreset?.addEventListener("click", (event) => {
       event.stopPropagation();
       const target = findItem(item.id);
-      if (!target || target.locked) return;
+      if (!target) return;
       const family = target.model === "h3image" || target.model === "qwen21" ? target.model : genFamily;
       const maxSide = family === "h3image" ? 4096 : 2048;
       const entries = GEN_SIZE_PRESETS.map((group) => ({
@@ -6116,17 +6419,41 @@ function attachGenPanel(el, item) {
   if (genModeFor(item, genInputItems(item).length) === "inpaint") {
     applyGenMaskMode(el, item.id, true);
   }
-  syncGen(el, item, genFeedOf(item));
+  syncGen(el, item, genFeedOf(item), { blocked: otherGenBlocked(item.id) });
   paintGenMore(item, el);
   fitGenPrompt(item.id, prompt);
   void refreshGenMaskBase(item);
 }
 
+/* 本地引擎一次只吃一张：别的面板在跑时这块的开始要灰掉；走 API 放开并行 */
+function otherGenBlocked(id) {
+  if (genEngine.provider === "api") return false;
+  const busy = genBusyId();
+  return Boolean(busy && busy !== id);
+}
+
+/* 运行态变了：把所有生图面板的「开始/停止」按新的占用情况重排一遍 */
+function refreshGenRunButtons() {
+  if (!current) return;
+  for (const item of current.items) {
+    if (item.type !== "gen") continue;
+    const el = itemEls.get(item.id);
+    const btn = el?.querySelector(".canvas-gen-run");
+    if (!btn) continue;
+    const run = genRunOf(item.id);
+    const busy = run.phase === "loading" || run.phase === "running";
+    btn.textContent = busy ? "停止" : "开始";
+    btn.disabled = !busy && otherGenBlocked(item.id);
+  }
+}
+
+onGenRunChange(refreshGenRunButtons);
+
 function refreshGenPanel(id) {
   const item = findItem(id);
   const el = itemEls.get(id);
   if (!item || !el) return;
-  syncGen(el, item, genFeedOf(item));
+  syncGen(el, item, genFeedOf(item), { blocked: otherGenBlocked(item.id) });
   paintGenMore(item, el);
   /* 只量不涨：打开画布、拖块、连线、刷新引擎状态都会走到这里，
      这些都该保持用户上次的尺寸。提示词变长由输入/改词那一趟单独 grow */
@@ -6209,14 +6536,13 @@ async function genInputPng(item) {
 
 function runOrStopGen(id) {
   const item = findItem(id);
-  if (!item || item.type !== "gen" || item.locked) return;
+  if (!item || item.type !== "gen") return;
   const run = genRunOf(id);
   if (run.phase === "loading" || run.phase === "running") {
     void stopGen(id);
     return;
   }
-  /* 一次一张：别的块在出图就按不动（syncGen 里已经禁用了，这儿再挡一道） */
-  if (isGenBusy()) return;
+  /* 本地引擎一次一张由后端拒绝；API 通道按设置并行，这里不拦 */
   /* 放大这一档不读提示词，那句「先写一句提示词」在这儿是拦错人 */
   const mode = genModeFor(item, genInputItems(item).length);
   if (mode !== "upscale" && !(item.prompt || "").trim()) {
@@ -6293,7 +6619,7 @@ async function stopGen(id) {
   /* 点了就是停了，先按画面判；后端那边走它的硬取消，不用这儿等 */
   patchGenRun(id, { phase: "canceled" });
   refreshGenPanel(id);
-  await store.genCancel().catch(() => {});
+  await store.genCancel(id).catch(() => {});
 }
 
 /* 落块时右边放不下：把面板右侧、和新图同一水平线的块整体右移，给新图片留出位置。
@@ -6562,7 +6888,7 @@ function attachVideoPanel(el, item) {
     e.stopPropagation();
     e.preventDefault();
     const target = findItem(item.id);
-    if (!target || target.locked) return;
+    if (!target) return;
     const kind = button.dataset.videoPreset;
     const entries =
       kind === "seconds"
@@ -6601,13 +6927,12 @@ function insertVideoPanel() {
 
 function runOrStopVideo(id) {
   const item = findItem(id);
-  if (!item || item.type !== "genvideo" || item.locked) return;
+  if (!item || item.type !== "genvideo") return;
   const run = videoRunOf(id);
   if (run.phase === "running") {
     void stopVideo(id);
     return;
   }
-  if (isVideoBusy()) return;
   if (!(item.prompt || "").trim()) {
     showError("先写一句提示词");
     return;
@@ -6652,13 +6977,13 @@ async function stopVideo(id) {
   /* 点了就是不等了；后端那边只置标志位，平台任务照样跑完、费用照算 */
   patchVideoRun(id, { phase: "canceled" });
   refreshVideoPanel(id);
-  await store.genVideoCancel().catch(() => {});
+  await store.genVideoCancel(id).catch(() => {});
 }
 
 /* 出片在缓存里；落块把它拷进画布 video/，新块自己带一份，面板接着改词重出。 */
 async function placeVideoBlock(id) {
   const item = findItem(id);
-  if (!item || item.type !== "genvideo" || item.locked) return;
+  if (!item || item.type !== "genvideo") return;
   const run = videoRunOf(id);
   if (!run.path || run.phase === "running") return;
   const canvasId = current?.meta.id;
@@ -7796,8 +8121,15 @@ async function landBlock(item, fromId, sourceId) {
 function copyItems(ids) {
   if (!current || !ids.length) return;
   const picked = new Set(ids);
-  const blocks = current.items.filter((item) => picked.has(item.id) && item.type !== "connector");
-  if (!blocks.length) return;
+  const selected = current.items.filter((item) => picked.has(item.id) && item.type !== "connector");
+  if (!selected.length) return;
+  /* 容器要把框里的子块一起带上：复制粘贴一个完整的容器 */
+  const byId = new Map(selected.map((item) => [item.id, item]));
+  for (const item of selected) {
+    if (!isContainer(item)) continue;
+    for (const kid of ownedMembers(item, new Set(byId.keys()), true)) byId.set(kid.id, kid);
+  }
+  const blocks = [...byId.values()];
   copiedBlocks = {
     canvasId: current.meta.id,
     box: selectionBox(blocks),
@@ -7830,8 +8162,9 @@ async function pasteBlocks(payload) {
   if (editingId || edgeLabelEditor) commitEditing();
   const canvasId = current.meta.id;
   const blocks = payload.blocks.filter((raw) => raw && typeof raw === "object");
-  /* 同画布右下挪一格，跨画布落在鼠标这儿 */
-  const box = selectionBox(blocks.filter((raw) => raw.type !== "connector"));
+  const plain = blocks.filter((raw) => raw.type !== "connector");
+  /* 同画布右下错开一点点，跨画布落在鼠标这儿 */
+  const box = selectionBox(plain);
   const anchor =
     payload.canvasId === canvasId
       ? { x: box.x + PASTE_OFFSET, y: box.y + PASTE_OFFSET }
@@ -7840,7 +8173,8 @@ async function pasteBlocks(payload) {
   for (const raw of blocks) {
     /* 拷贝副本那几下是异步的：期间切了画布就别再把块往原来那个画布上摆 */
     if (!current || current.meta.id !== canvasId) return;
-    const item = normalizeItem({ ...raw, id: newId(), seq: 0, z: null });
+    /* 粘出来的一律未锁定、归属清空后按新的落点重认：复制容器是为了接着用，不是把锁也搬过去 */
+    const item = normalizeItem({ ...raw, id: newId(), seq: 0, z: null, locked: false, containerId: "" });
     if (!item || item.type === "connector") continue;
     const dx = coord(raw.x) - box.x;
     const dy = coord(raw.y) - box.y;
@@ -7854,6 +8188,20 @@ async function pasteBlocks(payload) {
     if (await landBlock(item, payload.canvasId, raw.id)) placed.push(placeBlock(item));
   }
   if (!placed.length) return;
+  /* 粘出来的容器认自己的子块：重叠区里的老块都有主，不会被新容器抢走 */
+  const placedContainers = placed
+    .filter((item) => isContainer(item))
+    .sort((a, b) => a.w * a.h - b.w * b.h);
+  for (const container of placedContainers) {
+    const box = containerBoxOf(container);
+    if (!box) continue;
+    for (const item of placed) {
+      if (item === container || item.type === "connector") continue;
+      if (!item.containerId && insideBox(item, box)) {
+        item.containerId = container.id;
+      }
+    }
+  }
   selectedIds = new Set(placed.map((item) => item.id));
   syncSelectedClasses();
   updateSelection();
@@ -11378,7 +11726,6 @@ function agentUpdateConnector(item, patch) {
 
 function agentDeleteBlock(id) {
   const item = agentRequireItem(id);
-  if (item.locked) throw new Error("这块已锁定，先解锁再删");
   const summary = agentSummary(item);
   deleteItems([item.id]);
   return summary;
@@ -12234,9 +12581,13 @@ async function waitGenRun(id, timeoutMs) {
 async function agentGenRun(id, patch = {}, mask = "") {
   const item = agentGenOf(id);
   /* 锁拦改不拦看，但这一趟既改字段又发任务：先看锁，不许把提示词写进一块锁着的面板 */
-  if (item.locked) throw new Error("这块已锁定，先解锁再出图");
+  /* 锁只锁坐标：出图、改参数、落块这些照常走 */
+  if (!item.prompt?.trim() && genModeFor(item, genInputItems(item).length) !== "upscale") {
+    throw new Error("提示词是空的");
+  }
   const busy = genBusyId();
-  if (busy && busy !== item.id) {
+  const usingApi = genEngine.provider === "api";
+  if (!usingApi && busy && busy !== item.id) {
     throw new Error(`引擎正被生图面板 ${busy} 占着，一次只出一张`);
   }
   if (mask) genRunMasks.set(item.id, String(mask));
@@ -12254,7 +12605,10 @@ async function agentGenRun(id, patch = {}, mask = "") {
     if (el) syncItemElement(el, item);
     scheduleItemsSave();
   }
-  if (!busy) runOrStopGen(item.id);
+  const nowRun = genRunOf(item.id);
+  const running = nowRun.phase === "loading" || nowRun.phase === "running";
+  if (running) runOrStopGen(item.id);
+  else if (usingApi || !busy) runOrStopGen(item.id);
   agentHighlight([item.id], 1600);
   if (patch.wait === false) return { ...agentSummary(item), waited: false };
   const seconds = Math.min(600, Math.max(1, numOr(patch.timeout, 300)));
@@ -12268,11 +12622,16 @@ async function agentGenRun(id, patch = {}, mask = "") {
   };
 }
 
-function agentGenCancel() {
-  const busy = genBusyId();
-  if (!busy) return { canceled: false, note: "现在没有在出图" };
-  void stopGen(busy);
-  return { canceled: true, block: busy };
+/* 停一块的取消：给了块 id 就停那一块，不给就停当前在跑的第一块（兼容老调用） */
+function agentGenCancel(id) {
+  const target = id ? String(id) : genBusyId();
+  if (!target) return { canceled: false, note: "现在没有在出图" };
+  const run = genRunOf(target);
+  if (run.phase !== "loading" && run.phase !== "running") {
+    return { canceled: false, note: "这块现在没有在出图" };
+  }
+  void stopGen(target);
+  return { canceled: true, block: target };
 }
 
 /* 把最近那张落成一块独立图片块：面板留着继续改词重出，图片块自己带一份文件 */
@@ -12354,8 +12713,16 @@ async function agentGenVideoStatus() {
   return store.genVideoStatus();
 }
 
-async function agentGenVideoCancel() {
-  const canceled = await store.genVideoCancel().catch(() => false);
+async function agentGenVideoCancel(id) {
+  const target = id ? String(id) : videoBusyId();
+  if (target) {
+    const run = videoRunOf(target);
+    if (run?.phase === "running") {
+      void stopVideo(target);
+      return { canceled: true, block: target };
+    }
+  }
+  const canceled = await store.genVideoCancel(target || undefined).catch(() => false);
   return { canceled };
 }
 
@@ -12715,7 +13082,7 @@ export const canvasAgent = {
     };
   },
   /* 调试用：按选择器双击一下，走 DOM 的 dblclick，不模拟鼠标 */
-  debugDoubleClick: ({ selector, text = "" } = {}) => {
+  debugDoubleClick: ({ selector, text = "", ctrl = false } = {}) => {
     const nodes = [...document.querySelectorAll(String(selector || ""))].filter(
       (node) => node.getBoundingClientRect().width > 0,
     );
@@ -12723,9 +13090,17 @@ export const canvasAgent = {
       ? nodes.find((node) => (node.textContent || "").includes(String(text)))
       : nodes[0];
     if (!el) throw new Error("没找到要双击的元素");
-    el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
+    el.dispatchEvent(
+      new MouseEvent("dblclick", {
+        bubbles: true,
+        cancelable: true,
+        detail: 2,
+        ctrlKey: Boolean(ctrl),
+      }),
+    );
     return {
       doubleClicked: true,
+      ctrl: Boolean(ctrl),
       className: typeof el.className === "string" ? el.className : "",
       text: (el.textContent || "").trim().slice(0, 30),
     };
@@ -13013,6 +13388,8 @@ export const canvasAgent = {
   spaceCopy: agentSpaceCopy,
   spaceRename: agentRenameSpace,
   spaceDelete: agentDeleteSpace,
+  exportSpace: (id, group, target) => store.exportSpace(id, group, target),
+  importSpace: (parent, source) => store.importSpace(parent, source),
   groupCreate: agentGroupCreate,
   groupRename: agentGroupRename,
   groupDelete: agentGroupDelete,

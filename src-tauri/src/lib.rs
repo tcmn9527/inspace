@@ -248,6 +248,8 @@ pub fn run() {
             canvas::canvas_group_rename,
             canvas::canvas_group_delete,
             canvas::canvas_group_reveal,
+            canvas::canvas_export,
+            canvas::canvas_import,
             canvas::canvas_save_image,
             canvas::canvas_pick_image,
             canvas::canvas_import_image,

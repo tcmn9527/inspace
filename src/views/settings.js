@@ -102,6 +102,7 @@ export function initSettings(options = {}) {
   ui.genApiUrl = document.querySelector("#settings-gen-api-url");
   ui.genApiModel = document.querySelector("#settings-gen-api-model");
   ui.genApiKey = document.querySelector("#settings-gen-api-key");
+  ui.genApiParallel = document.querySelector("#settings-gen-api-parallel");
   ui.genApiReload = document.querySelector("#settings-gen-api-reload");
   ui.genApiStatus = document.querySelector("#settings-gen-api-status");
   ui.genApiError = document.querySelector("#settings-gen-api-error");
@@ -109,6 +110,7 @@ export function initSettings(options = {}) {
   ui.videoUrl = document.querySelector("#settings-video-url");
   ui.videoKey = document.querySelector("#settings-video-key");
   ui.videoModel = document.querySelector("#settings-video-model");
+  ui.videoParallel = document.querySelector("#settings-video-parallel");
   ui.videoReload = document.querySelector("#settings-video-reload");
   ui.videoStatus = document.querySelector("#settings-video-status");
   ui.videoError = document.querySelector("#settings-video-error");
@@ -175,6 +177,7 @@ export function initSettings(options = {}) {
     });
   }
   ui.genApiModel.addEventListener("change", saveGenApiForm);
+  ui.genApiParallel.addEventListener("change", saveGenApiForm);
   ui.genApiProtocol.addEventListener("change", async () => {
     await saveGenApiForm();
     await reloadGenApiModels();
@@ -198,6 +201,7 @@ export function initSettings(options = {}) {
     });
   }
   ui.videoModel.addEventListener("change", saveVideoForm);
+  ui.videoParallel.addEventListener("change", saveVideoForm);
   ui.videoReload.addEventListener("click", () => reloadVideoModels());
   ui.videoEngine.addEventListener("click", (event) => {
     const button = event.target.closest("[data-video-engine]");
@@ -731,6 +735,7 @@ function fillGenApiForm() {
   ui.genApiProtocol.value = genApi.protocol === "chat" ? "chat" : "images";
   ui.genApiUrl.value = genApi.baseUrl || "";
   ui.genApiKey.value = genApi.apiKey || "";
+  ui.genApiParallel.value = String(genApi.parallel || 2);
   fillModelOptions([]);
 }
 
@@ -787,6 +792,7 @@ function readGenApiForm() {
     baseUrl: ui.genApiUrl.value.trim(),
     model: ui.genApiModel.value.trim(),
     apiKey: ui.genApiKey.value,
+    parallel: Math.min(10, Math.max(1, Math.round(Number(ui.genApiParallel.value) || 2))),
   };
 }
 
@@ -797,7 +803,8 @@ async function saveGenApiForm() {
     next.protocol === genApi.protocol &&
     next.baseUrl === genApi.baseUrl &&
     next.model === genApi.model &&
-    next.apiKey === genApi.apiKey
+    next.apiKey === genApi.apiKey &&
+    next.parallel === genApi.parallel
   ) {
     return;
   }
@@ -894,6 +901,7 @@ function fillVideoForm() {
       : "openai";
   ui.videoUrl.value = videoApi.baseUrl || "";
   ui.videoKey.value = videoApi.apiKey || "";
+  ui.videoParallel.value = String(videoApi.parallel || 2);
   paintVideoUrl();
   fillVideoModels([]);
 }
@@ -1069,6 +1077,7 @@ function readVideoForm() {
     baseUrl: ui.videoUrl.value.trim(),
     apiKey: ui.videoKey.value,
     model: ui.videoModel.value,
+    parallel: Math.min(10, Math.max(1, Math.round(Number(ui.videoParallel.value) || 2))),
   };
 }
 
@@ -1078,7 +1087,8 @@ async function saveVideoForm() {
     next.protocol === videoApi.protocol &&
     next.baseUrl === videoApi.baseUrl &&
     next.apiKey === videoApi.apiKey &&
-    next.model === videoApi.model
+    next.model === videoApi.model &&
+    next.parallel === videoApi.parallel
   ) {
     return;
   }

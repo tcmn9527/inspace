@@ -356,6 +356,15 @@ const TOOL_DEFS = [
   def("space_delete", "删除画布：整个画布文件夹进系统回收站。", {
     space: { type: "string", description: "画布 id 或名字" },
   }, ["space"]),
+  def("space_export", "把画布或整个分组打包导出成 .inspace 容器（标准 zip，包根带 inspace.json 清单）。group=true 时导出整个分组（含子分组和里面所有画布）。out 必须给绝对路径，已存在会被覆盖。返回写出的文件路径。", {
+    id: { type: "string", description: "画布 id 或分组 id（相对 spaces/ 的路径，来自 space_tree）" },
+    group: { type: "boolean", description: "true=导出整个分组；省略=当画布导出" },
+    out: { type: "string", description: "保存到的绝对路径，以 .inspace 结尾" },
+  }, ["id", "out"], 120),
+  def("space_import", "把 .inspace 容器解压导入到指定分组：画布包变成一个画布目录，分组件包变成一个子分组；重名自动加后缀不覆盖。返回 {kind,id,name}。导入画布不会自动切过去，需要的话再 space_open。", {
+    parent: { type: "string", description: "目标分组 id，空串=根目录" },
+    path: { type: "string", description: ".inspace 文件的绝对路径" },
+  }, ["path"], 120),
   def("group_create", "新建分组（spaces/ 下的真文件夹）。parent 给分组 id 或名字就建在它里面，不给建在根级。返回 {id}。", {
     name: { type: "string", description: "分组名" },
     parent: { type: "string", description: "父分组 id 或名字，可省" },
@@ -519,10 +528,11 @@ const TOOL_DEFS = [
   ),
   def(
     "ui_dblclick",
-    "调试用：按 CSS 选择器双击一下元素（可再用 text 筛内容），走 DOM dblclick、不模拟鼠标。",
+    "调试用：按 CSS 选择器双击一下元素（可再用 text 筛内容），走 DOM dblclick、不模拟鼠标。ctrl=true 时带 Ctrl 双击，用来验证「Ctrl+双击」这类手势。",
     {
       selector: { type: "string", description: "CSS 选择器" },
       text: { type: "string", description: "多个匹配时，挑文字里包含这一段的那个" },
+      ctrl: { type: "boolean", description: "按住 Ctrl 一起双击，默认 false" },
     },
     ["selector"],
   ),
@@ -934,7 +944,7 @@ const TOOL_DEFS = [
     dit: { type: "string", description: "画图模型文件名，取自 gen_models 的 dit 列" },
     encoder: { type: "string", description: "文本编码器文件名，取自 gen_models 的 encoder 列" },
   }),
-  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个画布的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。mode 给 upscale 是另一条路：纯 ESRGAN 放大，连一张图、不读提示词也不看步数，出来就是 4× 那张（864×1152 那种输入约十秒）。设置里选了 API 引擎时整条路走远端：family/steps/cfg/seed/negative 都不生效，只发提示词、尺寸和参考图；i2i/inpaint 降级成「参考图+提示词」，upscale 直接报不支持。", {
+  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个画布的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。mode 给 upscale 是另一条路：纯 ESRGAN 放大，连一张图、不读提示词也不看步数，出来就是 4× 那张（864×1152 那种输入约十秒）。设置里选了 API 引擎时整条路走远端：family/steps/cfg/seed/negative 都不生效，只发提示词、尺寸和参考图；i2i/inpaint 降级成「参考图+提示词」，upscale 自动走本地放大模型（不受 API 开关影响）。", {
     id: ID,
     prompt: { type: "string", description: "这一张要什么，一句话到一段话" },
     negative: { type: "string", description: "不想要什么" },
@@ -978,9 +988,11 @@ const TOOL_DEFS = [
       },
     },
   ),
-  def("gen_cancel", "掐掉正在出的那一张。载入权重那几分钟也能停（那边一出来看到取消标志就自己收）。没有图在跑返回 canceled:false。走 API 时网络那头掐不断：界面立刻显示已取消，请求回来那张会作废丢弃。"),
+  def("gen_cancel", "掐掉正在出的那一张。id 点名一块（API 并行时各停各的），不给就停当前在跑的第一块。载入权重那几分钟也能停（那边一出来看到取消标志就自己收）。没有图在跑返回 canceled:false。走 API 时网络那头掐不断：界面立刻显示已取消，请求回来那张会作废丢弃。", {
+    id: { type: "string", description: "生图面板块 id；不给就停正在跑的那一块" },
+  }),
   def("gen_place", "把一块生图面板最近出的那张落成一块独立图片块，落在面板右边。落出去的是复制：面板接着显示它那张、也接着能改词重出，图片块自己带一份文件，删哪一块都不影响另一块。", { id: ID }, ["id"]),
-  def("gen_video", "生成一条视频（文生视频 / 图生视频）。走哪个引擎由设置 → 视频生成里的「本地模型 / 云端 API」决定：本地用本机 sd.cpp 跑 MiniMax-H3（1–20 秒、带音频、每条几分钟），云端用配置好的 API 协议；平台是异步任务，一次只跑一条，通常 1-5 分钟。firstFrame 给画布块 id（图片块、画面块、已出图的生图面板）或直接给 PNG 的 base64/data URL，给了就是图生视频；DashScope 协议（万相/百炼可灵）只收公网图片 URL，本地首帧会被拒。给了 block（genvideo 面板 id）就按面板走：提示词/秒数/尺寸/首帧优先用面板上的，状态和结果也写回面板，出完可 gen_video_place 落块。返回视频缓存文件的绝对路径（gen/videos/ 下）。等太久到 timeout 返回 timedOut:true，任务还在平台那边跑，用 gen_video_status 接着看。", {
+  def("gen_video", "生成一条视频（文生视频 / 图生视频）。走哪个引擎由设置 → 视频生成里的「本地模型 / 云端 API」决定：本地用本机 sd.cpp 跑 MiniMax-H3（1–20 秒、带音频、每条几分钟），云端用配置好的 API 协议，云端并行条数在设置 → 视频生成里配（1–10），本地一次只跑一条；平台是异步任务，通常 1-5 分钟。firstFrame 给画布块 id（图片块、画面块、已出图的生图面板）或直接给 PNG 的 base64/data URL，给了就是图生视频；DashScope 协议（万相/百炼可灵）只收公网图片 URL，本地首帧会被拒。给了 block（genvideo 面板 id）就按面板走：提示词/秒数/尺寸/首帧优先用面板上的，状态和结果也写回面板，出完可 gen_video_place 落块。返回视频缓存文件的绝对路径（gen/videos/ 下）。等太久到 timeout 返回 timedOut:true，任务还在平台那边跑，用 gen_video_status 接着看。", {
     prompt: { type: "string", description: "视频要什么：画面、动作、镜头；挂面板时可省略，用面板上的提示词" },
     block: { type: "string", description: "genvideo 面板块 id：给了就按面板的参数和首帧跑，状态/结果写回面板" },
     firstFrame: { type: "string", description: "首帧图：画布块 id，或 PNG 的 base64 / data URL；不给就是文生视频" },
@@ -991,8 +1003,10 @@ const TOOL_DEFS = [
     model: { type: "string", description: "覆盖设置里的模型名（可选）" },
     timeout: { type: "number", description: "等多少秒，默认 600，最大 1800" },
   }, ["prompt"]),
-  def("gen_video_status", "问视频任务现在什么状况：busy、当前引擎（local/api）、正在跑的那一条的块号、状态（载入权重/采样/排队中/下载中）、等了多久、平台任务号。"),
-  def("gen_video_cancel", "取消正在等的那条视频任务。注意：任务提交后平台停不掉，费用照算，这里只是本地不再等。"),
+  def("gen_video_status", "问视频任务现在什么状况：busy、当前引擎（local/api）、jobs 数组（每条在跑的任务：块号、状态、等了多久、平台任务号；并行时可能多条）、job 为第一条（兼容旧调用）。"),
+  def("gen_video_cancel", "取消正在等的一条视频任务。id 点名一块（云端 API 可以并行多条，各停各的），不给就停正在跑的第一条。注意：任务提交后平台停不掉，费用照算，这里只是本地不再等。", {
+    id: { type: "string", description: "genvideo 面板块 id；不给就停正在跑的那一条" },
+  }),
   def("gen_video_local", "看/换本地视频模型的文件夹。四件套（扩散模型、视频 VAE、音频 VAE、文本编码器）放进这个目录后自动扫描识别，文件名不一样也能认。不传 dir 只返回当前识别结果（每个槽位用了哪个文件、缺什么、建议改名、下载链接）；传 dir 就换目录并重新扫描，空串收回默认位置。", {
     dir: { type: "string", description: "模型目录的绝对路径；空串回到默认位置" },
   }, [], 30),
@@ -1429,6 +1443,10 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.spaceRename(args.space, args.name));
     case "space_delete":
       return onCanvas(args, () => canvasAgent.spaceDelete(args.space));
+    case "space_export":
+      return canvasAgent.exportSpace(args.id, Boolean(args.group), args.out);
+    case "space_import":
+      return canvasAgent.importSpace(args.parent || "", args.path);
     case "group_create":
       return onCanvas(args, () => canvasAgent.groupCreate(args.parent, args.name));
     case "group_rename":
@@ -1488,7 +1506,7 @@ async function dispatch(name, args) {
         last: args.last === true,
       });
     case "ui_dblclick":
-      return canvasAgent.debugDoubleClick({ selector: args.selector, text: args.text });
+      return canvasAgent.debugDoubleClick({ selector: args.selector, text: args.text, ctrl: args.ctrl === true });
     case "ui_wheel":
       return canvasAgent.debugWheel({
         x: Number(args.x) || 0,
@@ -1665,7 +1683,7 @@ async function dispatch(name, args) {
     case "gen_family":
       return canvasAgent.genFamily(args.family);
     case "gen_cancel":
-      return onCanvas(args, () => canvasAgent.genCancel());
+      return onCanvas(args, () => canvasAgent.genCancel(args.id));
     case "gen_place":
       return onCanvas(args, () => canvasAgent.genPlace(args.id));
     case "gen_video":
@@ -1673,7 +1691,7 @@ async function dispatch(name, args) {
     case "gen_video_status":
       return onCanvas(args, () => canvasAgent.genVideoStatus());
     case "gen_video_cancel":
-      return onCanvas(args, () => canvasAgent.genVideoCancel());
+      return onCanvas(args, () => canvasAgent.genVideoCancel(args.id));
     case "gen_video_local":
       return onCanvas(args, () => canvasAgent.genVideoLocal(args.dir));
     case "gen_device":

@@ -1182,6 +1182,261 @@ pub fn canvas_group_reveal(id: String, state: tauri::State<'_, CanvasState>) -> 
     Ok(())
 }
 
+// ---------- 导入 / 导出（.inspace = 标准 zip） ----------
+/* 包根放一份 inspace.json 清单说明类型和名字；其余条目就是画布/分组目录的内容，
+   条目名不带顶层目录，所以解压到哪儿就是哪儿，用户拿普通解压工具也能打开看。 */
+const INSPACE_MANIFEST: &str = "inspace.json";
+const INSPACE_KIND: &str = "inspace";
+const INSPACE_FILTER: &str = "inspace";
+
+fn zip_options() -> zip::write::SimpleFileOptions {
+    zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644)
+}
+
+/// 把目录整棵塞进 zip。跳过隐藏文件、符号链接；条目名一律正斜杠相对路径。
+fn zip_write_dir<W: Write + std::io::Seek>(
+    zw: &mut zip::ZipWriter<W>,
+    base: &Path,
+    dir: &Path,
+    depth: usize,
+) -> Result<(), String> {
+    if depth > 32 {
+        return Ok(());
+    }
+    let entries = fs::read_dir(dir).map_err(|e| format!("读目录失败 {e}"))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_symlink() {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(base)
+            .map_err(|_| "路径不在画布目录里".to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if kind.is_dir() {
+            zip_write_dir(zw, base, &path, depth + 1)?;
+        } else if kind.is_file() {
+            let bytes = fs::read(&path).map_err(|e| format!("读文件失败 {rel}：{e}"))?;
+            zw.start_file(rel.as_str(), zip_options())
+                .map_err(|e| format!("写入压缩包失败：{e}"))?;
+            zw.write_all(&bytes)
+                .map_err(|e| format!("写入压缩包失败：{e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// 导出画布（group=false）或整个分组（group=true）为 .inspace。
+/// target 给了就直接写到那个路径；不给就弹保存框。返回最终写出的路径，取消是 None。
+#[tauri::command]
+pub async fn canvas_export(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+    group: bool,
+    target: Option<String>,
+) -> Result<Option<String>, String> {
+    let root = app.state::<CanvasState>().root();
+    let (dir, kind) = if group {
+        (group_dir(&root, &id)?, "group")
+    } else {
+        (
+            canvas_dir(&root, &id)?,
+            "canvas",
+        )
+    };
+    /* 根级分组导出 = 整个 spaces 打包，名字不用目录名 "spaces" */
+    let name = if group && id.trim().is_empty() {
+        "全部画布".to_string()
+    } else {
+        dir.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "画布".to_string())
+    };
+    let out_path = match target {
+        Some(path) if !path.trim().is_empty() => PathBuf::from(path),
+        _ => {
+            let picked = app
+                .dialog()
+                .file()
+                .set_title("导出画布")
+                .set_file_name(format!("{name}.{INSPACE_FILTER}"))
+                .add_filter("无限画布容器", &["inspace"])
+                .set_parent(&window)
+                .blocking_save_file();
+            let Some(file_path) = picked else {
+                return Ok(None);
+            };
+            file_path
+                .into_path()
+                .map_err(|e| format!("无法解析保存位置：{e}"))?
+        }
+    };
+    let out_path = if out_path.extension().is_none() {
+        out_path.with_extension(INSPACE_FILTER)
+    } else {
+        out_path
+    };
+    let file = fs::File::create(&out_path).map_err(|e| format!("创建文件失败：{e}"))?;
+    let mut zw = zip::ZipWriter::new(file);
+    let manifest = json!({
+        "family": INSPACE_KIND,
+        "version": 1,
+        "kind": kind,
+        "name": name,
+        "exportedAt": now_ms(),
+    });
+    zw.start_file(INSPACE_MANIFEST, zip_options())
+        .map_err(|e| format!("写入压缩包失败：{e}"))?;
+    zw.write_all(manifest.to_string().as_bytes())
+        .map_err(|e| format!("写入压缩包失败：{e}"))?;
+    zip_write_dir(&mut zw, &dir, &dir, 0)?;
+    zw.finish().map_err(|e| format!("收尾压缩包失败：{e}"))?;
+    Ok(Some(out_path.to_string_lossy().to_string()))
+}
+
+fn zip_entry_is_symlink(unix_mode: Option<u32>) -> bool {
+    matches!(unix_mode, Some(mode) if mode & 0o170000 == 0o120000)
+}
+
+/// 解压 .inspace 到 parent 分组下。source 给了就直接读那个文件；不给就弹打开框。
+/// 画布包解出来是一个画布目录，分组件包解出来是一个子分组；重名自动加后缀。
+/// 返回 {kind, id, name}，取消是 None。
+#[tauri::command]
+pub async fn canvas_import(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    parent: String,
+    source: Option<String>,
+) -> Result<Option<Value>, String> {
+    let root = app.state::<CanvasState>().root();
+    let parent_dir = group_dir(&root, &parent)?;
+    let src_path = match source {
+        Some(path) if !path.trim().is_empty() => PathBuf::from(path),
+        _ => {
+            let picked = app
+                .dialog()
+                .file()
+                .set_title("导入画布")
+                .add_filter("无限画布容器", &["inspace"])
+                .set_parent(&window)
+                .blocking_pick_file();
+            let Some(file_path) = picked else {
+                return Ok(None);
+            };
+            file_path
+                .into_path()
+                .map_err(|e| format!("无法解析所选文件：{e}"))?
+        }
+    };
+    let file = fs::File::open(&src_path).map_err(|e| format!("打开压缩包失败：{e}"))?;
+    let mut za = zip::ZipArchive::new(std::io::BufReader::new(file))
+        .map_err(|e| format!("这不是有效的 .inspace 压缩包：{e}"))?;
+    /* 清单里的类型和名字只当参考：类型可以从包内容推翻，名字只作默认目录名 */
+    let manifest: Option<Value> = za
+        .by_name(INSPACE_MANIFEST)
+        .ok()
+        .and_then(|mut entry| {
+            let mut text = String::new();
+            entry.read_to_string(&mut text).ok()?;
+            serde_json::from_str(&text).ok()
+        });
+    let file_stem = src_path
+        .file_stem()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "导入的画布".to_string());
+    let raw_name = manifest
+        .as_ref()
+        .and_then(|m| m.get("name"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(&file_stem)
+        .to_string();
+    let name = check_name(&raw_name).unwrap_or_else(|_| check_name(&file_stem).unwrap_or_else(|_| "导入的画布".to_string()));
+    /* 根下有没有 space.json 是判断画布包的硬依据；清单里的 kind 只用来兜底 */
+    let has_canvas_meta = (0..za.len()).any(|i| {
+        za.by_index(i)
+            .ok()
+            .and_then(|entry| entry.enclosed_name())
+            .map(|path| {
+                path.parent().map(|p| p.as_os_str().is_empty()).unwrap_or(true)
+                    && (path.file_name().map(|n| n == META_FILE || n == LEGACY_META_FILE).unwrap_or(false))
+            })
+            .unwrap_or(false)
+    });
+    let kind = if has_canvas_meta {
+        "canvas"
+    } else if manifest.as_ref().and_then(|m| m.get("kind")).and_then(|v| v.as_str()) == Some("group") {
+        "group"
+    } else {
+        "canvas"
+    };
+    let new_dir = unique_dir(&parent_dir, &name);
+    fs::create_dir_all(&new_dir).map_err(|e| format!("创建目录失败：{e}"))?;
+    let mut unpacked = 0u32;
+    for i in 0..za.len() {
+        let Ok(mut entry) = za.by_index(i) else { continue };
+        if entry.name() == INSPACE_MANIFEST {
+            continue;
+        }
+        /* enclosed_name 挡掉 ..、绝对路径和盘符；符号链接一律不落盘 */
+        let Some(rel) = entry.enclosed_name() else { continue };
+        let target = new_dir.join(&rel);
+        if entry.is_dir() {
+            let _ = fs::create_dir_all(&target);
+            continue;
+        }
+        if zip_entry_is_symlink(entry.unix_mode()) {
+            continue;
+        }
+        if let Some(dir) = target.parent() {
+            fs::create_dir_all(dir).map_err(|e| {
+                let _ = fs::remove_dir_all(&new_dir);
+                format!("创建目录失败：{e}")
+            })?;
+        }
+        let mut bytes = Vec::with_capacity(entry.size().min(64 * 1024 * 1024) as usize);
+        if let Err(e) = entry.read_to_end(&mut bytes) {
+            let _ = fs::remove_dir_all(&new_dir);
+            return Err(format!("解压失败：{e}"));
+        }
+        if let Err(e) = fs::write(&target, &bytes) {
+            let _ = fs::remove_dir_all(&new_dir);
+            return Err(format!("写入文件失败：{e}"));
+        }
+        unpacked += 1;
+    }
+    if unpacked == 0 {
+        let _ = fs::remove_dir_all(&new_dir);
+        return Err("压缩包里没有可导入的内容".to_string());
+    }
+    /* 包里没带清单里的目录结构（手工压的包）时，跟着内容重新认一遍类型 */
+    let kind = if is_canvas_dir(&new_dir) { "canvas" } else { kind };
+    /* 画布目录的约定是带一个 images/：空画布的包不会带它，这里补齐 */
+    if kind == "canvas" {
+        let _ = fs::create_dir_all(new_dir.join(IMAGE_DIR));
+    }
+    let new_id = rel_id(&root, &new_dir);
+    let final_name = new_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or(name);
+    Ok(Some(json!({
+        "kind": kind,
+        "id": new_id,
+        "name": final_name,
+        "parent": parent,
+    })))
+}
+
 #[tauri::command]
 pub fn canvas_delete(id: String, state: tauri::State<'_, CanvasState>) -> Result<(), String> {
     let dir = resolve_dir(&state, &id)?;

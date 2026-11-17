@@ -85,6 +85,23 @@ body.is-titlebar-hidden .titlebar {
   height: 100%;
 }
 
+/* 画布路径 + 选中面板：住在标题栏左半边，太长就省略；文字能选中复制 */
+.titlebar-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  margin-right: auto;
+  padding: 0 12px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* 画布栏收起按钮：住在标题栏最左端，和窗口按钮同一套扁平样式 */
 .titlebar-side-toggle {
   display: flex;
@@ -92,7 +109,7 @@ body.is-titlebar-hidden .titlebar {
   justify-content: center;
   width: 38px;
   height: 100%;
-  margin-right: auto;
+  margin-right: 0;
   padding: 0;
   border: none;
   border-radius: 0;
@@ -1261,6 +1278,13 @@ body.is-titlebar-hidden .titlebar {
   line-height: 18px;
 }
 
+/* 类型名后面跟的那句说明：同占一行，不再另起段 */
+.dialog-props .props-hint-inline {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
 .props-path {
   margin-top: 6px;
   color: var(--fg);
@@ -1998,12 +2022,14 @@ body.is-titlebar-hidden .titlebar {
   display: inline-flex;
   align-items: center;
   color: var(--muted);
+  /* 锁只是状态标记，淡到不抢行文字的视线 */
+  opacity: 0.5;
 }
 
 .space-tree-lock .canvas-metrics-lock {
   margin: 0;
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
 }
 
 .space-tree-btn {

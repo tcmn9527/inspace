@@ -276,6 +276,10 @@ function normalizeBlock(raw) {
   const base = { id: raw.id, type, seq: Number.isFinite(raw.seq) ? Math.trunc(raw.seq) : 0 };
   /* 客户版隐藏：所有能出现在页面上的块都认，连线不参与 */
   if (type !== "connector") base.internal = raw.internal !== false;
+  /* 归属的容器（矩形框编成的分组）：重叠的框各自认自己的子块，拖完/重开都不会串 */
+  if (type !== "connector" && typeof raw.containerId === "string") {
+    base.containerId = raw.containerId;
+  }
   /* 面板树自定义名：只影响树显示，不动块本身的语义名字 */
   if (type !== "connector" && typeof raw.treeName === "string" && raw.treeName.trim()) {
     base.treeName = raw.treeName.trim().slice(0, 60);

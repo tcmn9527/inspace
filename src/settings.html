@@ -99,6 +99,10 @@
                 <span>API Key</span>
                 <input id="settings-gen-api-key" type="password" spellcheck="false" placeholder="sk-…" />
               </label>
+              <label class="settings-field">
+                <span>并行数</span>
+                <input id="settings-gen-api-parallel" type="number" min="1" max="10" step="1" value="2" />
+              </label>
               <div class="settings-actions">
                 <button class="plain-btn" id="settings-gen-api-reload" type="button">重新读取模型</button>
               </div>
@@ -106,7 +110,8 @@
               <p class="settings-error" id="settings-gen-api-error" hidden></p>
               <p class="settings-hint">
                 Images 协议直接出文生图；带参考图时走 edits。Chat 协议把提示词和图发进对话。
-                走 API 时步数、CFG、种子、负向这些本地参数不生效，高清放大仍然只能用本地模型。
+                走 API 时步数、CFG、种子、负向这些本地参数不生效，高清放大自动走本地放大模型。
+                并行数 = 同时最多跑几张（1–10）；本地模型固定一次一张。
               </p>
             </div>
             <div class="settings-gen-local" id="settings-gen-local">
@@ -164,7 +169,7 @@
             </div>
             <div class="settings-video-cloud" id="settings-video-cloud">
               <p class="settings-hint">
-                文生视频、图生视频走远端 API。海螺和 OpenAI 协议直接吃画布上的首帧图；万相和百炼可灵只收公网图片 URL，本地首帧暂不支持。任务提交后服务端停不掉，按秒计费。
+                文生视频、图生视频走远端 API。海螺和 OpenAI 协议直接吃画布上的首帧图；万相和百炼可灵只收公网图片 URL，本地首帧暂不支持。任务提交后服务端停不掉，按秒计费。并行数 = 同时最多跑几条（1–10）；本地模型固定一次一条。
               </p>
               <div class="settings-gen-api settings-video-form">
                 <label class="settings-field">
@@ -186,6 +191,10 @@
                 <label class="settings-field">
                   <span>模型</span>
                   <select id="settings-video-model"></select>
+                </label>
+                <label class="settings-field">
+                  <span>并行数</span>
+                  <input id="settings-video-parallel" type="number" min="1" max="10" step="1" value="2" />
                 </label>
                 <div class="settings-actions">
                   <button class="plain-btn" id="settings-video-reload" type="button">读取模型列表</button>

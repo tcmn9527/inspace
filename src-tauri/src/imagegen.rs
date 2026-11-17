@@ -8,6 +8,7 @@
 //! 实测空闲那几分钟显存并不额外占（跑前跑后都是同一档），占的是内存条上那 ~15GB，
 //! 所以出完 45 秒没接着画就自己放掉——连点改词还热着，停手一分钟把内存还回去。
 
+use std::collections::HashMap;
 use std::ffi::{c_void, CString};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -378,9 +379,16 @@ fn weight_kind(name: &str) -> Option<Kind> {
 struct Engine {
     ctx: *mut sd::sd_ctx_t,
     busy: bool,
+    /// 本地/放大任务认领的块 id；换成按块取消时靠它认人。
+    block: String,
     last_used: Instant,
     /// "gpu"=显卡(快,推荐)；"cpu"=全内存(慢,显存不够时用)。格纹与设备无关,是 H3 本地解码固有
     device: String,
+}
+
+/// API 通道在跑的一轮：每轮自己的取消标志，互不打扰。
+struct ApiJob {
+    cancel: Arc<AtomicBool>,
 }
 
 unsafe impl Send for Engine {}
@@ -407,6 +415,9 @@ pub struct GenCore {
     gpu: Arc<Mutex<Option<Gpu>>>,
     /// 远端 API 的配置（设置页写、出图时读）。启用且填全了就不碰本地引擎。
     api: Arc<Mutex<ApiConfig>>,
+    /// API 通道在跑的任务：块 id -> 任务。并行上限见 ApiConfig::parallel_limit，
+    /// 本地引擎不走这里——那张卡一次只能算一张。
+    api_jobs: Arc<Mutex<HashMap<String, ApiJob>>>,
 }
 
 pub struct GenState(GenCore);
@@ -766,6 +777,7 @@ pub fn init(data: DataRoot, db: &DbState) -> GenState {
         engine: Arc::new(Mutex::new(Engine {
             ctx: null_mut(),
             busy: false,
+            block: String::new(),
             last_used: Instant::now(),
             device: read_device(db),
         })),
@@ -785,6 +797,7 @@ pub fn init(data: DataRoot, db: &DbState) -> GenState {
         ])),
         gpu: Arc::new(Mutex::new(None)),
         api: Arc::new(Mutex::new(imageapi::load(db))),
+        api_jobs: Arc::new(Mutex::new(HashMap::new())),
     };
     // 引擎自己的日志：只放行警告和错误，INFO 一步刷几十行会把开发台埋了
     unsafe {
@@ -925,6 +938,13 @@ pub fn gen_status(state: tauri::State<GenState>) -> GenStatus {
         Err(_) => (false, true),
     };
     drop(engine);
+    /* API 并行也算「在出图」：本地引擎空着但远端还有任务在跑 */
+    let busy = busy
+        || core
+            .api_jobs
+            .lock()
+            .map(|jobs| !jobs.is_empty())
+            .unwrap_or(true);
     let family = core.family();
     let weights = resolve_weights(&core.models(), family, &core.weights());
     let api = core.api();
@@ -1596,6 +1616,11 @@ fn begin(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: String) -
         if let Some(problem) = api.problem() {
             return Err(format!("API 配置不完整：{problem}。去设置 → 生图模型里补上"));
         }
+        /* 高清放大例外：它只用本机的 ESRGAN 放大权重，不吃远端模型，
+           后台直接走本地，不拿「API 不支持」把这条路堵死 */
+        if Mode::pick(req.mode.as_deref(), req.images.len()) == Mode::Upscale {
+            return begin_upscale(core, app, req, block);
+        }
         return begin_api(core, app, req, block, api);
     }
     /* 放大这一档不碰扩散模型：既不载入那 12 GB，也不走 ctx，自成一条路 */
@@ -1634,6 +1659,7 @@ fn begin(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: String) -
         /* 先认领再加载：加载这一两分钟里 busy 得是真的，
            否则「停止」和第二次「开始」都看不出有人在干活 */
         engine.busy = true;
+        engine.block = block.clone();
         core.cancel.store(false, Ordering::Relaxed);
         let ctx = match ensure_ctx(&core, &mut engine) {
             Ok(ctx) => ctx,
@@ -1664,6 +1690,7 @@ fn begin_upscale(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: S
             return Err("正在出图，等这一张跑完".to_string());
         }
         engine.busy = true;
+        engine.block = block.clone();
         engine.last_used = Instant::now();
         core.cancel.store(false, Ordering::Relaxed);
     }
@@ -1678,8 +1705,8 @@ fn begin_upscale(core: GenCore, app: tauri::AppHandle, req: GenRequest, block: S
     Ok(())
 }
 
-/// API 这一趟：认领 busy 后把请求丢给后台线程。网络那头掐不断，
-/// 「停止」只留标志位，请求回来再认这张作废——和放大那条路一个道理。
+/// API 这一趟：按设置的并行上限起一条独立任务，不占本地引擎，多块可以同时跑。
+/// 网络那头掐不断，「停止」只留标志位，请求回来再认这张作废——和放大那条路一个道理。
 fn begin_api(
     core: GenCore,
     app: tauri::AppHandle,
@@ -1687,15 +1714,27 @@ fn begin_api(
     block: String,
     config: ApiConfig,
 ) -> Result<(), String> {
-    {
-        let mut engine = core.lock();
-        if engine.busy {
-            return Err("正在出图，等这一张跑完".to_string());
+    let limit = config.parallel_limit();
+    let cancel = {
+        let mut jobs = core
+            .api_jobs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if jobs.contains_key(&block) {
+            return Err("这块正在出图，等这一张跑完".to_string());
         }
-        engine.busy = true;
-        engine.last_used = Instant::now();
-        core.cancel.store(false, Ordering::Relaxed);
-    }
+        if jobs.len() >= limit {
+            return Err(format!("API 并行已满（{limit} 个），等一个跑完再点"));
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        jobs.insert(
+            block.clone(),
+            ApiJob {
+                cancel: Arc::clone(&cancel),
+            },
+        );
+        cancel
+    };
     thread::spawn(move || {
         let started = Instant::now();
         /* 一条 0/0 的进度：前端拿它把「载入权重…」换成「生成中…」 */
@@ -1708,8 +1747,12 @@ fn begin_api(
                 seconds: 0.0,
             },
         );
-        let outcome = imageapi::generate(&config, &req, &core.cancel);
-        finish(&core, &app, block, outcome, started.elapsed().as_secs_f32());
+        let outcome = imageapi::generate(&config, &req, &cancel);
+        if let Ok(mut jobs) = core.api_jobs.lock() {
+            jobs.remove(&block);
+        }
+        let canceled = cancel.load(Ordering::Relaxed);
+        emit_outcome(&app, block, outcome, started.elapsed().as_secs_f32(), canceled);
     });
     Ok(())
 }
@@ -1726,21 +1769,49 @@ fn upscaler_path(core: &GenCore) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// 停止这一轮。这里不碰那把锁——它正被「载入权重」占着的时候，等锁就是卡界面。
+/// 停止一轮：给了块 id 就只停那一块（API 并行时各停各的），不给就全停。
+/// 这里不碰那把锁——它正被「载入权重」占着的时候，等锁就是卡界面。
 #[tauri::command]
-pub fn gen_cancel(state: tauri::State<GenState>) -> bool {
+pub fn gen_cancel(state: tauri::State<GenState>, block: Option<String>) -> bool {
     let core = state.0.clone();
-    if !core.engine.try_lock().map(|engine| engine.busy).unwrap_or(true) {
-        return false;
-    }
-    core.cancel.store(true, Ordering::Relaxed);
-    /* 引擎已经起来了就直接掐；还在载入就只留标志位，begin() 一出来自己收 */
-    if let Ok(engine) = core.engine.try_lock() {
-        if !engine.ctx.is_null() {
-            unsafe { sd::sd_cancel_generation(engine.ctx, sd::sd_cancel_mode_t::SD_CANCEL_ALL) };
+    let mut hit = false;
+    /* API 任务：各带各的取消标志 */
+    if let Ok(mut jobs) = core.api_jobs.lock() {
+        match block.as_deref() {
+            Some(target) => {
+                if let Some(job) = jobs.get(target) {
+                    job.cancel.store(true, Ordering::Relaxed);
+                    hit = true;
+                }
+            }
+            None => {
+                for job in jobs.values() {
+                    job.cancel.store(true, Ordering::Relaxed);
+                }
+                hit |= !jobs.is_empty();
+            }
         }
     }
-    true
+    /* 本地/放大那一条：一次只有一块，engine.block 认人 */
+    match core.engine.try_lock() {
+        Ok(engine) => {
+            let mine = engine.busy
+                && block.as_deref().is_none_or(|target| target == engine.block);
+            if mine {
+                core.cancel.store(true, Ordering::Relaxed);
+                if !engine.ctx.is_null() {
+                    unsafe { sd::sd_cancel_generation(engine.ctx, sd::sd_cancel_mode_t::SD_CANCEL_ALL) };
+                }
+                hit = true;
+            }
+        }
+        /* 锁被「载入权重」占着：认不出块，给的是哪块都按这块处理，只留标志位 */
+        Err(_) => {
+            core.cancel.store(true, Ordering::Relaxed);
+            hit = true;
+        }
+    }
+    hit
 }
 
 /// 权重是惰性的：new_sd_ctx 只登记，真正搬上卡发生在第一次出图里。
@@ -1957,7 +2028,7 @@ fn dechecker(pixels: &mut [u8], width: u32, height: u32, channel: u32) {
     }
 }
 
-/// 两条路（扩散、放大）跑完都从这儿收尾：交还 busy，再把这一张或这条错发回前端。
+/// 本地两条路（扩散、放大）跑完都从这儿收尾：交还 busy，再把这一张或这条错发回前端。
 fn finish(
     core: &GenCore,
     app: &tauri::AppHandle,
@@ -1969,8 +2040,20 @@ fn finish(
     {
         let mut engine = core.lock();
         engine.busy = false;
+        engine.block.clear();
         engine.last_used = Instant::now();
     }
+    emit_outcome(app, block, outcome, seconds, canceled);
+}
+
+/// 一轮的结果统一从这儿发出去：本地、放大、API 三条路共用。
+fn emit_outcome(
+    app: &tauri::AppHandle,
+    block: String,
+    outcome: Result<Out, String>,
+    seconds: f32,
+    canceled: bool,
+) {
     match outcome {
         /* 放大那一次前向掐不断，只能跑完再认这张已经作废——
            不然界面先显示「已取消」，过几秒又自己变成一张成品。 */
@@ -1985,9 +2068,8 @@ fn finish(
             );
         }
         Ok(mut image) => {
-            /* H3 的 VAE 解码会在平坦区留一层约 4px 的棋盘网格（转置卷积固有伪影），
-               与提示词和尺寸无关。用 2px 间隔的四点平均消掉该周期分量：
-               对周期 4 的网格正好反相抵消，对正常细节只极轻微软化。 */
+            /* H3 的 VAE 解码会在平坦区留一层细棋盘网格（转置卷积固有伪影）。
+               边缘感知的高斯平滑：平坦区抹平细网格，高频结构处保持原样。 */
             dechecker(&mut image.pixels, image.width, image.height, image.channel);
             let _ = app.emit(
                 "gen-done",

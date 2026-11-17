@@ -33,16 +33,12 @@ export function dropVideoRun(id) {
   runs.delete(id);
 }
 
-/* 一次只跑一条：哪一块正占着视频通道。 */
+/* 当前在跑的视频块（API 并行时可能不止一块，取第一块给老调用用）。 */
 export function videoBusyId() {
   for (const [id, run] of runs) {
     if (run.phase === "running") return id;
   }
   return "";
-}
-
-export function isVideoBusy() {
-  return Boolean(videoBusyId());
 }
 
 function waitedOf(run) {
@@ -120,21 +116,22 @@ export function syncVideoPanel(el, item, feed) {
   if (document.activeElement !== prompt && prompt.value !== (item.prompt || "")) {
     prompt.value = item.prompt || "";
   }
-  prompt.disabled = Boolean(item.locked);
+  prompt.disabled = false;
   if (seconds && document.activeElement !== seconds) {
     seconds.value = String(item.seconds || 6);
-    seconds.disabled = Boolean(item.locked);
+    seconds.disabled = false;
   }
   if (width && document.activeElement !== width) {
     width.value = String(item.width || 1280);
-    width.disabled = Boolean(item.locked);
+    width.disabled = false;
   }
   if (height && document.activeElement !== height) {
     height.value = String(item.height || 720);
-    height.disabled = Boolean(item.locked);
+    height.disabled = false;
   }
 
   runButton.textContent = busy ? "停止" : "开始";
-  runButton.disabled = Boolean(item.locked) || (!busy && isVideoBusy());
-  placeButton.hidden = !run.path || busy || Boolean(item.locked);
+  /* API 通道可以并行跑多块，这里不再按「别人在跑」禁用；本地引擎由后端拒绝并报错 */
+  runButton.disabled = false;
+  placeButton.hidden = !run.path || busy;
 }

@@ -1,0 +1,290 @@
+/* styles/text.css —— 从 styles.css 拆出，入口按原顺序 @import。 */
+
+/* ---------- Markdown 排版 ---------- */
+.md-body > :first-child {
+  margin-top: 0;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4,
+.md-body h5 {
+  margin: 1.4em 0 0.6em;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.md-body h1 {
+  font-size: 24px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+}
+
+.md-body h2 {
+  font-size: 20px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 28%, transparent);
+}
+
+.md-body h3 {
+  font-size: 17px;
+}
+
+.md-body h4 {
+  font-size: 15px;
+}
+
+.md-body h5 {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.md-body p {
+  margin: 0.7em 0;
+}
+
+.md-body ul,
+.md-body ol {
+  margin: 0.7em 0;
+  padding-left: 1.6em;
+}
+
+.md-body li {
+  margin: 0.25em 0;
+}
+
+.md-body li > input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: var(--accent);
+}
+
+.md-body a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.md-body a:hover {
+  text-decoration: underline;
+}
+
+.md-body strong {
+  font-weight: 600;
+}
+
+.md-body del {
+  color: var(--muted);
+}
+
+.md-body code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.md-body pre {
+  margin: 0.9em 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+
+.md-body pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.md-body blockquote {
+  margin: 0.9em 0;
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--muted);
+}
+
+.md-body table {
+  margin: 0.9em 0;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.md-body th,
+.md-body td {
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+}
+
+.md-body th {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  font-weight: 600;
+}
+
+.md-body hr {
+  margin: 1.6em 0;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+}
+
+.md-body img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.md-image-missing {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.md-error {
+  color: var(--danger);
+}
+
+/* ---------- 编辑态 ---------- */
+
+.md-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 6px var(--pad-x);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.md-tool {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.md-tool:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  border-color: color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.md-tool.is-strong {
+  font-weight: 700;
+}
+
+.md-tool.is-italic {
+  font-style: italic;
+}
+
+.md-tool.is-strike {
+  text-decoration: line-through;
+}
+
+.md-tool-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.md-textarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  padding: 16px 30px 24px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+
+.plain-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* 输入框弹层（新建文件夹 / 重命名等）：和菜单、确认框同一套视觉 */
+.dialog-prompt {
+  width: 340px;
+}
+
+.dialog-prompt .dialog-title {
+  margin-bottom: 12px;
+}
+
+.dialog-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dialog-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.dialog-input::placeholder {
+  color: var(--muted);
+}
+
+.dialog-input:hover {
+  border-color: color-mix(in srgb, var(--line) 85%, transparent);
+}
+
+.dialog-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.dialog-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* 工具栏里的色盘按钮 */
+.md-tool-color {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+}
+
+/* 色盘按钮：一个渐变小色轮，不带文字 */
+.md-tool-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1.5px solid var(--muted);
+  background: conic-gradient(
+    #e5484d,
+    #f08c00,
+    #f59f00,
+    #2f9e44,
+    #1971c2,
+    #7048e8,
+    #e5484d
+  );
+}
+
+.md-tool-color:hover .md-tool-swatch {
+  border-color: color-mix(in srgb, var(--fg) 55%, transparent);
+}

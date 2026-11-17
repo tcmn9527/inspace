@@ -1,0 +1,341 @@
+/* styles/dialogs.css —— 从 styles.css 拆出，入口按原顺序 @import。 */
+
+/* ---------- 自定义确认框（替换系统 confirm，风格与菜单/取色盘一致） ---------- */
+.dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.dialog {
+  position: relative;
+  width: 324px;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+.dialog-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.dialog-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 属性卡：比通用弹框宽一点，路径按字符换行、整段可选中（全局禁了选字，这里单独放开） */
+.dialog-props {
+  width: 460px;
+  max-width: calc(100vw - 48px);
+  padding: 14px 18px;
+}
+
+/* × 号绝对定位在右上角，不参与标题行排版，否则把标题整个顶下去 */
+.dialog-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  border-color: var(--line);
+  color: var(--fg);
+}
+
+.dialog-props .props-kind {
+  margin-top: 4px;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dialog-props .props-hint {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+/* 类型名后面跟的那句说明：同占一行，不再另起段 */
+.dialog-props .props-hint-inline {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+/* ---------- 参数化家具弹窗 ---------- */
+.dialog-furniture {
+  width: 340px;
+}
+
+.dialog-furniture .furn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.dialog-furniture .furn-row > span:first-child {
+  flex: 0 0 auto;
+  width: 44px;
+  color: var(--muted);
+}
+
+.dialog-furniture .furn-row input[type="number"],
+.dialog-furniture .furn-row select {
+  width: 110px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.dialog-furniture .furn-row input[type="number"]:focus,
+.dialog-furniture .furn-row select:focus {
+  border-color: var(--accent);
+}
+
+.dialog-furniture .furn-row em {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: normal;
+}
+
+.dialog-furniture .furn-colors {
+  display: flex;
+  gap: 8px;
+}
+
+.dialog-furniture .furn-color {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent);
+  cursor: pointer;
+}
+
+.dialog-furniture .furn-color.is-active {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.dialog-furniture .furn-save {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dialog-furniture .furn-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.props-path {
+  margin-top: 6px;
+  color: var(--fg);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+.dialog-btn {
+  min-width: 72px;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.dialog-btn:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.dialog-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dialog-ok {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.dialog-ok:hover {
+  background: color-mix(in srgb, var(--accent) 82%, var(--fg));
+}
+
+.dialog-ok.dialog-danger {
+  background: color-mix(in srgb, var(--danger) 70%, #4d0803);
+  color: #ffffff;
+}
+
+.dialog-ok.dialog-danger:hover {
+  background: color-mix(in srgb, var(--danger) 78%, #4d0803);
+}
+
+/* ---------- 多选项弹层（大视频拷不拷：把代价写在按钮上，一眼选完） ---------- */
+.dialog-choice-modal {
+  width: 372px;
+}
+
+.dialog-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.dialog-choice {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.dialog-choice:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.dialog-choice:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dialog-choice-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dialog-choice-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dialog-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+}
+
+/* ---------- 进度弹层（换数据目录搬运大量文件：一根条 + 一句在弄哪个 + 停止） ---------- */
+.dialog-progress {
+  width: 372px;
+}
+
+.dialog-bar {
+  height: 5px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  overflow: hidden;
+}
+
+.dialog-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.dialog-count {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* 视频播不出来的说明弹层：步骤多、要能看清单号，所以比确认框宽一点。 */
+.dialog-help {
+  width: 452px;
+}
+
+.dialog-help-facts {
+  font-variant-numeric: tabular-nums;
+}
+
+.dialog-steps {
+  margin: 12px 0 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 19px;
+  color: var(--fg);
+}
+
+.dialog-steps::marker {
+  color: var(--muted);
+}
+
+.dialog-help-path {
+  /* 组件文件夹路径要能整段看清，允许断行但别断单词 */
+  word-break: break-all;
+  user-select: text;
+}

@@ -1,0 +1,640 @@
+/* styles/shell.css —— 从 styles.css 拆出，入口按原顺序 @import。 */
+
+/* ---------- 外壳 ---------- */
+.shell {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.section-label {
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  color: var(--fg);
+  /* 标题永不被挤：窄的时候只压缩右边的控件，别让标题折成两行 */
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 标签行里的文字按钮（已隐藏 N） */
+.link-btn {
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+/* ---------- 设置窗口 ---------- */
+/* 独立窗口：自绘标题栏 + 左侧平铺菜单 + 右侧当前这一项的内容。
+   每页只有一张卡，所以不套卡片的边框和底色，标题直接落在内容面上。 */
+.settings-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+
+.settings-window-head {
+  justify-content: space-between;
+  padding-left: 14px;
+}
+
+/* 主窗口那条线分的是「工具条 | 窗口按钮」，设置窗口没有工具条，不画 */
+.settings-window-head .titlebar-right::before {
+  display: none;
+}
+
+.settings-window-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.settings-layout {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.settings-nav {
+  flex: 0 0 176px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px 14px;
+  border-right: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
+}
+
+.settings-nav-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.settings-nav-item:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+
+.settings-nav-item.is-active {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+
+.settings-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 22px 26px 28px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
+}
+
+.settings-pane > .settings-card {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+/* 宇宙主题这一页里贴图和航线是两节，用一条细线分开 */
+.settings-pane > .settings-card + .settings-card {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+/* 窗口右侧比原来的弹层宽：色卡按可用宽度多排几列 */
+.settings-pane .theme-pop-grid {
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+}
+
+.settings-card {
+  margin-bottom: 14px;
+  padding: 18px 20px 16px;
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.settings-path {
+  display: block;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+  user-select: text;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.settings-status,
+.settings-error {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.settings-status {
+  color: var(--muted);
+}
+
+.settings-error {
+  color: var(--danger);
+}
+
+/* 生图模型族切换：两族的槽位/默认参数/目录都各管各的 */
+.settings-gen-device {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+  max-width: 460px;
+}
+
+.settings-gen-device > span {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-gen-device select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+
+.settings-gen-device select:focus {
+  border-color: var(--accent);
+}
+
+.settings-gen-families {
+  display: inline-flex;
+  gap: 2px;
+  margin-top: 12px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.settings-gen-family {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.settings-gen-family:hover {
+  color: var(--fg);
+}
+
+.settings-gen-family.is-active {
+  background: color-mix(in srgb, var(--fg) 11%, transparent);
+  color: var(--fg);
+}
+
+.settings-gen-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 生图引擎切换：本地模型 / API。和模型族那组同一套视觉，只是管的事不同 */
+.settings-gen-engine {
+  display: inline-flex;
+  gap: 2px;
+  margin-top: 12px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.settings-gen-api {
+  margin-top: 4px;
+}
+
+.settings-gen-api .settings-field {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.settings-gen-api .settings-field > span {
+  align-self: center;
+}
+
+.settings-gen-api input,
+.settings-gen-api select {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.settings-gen-api input:focus,
+.settings-gen-api select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 视频本地引擎的四个文件行：名字、文件名（截断）、选择按钮 */
+.settings-video-files .settings-field {
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+}
+
+.settings-video-file {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* 生图档位：两列真文件，文件名在左、体积在右。当前那一档用左边一条光带标出来，
+   不动文件名自己的颜色——他得看清选中的到底是哪个文件。名字宁可折行也不截尾，
+   截掉尾巴就正好把 Q4_K / Q6_K 这种区别档名的部分丢了。 */
+.settings-gen-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 18px;
+  margin-top: 12px;
+  max-width: 640px;
+}
+
+.settings-gen-col {
+  min-width: 0;
+}
+
+.settings-gen-col-title {
+  margin: 0 0 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.settings-gen-opt {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px 5px 10px;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 18%, transparent);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-gen-col .settings-gen-opt:last-of-type {
+  border-bottom: none;
+}
+
+.settings-gen-opt:hover {
+  background: color-mix(in srgb, var(--line) 8%, transparent);
+}
+
+.settings-gen-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-gen-size {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-gen-opt.is-current::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.settings-gen-fixed {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 检测结论：只有点了「检测模型」才摊开的一整块，用一条分隔线和上面的状态行分开。
+   里面从上到下是「这台机器什么状况 → 建议哪档 → 缺的文件下哪儿 → 目录里能选谁」。 */
+.settings-gen-detail {
+  margin-top: 12px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 30%, transparent);
+}
+
+.settings-gen-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 建议那句是这块的主角，用主文字色；机器数字是它的依据，退回次要色 */
+.settings-gen-line.is-advice {
+  color: var(--fg);
+}
+
+.settings-gen-line.is-title {
+  margin-top: 12px;
+  font-size: 11px;
+}
+
+.settings-gen-files {
+  display: grid;
+  gap: 1px;
+  margin-top: 4px;
+  max-width: 640px;
+}
+
+.settings-gen-file {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 18%, transparent);
+  border-left: 2px solid transparent;
+  font-size: 12px;
+}
+
+/* 建议那一档用左边一条光带标出来，跟档位选择器同一个记号；
+   每行都留了同样宽的透明边，标不标都不会把文字挤得错位 */
+.settings-gen-file.is-recommended {
+  border-left-color: var(--accent);
+}
+
+.settings-gen-file:last-child {
+  border-bottom: none;
+}
+
+.settings-gen-role {
+  flex: none;
+  width: 5.5em;
+  color: var(--muted);
+}
+
+.settings-gen-link {
+  flex: none;
+  color: var(--accent);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.settings-gen-link:hover {
+  text-decoration: underline;
+}
+
+/* 「已有 / 缺」标在行尾：缺是这一趟要办的事，用危险色点出来 */
+.settings-gen-state {
+  color: var(--muted);
+}
+
+.settings-gen-file.is-missing .settings-gen-state {
+  color: var(--danger);
+}
+
+/* 识别说明：共享、改名建议、多余候选，都是「知道就好」的补充，不抢主状态 */
+.settings-model-notes {
+  margin-top: 6px;
+  max-width: 640px;
+}
+
+.settings-model-note {
+  margin: 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* 遨游星球：名单一行一颗。行尾的上移/下移/移除平时不出现，也不做按钮外壳——
+   它们是这一行的次级操作，套上边框会和「下载 8K 贴图」那种动作按钮抢层级 */
+.settings-route {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 420px;
+}
+
+.settings-route-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 22%, transparent);
+  font-size: 13px;
+}
+
+.settings-route-item:last-child {
+  border-bottom: none;
+}
+
+.settings-route-index {
+  width: 16px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-route-name {
+  flex: 1 1 auto;
+}
+
+.settings-route-ops {
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.settings-route-item:hover .settings-route-ops,
+.settings-route-item:focus-within .settings-route-ops {
+  opacity: 1;
+}
+
+.settings-route-op {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-route-op:hover,
+.settings-route-op:focus-visible {
+  color: var(--fg);
+}
+
+.settings-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 就地编辑的数字，和画布工具栏里的缩放数字同一套规格：平时只是个数，
+   悬停才有一点底，进编辑才更亮——它不是表单控件，别做成一个空着的输入框 */
+.settings-input {
+  width: 40px;
+  height: 26px;
+  padding: 0 2px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.settings-input[readonly] {
+  cursor: default;
+}
+
+.settings-input:not([readonly]) {
+  cursor: text;
+}
+
+.settings-input:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.settings-input:focus {
+  outline: none;
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+}
+
+/* 快捷键说明：只读清单，宽的时候两列排开；每一行右边是按键胶囊 */
+.settings-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px 32px;
+  margin-top: 16px;
+}
+
+.settings-shortcut-heading {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 30px;
+  padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+  font-size: 12.5px;
+}
+
+.settings-shortcut-heading + .settings-shortcut-row {
+  border-top: none;
+}
+
+.settings-keys {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.settings-keys kbd {
+  min-width: 20px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.settings-key-sep {
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0.7;
+}

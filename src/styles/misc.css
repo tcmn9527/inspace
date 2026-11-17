@@ -1,0 +1,741 @@
+/* styles/misc.css —— 从 styles.css 拆出，入口按原顺序 @import。 */
+
+/* ---------- 搜索面板 ---------- */
+.canvas-search {
+  position: absolute;
+  z-index: 6;
+  top: 50px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100% - 32px));
+  max-height: min(60vh, 460px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.44);
+  transform: translateX(-50%);
+  overflow: hidden;
+}
+
+.canvas-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  color: var(--muted);
+}
+
+.canvas-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.canvas-search-input::placeholder {
+  color: var(--muted);
+}
+
+.canvas-search-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-search-results {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+/* 分隔线挂在这儿而不是输入行上：只有下面真有东西的时候才画。
+   刚唤出面板、或者输入还是空的时候列表里一个节点都没有，
+   此时整块收起来，免得留一条没有下文的横线加一截空白。 */
+.canvas-search-results:empty {
+  display: none;
+}
+
+.canvas-search-results:not(:empty) {
+  border-top: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.canvas-search-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.canvas-search-row.is-active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.canvas-search-badge {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.canvas-search-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.canvas-search-title {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-search-text {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-search-row mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 46%, transparent);
+  color: var(--fg);
+}
+
+.canvas-search-empty {
+  margin: 0;
+  padding: 14px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 搜索定位到的那一块：边框亮一下，告诉用户「就是它」 */
+.canvas-item.is-found {
+  animation: canvas-found 1.4s ease-out;
+}
+
+@keyframes canvas-found {
+  0%,
+  40% {
+    box-shadow: 0 0 0 3px var(--accent), 0 0 26px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* 左下角信息条：选中面板的 (X, Y) 和 [W, H]，样式跟右下角缩放条同一路子（浮层控件） */
+.canvas-metrics {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 6;
+  margin: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  color: var(--muted);
+  font-size: 12px;
+  /* 拖动途中数字一直在跳，等宽数字才不会左右抖 */
+  font-variant-numeric: tabular-nums;
+  /* 默认只报编号，点一下展开坐标尺寸；宽度跟内容走 */
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* 锁定块在 #N 前面挂的小锁，跟着 12px 字走 */
+.canvas-metrics-lock {
+  width: 11px;
+  height: 11px;
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+
+/* ---- 右下角鸟瞰窗 ---- */
+.canvas-minimap {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 132px;
+  height: 90px;
+  z-index: 6;
+  border: 1px solid color-mix(in srgb, var(--line) 34%, transparent);
+  border-radius: 8px;
+  /* 必须不透明：透出底下的画布网格和块会跟鸟瞰窗里的小方框混成一片 */
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.canvas-minimap[hidden] {
+  display: none;
+}
+
+.canvas-minimap-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.canvas-minimap-canvas.is-grabbing {
+  cursor: grabbing;
+}
+
+/* 左上角的块数，和右上角收起按键做是一对：同高、同底色、同圆角。
+   pointer-events:none —— 它压在画面上，不能挡住拖框和点跳。 */
+.canvas-minimap-count {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  height: 20px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.canvas-minimap-min {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.canvas-minimap-min:hover {
+  border-color: color-mix(in srgb, var(--line) 40%, transparent);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+
+/* 收起后留在原位的还原按键 */
+.canvas-minimap-key {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 6;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--line) 34%, transparent);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.canvas-minimap-key[hidden] {
+  display: none;
+}
+
+.canvas-minimap-key:hover {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.canvas-error {
+  position: absolute;
+  z-index: 7;
+  left: 50%;
+  bottom: 18px;
+  max-width: min(560px, calc(100% - 32px));
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+  color: var(--fg);
+  font-size: 12px;
+  transform: translateX(-50%);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+}
+
+/* 一句回执（导出完成之类）：从底部浮起来，几秒后自己退场 */
+.canvas-toast {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  bottom: 56px;
+  max-width: min(620px, calc(100% - 32px));
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+}
+
+.canvas-toast.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* ---------- Agent 演示光带 ---------- */
+
+/* 只加一圈外发光，不改块自己的颜色、边框和尺寸 */
+.canvas-item.is-agent-target,
+
+/* 连线是 SVG，box-shadow 不生效，用 drop-shadow 沿线条发光 */
+.canvas-connector.is-agent-target {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 85%, transparent))
+    drop-shadow(0 0 9px color-mix(in srgb, var(--accent) 55%, transparent));
+}
+
+/* ---------- 图片对比浮层 ---------- */
+/* 临时查看用：两张图完整显示（contain）叠在同一区域，拖中间分割线看差异 */
+.compare-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 12, 18, 0.72);
+}
+
+.compare-panel {
+  position: relative;
+  display: flex;
+  width: min(92vw, 1500px);
+  height: min(88vh, 1000px);
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.compare-panel:focus {
+  outline: none;
+}
+
+.compare-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  cursor: pointer;
+}
+
+.compare-close:hover {
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.compare-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+/* 图片内容一起缩放/平移；分割线留在屏幕上不跟着动 */
+.compare-canvas {
+  position: absolute;
+  inset: 0;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.compare-stage.is-zoomed {
+  cursor: grab;
+}
+
+.compare-stage.is-comparing-pan {
+  cursor: grabbing;
+}
+
+.compare-tools {
+  position: absolute;
+  top: 10px;
+  right: 48px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.compare-tool {
+  height: 26px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.compare-tool:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.compare-zoom-value {
+  min-width: 46px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+}
+
+.compare-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.compare-top {
+  clip-path: inset(0 0 0 50%);
+}
+
+.compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+.compare-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  background: rgba(18, 18, 18, 0.72);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+/* ---------- 3D 场景工具条（选中单个场景块时浮在画布底部） ---------- */
+.scene-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+}
+
+.scene-toolbar[hidden] {
+  display: none;
+}
+
+.scene-tool-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.scene-tool-btn:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.scene-tool-btn.is-open {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.scene-tool-btn.is-disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.scene-tool-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+  background: transparent;
+}
+
+
+.scene-pop {
+  position: absolute;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 280px;
+  max-width: 360px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  z-index: 31;
+}
+
+.scene-pop[hidden] {
+  display: none;
+}
+
+.scene-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.scene-pop-row > span:first-child {
+  flex: 0 0 52px;
+}
+
+.scene-pop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 弹层里的按钮平分整行宽度，别挤成一坨 */
+.scene-pop-actions .plain-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scene-pop-actions .plain-btn.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.scene-pop-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.scene-dot {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent);
+  cursor: pointer;
+}
+
+.scene-dot.is-active {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.scene-dot.is-default {
+  background:
+    linear-gradient(135deg, transparent 46%, var(--muted) 48%, var(--muted) 52%, transparent 54%),
+    var(--surface);
+}
+
+/* 更多色：彩虹渐变的小圆，挑过自定义色时显示那个色 */
+.scene-dot.is-more {
+  background: conic-gradient(#e58a8a, #e8c07a, #a7d08a, #7ab8d9, #9a9ae0, #ce95ce, #e58a8a);
+}
+
+.scene-dot.is-more.is-custom {
+  background: var(--c);
+}
+
+/* 全局取色盘浮层的「取消 / 确定」行（给需要显式确认的入口用） */
+.color-pop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.color-pop-actions .color-pop-confirm {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 模型库菜单：每行左边一张缩略图，认模型不用靠文件名 */
+.ctx-menu button.has-thumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctx-menu button .menu-thumb {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  object-fit: contain;
+}
+
+/* 模型菜单悬停大图：菜单行右边浮一张 232 的预览，不吃鼠标 */
+.menu-thumb-preview {
+  position: fixed;
+  z-index: 60;
+  width: 232px;
+  height: 232px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.menu-thumb-preview[hidden] {
+  display: none;
+}
+
+.menu-thumb-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* 菜单顶部搜索框（模型库这类长列表用） */
+.menu-search {
+  display: block;
+  width: calc(100% - 12px);
+  height: 28px;
+  margin: 4px 6px 6px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.menu-search:focus {
+  border-color: var(--accent);
+}
+
+.menu-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 长菜单的列表区：固定高度、自己滚；滚到底再续下一页 */
+.menu-list {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
+}
+
+.menu-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.menu-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 3px;
+}
+
+.menu-list::-webkit-scrollbar-track {
+  background: transparent;
+}

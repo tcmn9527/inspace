@@ -1,0 +1,1921 @@
+/* styles/media-blocks.css —— 丢失卡 / 音乐 / 文件 / PDF / DOCX / XLSX / PPTX 等块样式。 */
+
+/* 丢了文件的块统一长这一张卡：铺在块原来的位置，宽高都不动 */
+.canvas-missing-card {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px dashed color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: center;
+  user-select: none;
+}
+
+.canvas-missing-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-missing-icon {
+  display: flex;
+  color: var(--danger);
+  opacity: 0.72;
+}
+
+.canvas-missing-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.canvas-missing-title {
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+/* 路径多半很长，两头都要留全：整行按 RTL 排，省略号就吃掉开头，文件名留在眼前。
+   不能再加 unicode-bidi: plaintext —— 那样首字母把方向定回 LTR，掐的就变成结尾了。 */
+.canvas-missing-path {
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  user-select: text;
+}
+
+/* 音乐播放器块 */
+.canvas-item-audio {
+  cursor: move;
+}
+
+.canvas-audio-player {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+  user-select: none;
+}
+
+.canvas-audio-player.is-playing {
+  border-color: var(--accent);
+}
+
+.canvas-audio-player.is-error {
+  border-color: var(--danger);
+}
+
+.canvas-audio-player.is-loading .canvas-audio-toggle {
+  opacity: 0.55;
+}
+
+.canvas-audio-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.canvas-audio-note {
+  width: 21px;
+  height: 21px;
+}
+
+.canvas-audio-bars {
+  display: none;
+  align-items: flex-end;
+  gap: 3px;
+  height: 18px;
+}
+
+.canvas-audio-bars i {
+  display: block;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: bottom;
+  animation: canvas-audio-bar 0.9s ease-in-out infinite;
+}
+
+.canvas-audio-bars i:nth-child(1) {
+  animation-delay: -0.3s;
+}
+
+.canvas-audio-bars i:nth-child(2) {
+  animation-delay: -0.55s;
+}
+
+.canvas-audio-player.is-playing .canvas-audio-note {
+  display: none;
+}
+
+.canvas-audio-player.is-playing .canvas-audio-bars {
+  display: flex;
+}
+
+.canvas-audio-player.is-playing .canvas-audio-icon {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+@keyframes canvas-audio-bar {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.canvas-audio-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.canvas-audio-name {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* 右上角那颗收起键的地盘 */
+  padding-right: 20px;
+}
+
+.canvas-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.canvas-audio-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.canvas-audio-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--accent);
+}
+
+.canvas-audio-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.canvas-audio-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.canvas-audio-pause {
+  display: none;
+}
+
+.canvas-audio-player.is-playing .canvas-audio-play {
+  display: none;
+}
+
+.canvas-audio-player.is-playing .canvas-audio-pause {
+  display: block;
+}
+
+.canvas-audio-track {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 30px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.canvas-audio-rail {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+
+.canvas-audio-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.canvas-audio-knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg) 65%, transparent);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.canvas-audio-track:hover .canvas-audio-knob,
+.canvas-audio-player.is-playing .canvas-audio-knob {
+  opacity: 1;
+}
+
+.canvas-audio-time {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.canvas-audio-element {
+  display: none;
+}
+
+/* 文件块：什么格式都先当附件收进来，卡片只报名字和体积，打开交给系统默认程序 */
+.canvas-item-file {
+  cursor: move;
+}
+
+.canvas-file-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* 非文本的附件条就一行，垂直居中；文本块、PDF 块、DOCX 块、XLSX 块、PPTX 块顶格排，好给下面留高度 */
+.canvas-file-card:not(.canvas-file-card-text):not(.canvas-file-card-pdf):not(.canvas-file-card-docx):not(.canvas-file-card-xlsx):not(.canvas-file-card-pptx) {
+  justify-content: center;
+}
+
+/* 上面一行永远是「图标 + 名字/体积 + 按钮」，文本块再往下多接一块只读预览 */
+.canvas-file-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.canvas-file-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--muted);
+}
+
+.canvas-file-badge svg {
+  width: 20px;
+  height: 20px;
+}
+
+.canvas-file-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.canvas-file-name {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-file-sub {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* PDF 块：页面画在 canvas 上铺满块宽，比块高就在这一格里滚；底下一行只管翻页 */
+.canvas-file-pdf {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+}
+
+.canvas-file-pdf-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border-radius: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+
+.canvas-file-pdf-track {
+  position: relative;
+}
+
+/* 页链里一页一格。格子先按算出来的页高把纸撑在这儿，位图晚一点才画上去也不露底色 */
+.canvas-file-pdf-slot {
+  position: absolute;
+  left: 0;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+}
+
+/* 纸本身永远是白的，不跟着主题走：深色主题下看 PDF 还是看纸面，别把页面染成黑底 */
+.canvas-file-pdf-page {
+  display: block;
+}
+
+.canvas-file-pdf-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.canvas-file-pdf-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.canvas-file-pdf-step:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.canvas-file-pdf-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.canvas-file-pdf-pos {
+  min-width: 48px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 加载中那一行，和预览不了的三种话（有密码、读坏了、没接上）都走这里 */
+.canvas-file-pdf-state {
+  flex: 0 0 auto;
+  padding-top: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+
+/* 文本预览：整块常显，超出卡片高度就自己滚 */
+.canvas-file-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+  overflow: auto;
+  /* 轨道留空，露出卡片自己的底色：用户改过背景色也不出现一条白边 */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+  /* 卡片整体禁选，预览正文单独放开，方便从预览里选中复制文字 */
+  user-select: text;
+  -webkit-user-select: text;
+  /* 正文里是文字：用 I 形光标提示「这里能选」，移动交给头部 */
+  cursor: text;
+}
+
+.canvas-file-card-text {
+  padding-bottom: 10px;
+}
+
+.canvas-file-lines {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 解不出编码这类问题才把这行点亮，正常态这里什么都不显示 */
+.canvas-file-preview.is-failed {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--danger);
+}
+
+/* DOCX 块：mammoth 转出来的 HTML 铺在卡片里，超出就自己滚；底色跟卡片走 */
+.canvas-file-docx {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+}
+
+.canvas-file-docx-state {
+  flex: 0 0 auto;
+  padding-top: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+
+.canvas-file-docx-state.is-failed {
+  color: var(--danger);
+}
+
+.canvas-file-docx-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 2px 4px;
+  /* 卡片整体禁选，正文单独放开，方便从预览里复制文字 */
+  user-select: text;
+  -webkit-user-select: text;
+  /* 正文里是文字：用 I 形光标提示「这里能选」，移动交给头部 */
+  cursor: text;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+/* mammoth 输出的语义化 HTML，限定在 DOCX 正文里排版，不污染全局 */
+.canvas-file-docx-body h1,
+.canvas-file-docx-body h2,
+.canvas-file-docx-body h3,
+.canvas-file-docx-body h4,
+.canvas-file-docx-body h5,
+.canvas-file-docx-body h6 {
+  margin: 10px 0 6px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.canvas-file-docx-body h1 { font-size: 18px; }
+.canvas-file-docx-body h2 { font-size: 16px; }
+.canvas-file-docx-body h3 { font-size: 14px; }
+.canvas-file-docx-body h4,
+.canvas-file-docx-body h5,
+.canvas-file-docx-body h6 { font-size: 13px; }
+.canvas-file-docx-body p { margin: 0 0 8px; }
+.canvas-file-docx-body ul,
+.canvas-file-docx-body ol { margin: 0 0 8px; padding-left: 22px; }
+.canvas-file-docx-body li { margin: 2px 0; }
+.canvas-file-docx-body a { color: var(--accent); }
+.canvas-file-docx-body img { max-width: 100%; height: auto; border-radius: 4px; }
+.canvas-file-docx-body table {
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 11px;
+}
+.canvas-file-docx-body th,
+.canvas-file-docx-body td {
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.canvas-file-docx-body blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid color-mix(in srgb, var(--line) 50%, transparent);
+  color: var(--muted);
+}
+.canvas-file-docx-empty { color: var(--muted); }
+
+/* XLSX 块：和 DOCX 同样的「头移内容选」套路，正文换成一张可滚动的表 */
+.canvas-file-xlsx {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* 卡片整体禁选，正文单独放开，方便从预览里复制单元格文字 */
+}
+
+/* 一排工作表标签：点哪个亮哪个，切换显示的表 */
+.canvas-file-xlsx-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+.canvas-file-xlsx-tab {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 1px 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.canvas-file-xlsx-tab.is-active {
+  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.canvas-file-xlsx-state {
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+.canvas-file-xlsx-state.is-failed {
+  color: var(--danger);
+}
+
+/* 正文：可滚动的表区，鼠标是 I 形——和 DOCX 一样，放在这里划选复制、放在头部拖动 */
+.canvas-file-xlsx-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 2px 4px;
+  user-select: text;
+  cursor: text;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+
+.canvas-file-xlsx-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--fg);
+  width: max-content;       /* 列宽跟着内容走，别被压成挤一条 */
+  max-width: 100%;
+}
+.canvas-file-xlsx-table th,
+.canvas-file-xlsx-table td {
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  padding: 3px 8px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;    /* 单元格里的换行留着，别塌成一行 */
+  word-break: break-word;
+}
+.canvas-file-xlsx-table th {
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  font-weight: 600;
+  z-index: 1;
+}
+.canvas-file-xlsx-table td { background: var(--surface); }
+.canvas-file-xlsx-trunc {
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+}
+
+/* PPTX 块：工具栏 + 主舞台（自适应宽度的单页）+ 底部缩略图条 */
+.canvas-file-pptx {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 包裹工具栏/舞台/缩略图的外层：撑满卡片，正文区放开选区，放在这里划选、放在头部拖动 */
+.canvas-file-pptx-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  user-select: text;
+  cursor: text;
+}
+
+/* 翻页工具栏：‹ 第 X / N 张 › */
+.canvas-file-pptx-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 3px 0 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+}
+.canvas-file-pptx-nav {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  width: 24px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.canvas-file-pptx-nav:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.canvas-file-pptx-count {
+  flex: 1 1 auto;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* 主舞台：装着按比例缩放后的那一页，宽度撑满卡片 */
+.canvas-file-pptx-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: 4px 0;
+  /* 预留滚动条槽：滚动条出现/消失不再改变内容宽，免得和缩放重算互相触发 */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+
+/* 缩放包裹层：固定宽（主舞台 100% / 缩略图定宽），内部 96DPI 舞台靠 transform 缩放 */
+.canvas-file-pptx-slidewrap {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.canvas-file-pptx-slide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  background: #ffffff;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--fg) 18%, transparent);
+  overflow: hidden;
+}
+
+/* 文本框：绝对定位、竖排、整体可选中复制 */
+.pptx-textbox {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: 2px 4px;
+  user-select: text;
+  cursor: text;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  color: #000000;
+}
+.pptx-textbox p { margin: 0; line-height: 1.12; }
+.pptx-textbox p + p { margin-top: 2px; }
+.pptx-bullet { padding-left: 1em; position: relative; }
+.pptx-bullet::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+}
+.pptx-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+.pptx-table {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #ffffff;
+  color: #000000;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+.pptx-table th,
+.pptx-table td {
+  border: 1px solid #b0b0b0;
+  padding: 1px 4px;
+  text-align: left;
+  vertical-align: top;
+  overflow: hidden;
+  line-height: 1.1;
+}
+.pptx-table p { margin: 0; }
+
+/* 底部缩略图条：每张缩略图是个定宽缩放页，点哪个跳哪页 */
+.canvas-file-pptx-thumbs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 2px 2px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+.canvas-file-pptx-thumb {
+  flex: 0 0 auto;
+  width: 132px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 4px;
+  background: #ffffff;
+  cursor: pointer;
+  overflow: hidden;
+}
+.canvas-file-pptx-thumb.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.canvas-file-pptx-state {
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+.canvas-file-pptx-state.is-failed {
+  color: var(--danger);
+}
+
+/* 文本块的就地编辑：占掉预览那一格，点别处即写回源文件 */
+.canvas-file-editor {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+}
+
+.canvas-file-editor-tip {
+  padding: 0 2px 6px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+}
+
+/* 编辑框跟预览那一格用同一套字：字号、行高、左右留白都对齐 .canvas-file-lines，
+   不然双击进编辑，同一份文本会当场换个样子，看着像内容被改了 */
+.canvas-file-textarea {
+  padding: 0;
+  font-size: 11px;
+  line-height: 16px;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+
+.canvas-item-file.is-editing {
+  cursor: default;
+}
+
+.canvas-file-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--fg);
+}
+
+.canvas-file-table th,
+.canvas-file-table td {
+  max-width: 170px;
+  padding: 3px 8px 3px 0;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 20%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-file-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* 电子书阅读块：深色书壳包一张纸，正文在 sandbox iframe 里自己滚 */
+.canvas-item-ebook {
+  cursor: move;
+}
+
+.canvas-ebook-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+  user-select: none;
+}
+
+.canvas-ebook-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 26%, transparent);
+  cursor: move;
+}
+
+.canvas-ebook-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.canvas-ebook-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-ebook-author {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-ebook-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-ebook-step {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.canvas-ebook-step svg {
+  display: block;
+}
+
+.canvas-ebook-step:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--accent);
+}
+
+.canvas-ebook-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.canvas-ebook-select {
+  max-width: 190px;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  color: var(--fg);
+  font-size: 11.5px;
+}
+
+.canvas-ebook-pos {
+  min-width: 46px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-ebook-body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #fbfaf6;
+}
+
+/* 滚动条、滚轮、悬停光标、按下拖动都在这层（主文档自己的元素）：
+   书页是跨进程 iframe，光标一压上去就把整条手势吃掉，所以它永久对指针免疫。 */
+.canvas-ebook-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  /* 正文换章时浏览器会「锚定」旧位置把滚动条顶回去（实测翻章后回到 16 而不是 0），
+     这个滚动条由我们自己管 */
+  overflow-anchor: none;
+  cursor: move;
+}
+
+.canvas-ebook-scroll[hidden] {
+  display: none;
+}
+
+/* 高度照正文排出来的实际长度给（帧里报上来），外层因此有真滚动条 */
+.canvas-ebook-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.canvas-ebook-page {
+  position: sticky;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  border: 0;
+  background: #fbfaf6;
+  pointer-events: none;
+}
+
+/* 翻章只在这块里转圈/报错：书壳和工具栏一直看得见 */
+.canvas-ebook-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #fbfaf6;
+  color: #6b6459;
+  font-family: Georgia, "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.canvas-ebook-state[hidden] {
+  display: none;
+}
+
+/* 视频播放块：上面是画面，下面是和音乐同一套的播放条 */
+.canvas-item-video {
+  cursor: move;
+}
+
+.canvas-video-player {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+  user-select: none;
+}
+
+.canvas-video-player.is-playing {
+  border-color: var(--accent);
+}
+
+.canvas-video-player.is-error {
+  border-color: var(--danger);
+}
+
+.canvas-video-player.is-loading .canvas-video-toggle {
+  opacity: 0.55;
+}
+
+.canvas-video-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 8px 8px 0 0;
+  background: #0b0b0d;
+  overflow: hidden;
+}
+
+.canvas-video-element {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* 画面本身不吃指针：拖动整块要落在外壳上，双击才切换播放 */
+  pointer-events: none;
+}
+
+.canvas-video-curtain {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.canvas-video-curtain svg {
+  width: 44px;
+  height: 44px;
+}
+
+.canvas-video-player.is-playing .canvas-video-curtain {
+  opacity: 0;
+}
+
+.canvas-video-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 10px;
+}
+
+.canvas-video-toggle,
+.canvas-video-volume,
+.canvas-video-max {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.canvas-video-toggle:hover,
+.canvas-video-volume:hover,
+.canvas-video-max:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--accent);
+}
+
+.canvas-video-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.canvas-video-toggle svg,
+.canvas-video-volume svg,
+.canvas-video-max svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-video-pause {
+  display: none;
+}
+
+.canvas-video-player.is-playing .canvas-video-play {
+  display: none;
+}
+
+.canvas-video-player.is-playing .canvas-video-pause {
+  display: block;
+}
+
+.canvas-video-max-in {
+  display: none;
+}
+
+.canvas-video-player.is-fullscreen .canvas-video-max-out {
+  display: none;
+}
+
+.canvas-video-player.is-fullscreen .canvas-video-max-in {
+  display: block;
+}
+
+/* 音量：平时只有一颗喇叭键，滑条悬停才从按钮上方浮出来 */
+.canvas-video-volwrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.canvas-video-vol-off {
+  display: none;
+}
+
+.canvas-video-volwrap.is-muted .canvas-video-vol-on {
+  display: none;
+}
+
+.canvas-video-volwrap.is-muted .canvas-video-vol-off {
+  display: block;
+}
+
+.canvas-video-volpop {
+  position: absolute;
+  z-index: 2;
+  right: -10px;
+  bottom: calc(100% + 8px);
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+.canvas-video-volrail {
+  position: relative;
+  width: 82px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  cursor: pointer;
+}
+
+.canvas-video-volfill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.canvas-video-volknob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg) 65%, transparent);
+  transform: translate(-50%, -50%);
+}
+
+.canvas-video-track {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 30px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.canvas-video-rail {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+
+.canvas-video-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.canvas-video-knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg) 65%, transparent);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.canvas-video-track:hover .canvas-video-knob,
+.canvas-video-player.is-playing .canvas-video-knob {
+  opacity: 1;
+}
+
+.canvas-video-time {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 播不出声/播不出画面时才冒出来的入口：平时这行不该有多余控件 */
+.canvas-video-hint {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.canvas-video-hint:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+/* 铺满屏幕：壳进全屏层后画面吃掉整块，控制行浮在底部压一层暗渐变。
+   全屏元素本身是 fixed 定位，所以控制行 absolute 直接挂它下面就行。 */
+.canvas-video-player:fullscreen {
+  border: none;
+  border-radius: 0;
+  background: #000;
+}
+
+.canvas-video-player:fullscreen .canvas-video-stage {
+  border-radius: 0;
+  background: #000;
+}
+
+.canvas-video-player:fullscreen .canvas-video-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: auto;
+  padding: 26px 22px 16px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+}
+
+.canvas-video-player:fullscreen .canvas-video-toggle,
+.canvas-video-player:fullscreen .canvas-video-volume,
+.canvas-video-player:fullscreen .canvas-video-max {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.canvas-video-player:fullscreen .canvas-video-toggle:hover,
+.canvas-video-player:fullscreen .canvas-video-volume:hover,
+.canvas-video-player:fullscreen .canvas-video-max:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.canvas-video-player:fullscreen .canvas-video-rail,
+.canvas-video-player:fullscreen .canvas-video-volrail {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.canvas-video-player:fullscreen .canvas-video-knob,
+.canvas-video-player:fullscreen .canvas-video-volknob {
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-video-player:fullscreen .canvas-video-volpop {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(20, 20, 22, 0.92);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.canvas-video-player:fullscreen .canvas-video-time,
+.canvas-video-player:fullscreen .canvas-video-hint {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.canvas-video-player:fullscreen .canvas-video-hint:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* 视频拷贝进度：后台搬文件时才出现，随时能喊停 */
+.canvas-copy {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  bottom: 52px;
+  width: min(420px, calc(100% - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 97%, transparent);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  transform: translateX(-50%);
+  user-select: none;
+}
+
+.canvas-copy-name {
+  margin: 0 0 9px;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-copy-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  overflow: hidden;
+}
+
+.canvas-copy-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.canvas-copy-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 9px;
+}
+
+.canvas-copy-text {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-copy-cancel {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.canvas-copy-cancel:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.canvas-copy-cancel:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.canvas-item-line,
+.canvas-item-arrow {
+  pointer-events: none;
+}
+
+.canvas-line-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.canvas-line-hit {
+  pointer-events: stroke;
+  cursor: move;
+}
+
+/* 选中框：现在只是一层装把手的壳，自己不画任何东西。
+   块被选中的记号改由四边的端口圈（.canvas-port[data-sel]）来担，单选多选都一样，
+   描边、柔光全废——一堆块并排选中时那一圈线糊成一片，反而看不清哪块进了集合。
+   壳仍然画在块自己身上，跟着块的层级走；inset 由 JS 按块的边框宽度补，把手才贴得住真实外沿。 */
+.canvas-sel-box {
+  position: absolute;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* 挪块途中只藏缩放把手（停下来才用来改大小），端口圈和线端点圈是唯一的选中记号，得跟着块飞 */
+.canvas-stage.is-moving .canvas-handle[data-handle="corner"],
+.canvas-stage.is-moving .canvas-handle[data-handle="edge"] {
+  display: none;
+}
+
+/* 连线端点圆钮：压在端口圈之上，保证端点可拖 */
+.canvas-endpoint-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+/* 拖拽时的对齐辅助线：临时提示，压在所有面板之上，松手就清掉 */
+.canvas-guide-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.canvas-guide {
+  position: absolute;
+}
+
+.canvas-guide-vertical {
+  border-left: 1px dashed var(--accent);
+}
+
+.canvas-guide-horizontal {
+  border-top: 1px dashed var(--accent);
+}
+
+/* 直线/箭头吸角度时的参考线：整条从起点朝两头铺出去，靠 rotate 摆方向 */
+.canvas-guide-angle {
+  height: 0;
+  border-top: 1px dashed var(--accent);
+  transform-origin: 0 0;
+}
+
+/* Alt 测距：临时量尺，画在块之上、顶栏之下，不吃指针 */
+.canvas-measure-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-measure-line {
+  position: absolute;
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.canvas-measure-h {
+  height: 1px;
+}
+
+.canvas-measure-v {
+  width: 1px;
+}
+
+.canvas-measure-h::before,
+.canvas-measure-h::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: var(--accent);
+}
+
+.canvas-measure-h::before {
+  left: 0;
+}
+
+.canvas-measure-h::after {
+  right: 0;
+}
+
+.canvas-measure-v::before,
+.canvas-measure-v::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.canvas-measure-v::before {
+  top: 0;
+}
+
+.canvas-measure-v::after {
+  bottom: 0;
+}
+
+.canvas-measure-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  /* 贴着数字的小底片：不带边框/阴影，内边距只留 1px，
+     15px 的窄缝里也放得下 */
+  padding: 0 1px;
+  border: none;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--fg);
+  font-size: 10.5px;
+  line-height: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.canvas-handle {
+  position: absolute;
+  width: calc(10px * var(--canvas-inv, 1));
+  height: calc(10px * var(--canvas-inv, 1));
+  border: calc(1px * var(--canvas-inv, 1)) solid var(--accent);
+  border-radius: calc(2px * var(--canvas-inv, 1));
+  background: var(--surface);
+  box-shadow: 0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+/* 四个角的把手：看不见但摸得着。方框、底、投影都不画，元素还在原地占着那 10px 热区，
+   所以鼠标挪到块角上照样变斜箭头，照样能拖角改大小——单选的记号只留端口圈，画面干净些。 */
+.canvas-handle[data-handle="corner"] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 四条边也能拖着改大小：一条看不见的窄带，上下改高度、左右改宽度。
+   边中点的端口圈压在它上面，所以那一小圈仍然归拉连线。 */
+.canvas-handle[data-handle="edge"] {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.canvas-handle-n,
+.canvas-handle-s {
+  left: 0;
+  right: 0;
+  width: auto;
+  height: calc(10px * var(--canvas-inv, 1));
+}
+
+.canvas-handle-n {
+  top: 0;
+  transform: translateY(-50%);
+  cursor: ns-resize;
+}
+
+.canvas-handle-s {
+  bottom: 0;
+  transform: translateY(50%);
+  cursor: ns-resize;
+}
+
+.canvas-handle-e,
+.canvas-handle-w {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  width: calc(10px * var(--canvas-inv, 1));
+}
+
+.canvas-handle-e {
+  right: 0;
+  transform: translateX(50%);
+  cursor: ew-resize;
+}
+
+.canvas-handle-w {
+  left: 0;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+
+.canvas-handle-nw {
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  cursor: nwse-resize;
+}
+
+.canvas-handle-ne {
+  right: 0;
+  top: 0;
+  transform: translate(50%, -50%);
+  cursor: nesw-resize;
+}
+
+.canvas-handle-sw {
+  left: 0;
+  bottom: 0;
+  transform: translate(-50%, 50%);
+  cursor: nesw-resize;
+}
+
+.canvas-handle-se {
+  right: 0;
+  bottom: 0;
+  transform: translate(50%, 50%);
+  cursor: nwse-resize;
+}
+
+/* 线/箭头两头的端点圈：和选中态端口圈同一副长相——这俩本来就只在被选中时才画出来。
+   多选一堆线时它们只报「这几根进了集合」，不给人拖，所以 pointer-events 关掉。 */
+.canvas-handle-point {
+  border-radius: 50%;
+  width: calc(13px * var(--canvas-inv, 1));
+  height: calc(13px * var(--canvas-inv, 1));
+  border-color: var(--surface);
+  background: var(--accent);
+  box-shadow:
+    0 0 0 calc(2px * var(--canvas-inv, 1))
+      color-mix(in srgb, var(--accent) 32%, transparent),
+    0 calc(1px * var(--canvas-inv, 1)) calc(3px * var(--canvas-inv, 1)) rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%);
+  cursor: move;
+}
+
+.canvas-handle-point[data-inert] {
+  pointer-events: none;
+}
+
+/* 连线折点：比两端圆圈小一号、空心，和「接在哪条边」的实心端点在视觉上分开。
+   外面一圈透明伪元素把可抓范围放大到 19px，细看是空心的，手感不至于太抠。 */
+.canvas-handle-bend {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--accent);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  cursor: move;
+}
+
+.canvas-handle-bend::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+/* 工具条、缩放、导出都住在标题栏里，排在窗口按钮左边。
+   不放描边、底色和投影，和右边的主题/设置按钮同一种扁平按钮：
+   按钮占满标题栏高度，悬停/选中是整块淡灰底。 */
+.titlebar-tools {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 6px;
+  margin-right: 8px;
+}
+
+/* 组与组之间一条短竖线：工具条 | 缩放 | 导出 | 窗口按钮 */
+.canvas-zoom::before,
+.canvas-actions::before,
+.titlebar-right::before {
+  content: "";
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1px;
+  height: 14px;
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+}
+
+.canvas-zoom::before,
+.canvas-actions::before {
+  margin-right: 6px;
+}
+
+.titlebar-right::before {
+  margin-right: 8px;
+}
+
+.canvas-tools {
+  display: flex;
+  align-items: stretch;
+}
+
+.canvas-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.canvas-tool:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+.canvas-tool.is-active {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
+}
+
+/* 收纳后的「工具」按钮：38×38 里一枚图标；
+   端着工具时图标换成该工具自己的，底色高亮 */
+.canvas-tool-tools {
+  position: relative;
+}
+
+.canvas-tool-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 标题栏矮下来了，图形跟着收一号：内联 17px 的 svg 在这里统一压到 15 */
+.canvas-tool svg {
+  width: 15px;
+  height: 15px;
+}
+
+#settings-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-zoom {
+  display: flex;
+  align-items: stretch;
+}
+
+.canvas-zoom-btn {
+  min-width: 38px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.canvas-zoom-btn:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+.canvas-zoom-value {
+  width: 38px;
+  padding: 0 2px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  cursor: text;
+}
+
+.canvas-zoom-value:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+.canvas-zoom-value:focus {
+  outline: none;
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  color: var(--fg);
+}
+
+.canvas-page.no-canvas .canvas-tools,
+.canvas-page.no-canvas .canvas-zoom,
+.canvas-page.no-canvas .canvas-actions {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* 导出：紧挨在缩放右边，同样是扁平按钮 */
+.canvas-actions {
+  display: flex;
+  align-items: stretch;
+}
+
+.canvas-act {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.canvas-act:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+.canvas-act:active:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+
+/* 到头了就是到头了：灰掉、不吃指针，不给「点了没反应」的错觉 */
+.canvas-act:disabled {
+  opacity: 0.3;
+  cursor: default;
+}

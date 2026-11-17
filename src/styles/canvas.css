@@ -1,0 +1,1270 @@
+/* styles/canvas.css —— 从 styles.css 拆出，入口按原顺序 @import。 */
+
+/* ---------- 无限画布 ---------- */
+.canvas-page {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+}
+
+/* 画布内容整列：顶栏、舞台、空态都相对它定位，左侧树栏占多少宽度它就让多少 */
+.canvas-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 标题栏下面那块：顶栏、搜索、舞台、空态、错误各自的绝对定位都以它为界 */
+.canvas-content {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---------- 左侧画布树 ---------- */
+.space-tree {
+  position: relative;
+  flex: 0 0 auto;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid color-mix(in srgb, var(--line) 25%, transparent);
+  background: color-mix(in srgb, var(--surface) 55%, var(--bg));
+  z-index: 6;
+}
+
+.space-tree[hidden] {
+  display: none;
+}
+
+/* 分类标题：就是树里的普通一行，跟着内容一起滚，不做固定头部 */
+.space-tree-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 6px 5px;
+  cursor: pointer;
+}
+
+.space-tree-section-toggle {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.space-tree-section-toggle svg {
+  transition: transform 0.12s ease;
+}
+
+.space-tree-section.is-open .space-tree-section-toggle svg {
+  transform: rotate(90deg);
+}
+
+.space-tree-section-toggle:hover {
+  color: var(--fg);
+}
+
+.space-tree-section-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.space-tree-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* 面板区和画布区之间一条分隔线，跟着内容滚 */
+.space-tree-section[data-section="panels"] {
+  margin-top: 6px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 32%, transparent);
+}
+
+/* 锁定记号：名字后面一枚小锁，未锁定不占位 */
+.space-tree-lock {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  /* 锁只是状态标记，淡到不抢行文字的视线 */
+  opacity: 0.5;
+}
+
+.space-tree-lock .canvas-metrics-lock {
+  margin: 0;
+  width: 10px;
+  height: 10px;
+}
+
+.space-tree-btn {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.space-tree-btn:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.space-tree-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px 0 10px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
+}
+
+.space-tree-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.space-tree-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.space-tree-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 3px;
+}
+
+
+.space-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+  margin: 0 6px;
+  padding-right: 8px;
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.space-tree-row:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+/* 右键菜单开着时，来源行保持和悬停一样的底色 */
+.space-tree-row.is-context {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.space-tree-row.is-current {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.space-tree-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.space-tree-row.is-group {
+  color: color-mix(in srgb, var(--fg) 82%, var(--muted));
+}
+
+.space-tree-chevron {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+
+.space-tree-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.space-tree-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.space-tree-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+
+.space-tree-hint {
+  padding: 14px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.space-tree-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 7;
+}
+
+.space-tree-resize:hover,
+.space-tree-resize.is-active {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.canvas-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background-color: var(--bg);
+}
+
+/* 主题背景层（宇宙）：压在画布最底下，块和连线都在它上面 */
+.canvas-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.canvas-backdrop[hidden] {
+  display: none;
+}
+
+/* 宇宙主题下纯文字块没有底色，背景会从字后面透出来；给字补一层弱阴影压住 */
+[data-theme="cosmos"] .canvas-item-text .canvas-text-body {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.72);
+}
+
+.canvas-stage.is-panning {
+  cursor: grabbing;
+}
+
+/* Ctrl 按住时的框选：光标变十字，拖出半透明选框；松开恢复 */
+.canvas-stage.is-marquee-ready {
+  cursor: crosshair;
+}
+
+.canvas-marquee {
+  position: fixed;
+  z-index: 40;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+}
+
+/* 从资源管理器拖文件进来时，给画布一圈提示 */
+.canvas-stage.is-file-over::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  pointer-events: none;
+  z-index: 6;
+}
+
+.canvas-stage[data-tool="rect"],
+.canvas-stage[data-tool="ellipse"],
+.canvas-stage[data-tool="line"],
+.canvas-stage[data-tool="arrow"],
+.canvas-stage[data-tool="text"],
+.canvas-stage[data-tool="picture"] {
+  cursor: crosshair;
+}
+
+.canvas-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+/* 连线层：和 world 吃同一套相机变换，固定压在块下面（z-index 0 < world 1） */
+.canvas-edge-layer {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.canvas-edge-visible {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* 选中态：在线条底下垫一条粗光带，而不是把线条本身刷成主题色。
+   之前用 stroke: var(--accent) 覆盖，改颜色/线型时看到的都是主题蓝，看不出真实效果。
+   默认连线现在就走强调色，光带再原样用 accent 等于叠在同色上看不见，
+   所以往主题前景方向压一档：浅色主题下偏深、深色主题下偏浅，总跟线色拉得开。 */
+.canvas-edge-halo {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 70%, var(--fg));
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.canvas-connector.is-selected .canvas-edge-halo {
+  opacity: 0.4;
+}
+
+.canvas-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.canvas-edge-preview {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* 连线中间的文字：位置由 JS 按路径中点摆，用背景色描一圈边，线从字缝里过也不糊 */
+.canvas-edge-label {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.canvas-edge-label-text {
+  font-size: 13px;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  user-select: none;
+}
+
+/* 编辑时文字先藏起来，同一位置换成输入框，免得两层字叠在一起 */
+.canvas-connector.is-label-editing .canvas-edge-label {
+  visibility: hidden;
+}
+
+.canvas-edge-label-input {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, -50%);
+  width: 90px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  line-height: 1.5;
+  text-align: center;
+  outline: none;
+}
+
+/* 连线端口：块身上只留一个 10px 的透明热区；看得见的圆点画在屏幕层的
+   .canvas-port-visual-layer 里，不跟相机缩放走，也不会被缩放糊成横条。 */
+.canvas-port-box {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.canvas-port {
+  position: absolute;
+  /* 热区在屏幕上是 10px；world 被相机缩放了，乘回倒数保持手感不变 */
+  width: calc(10px * var(--canvas-inv, 1));
+  height: calc(10px * var(--canvas-inv, 1));
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.canvas-port[data-side="top"] {
+  left: 50%;
+  top: 0;
+}
+
+.canvas-port[data-side="right"] {
+  left: 100%;
+  top: 50%;
+}
+
+.canvas-port[data-side="bottom"] {
+  left: 50%;
+  top: 100%;
+}
+
+.canvas-port[data-side="left"] {
+  left: 0;
+  top: 50%;
+}
+
+/* 只当记号、不吃鼠标：换到画框/划线工具、以及拖块拖连线的这一会儿 */
+.canvas-port[data-inert] {
+  pointer-events: none;
+}
+
+/* 端口的视觉层：屏幕坐标、不缩放，1px 就是真的 1px */
+.canvas-port-visual-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-port-dot {
+  position: absolute;
+  box-sizing: border-box;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+}
+
+/* 选中态：大一号，外加一道真正的 1px 浅描边和柔光 */
+.canvas-port-dot[data-sel] {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.canvas-item.is-connect-target {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.canvas-stage.is-connecting {
+  cursor: crosshair;
+}
+
+/* 图元 */
+/* 画布上的卡片型面板（笔记/音频/文件/电子书/视频）共用同一套外壳：
+   1px --line 40% 边框、10px 圆角、--surface 底色，一律不投影。 */
+.canvas-item {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+/* 落图抓屏时藏掉不属于面板内容的记号：容器虚线、鸟瞰窗 */
+body.is-screen-capturing .canvas-item.is-container {
+  outline: none !important;
+}
+
+body.is-screen-capturing .canvas-minimap,
+body.is-screen-capturing .canvas-port-visual-layer,
+body.is-screen-capturing .canvas-port,
+body.is-screen-capturing .canvas-sel-box,
+body.is-screen-capturing .canvas-port-box {
+  display: none !important;
+}
+
+/* 分组容器：只是一层虚线框，不吃布局、不改块自己的边框。
+   框里完全装下的块，在拖动这个框的时候会跟着走。 */
+/* 相机只渲染视野附近的块；离得远的先不挂出来 */
+.canvas-item.is-culled {
+  display: none;
+}
+
+.canvas-item.is-container {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 46%, transparent);
+  outline-offset: 4px;
+}
+
+.canvas-item.is-container:hover {
+  outline-color: color-mix(in srgb, var(--accent) 78%, transparent);
+}
+
+/* 锁住的块：块上不再画任何记号，只留右上角一块透明热区，双击解除锁定。
+   锁定标识改由左下角信息条的小锁承担。块自己拖不动，但按住它可以拖整张画布，
+   所以光标给「可抓」而不是普通箭头。内部自带 cursor: move 的拖动头（如电子书头部）
+   也一并改过来，免得指着它还以为能挪这块。 */
+.canvas-item.is-locked,
+.canvas-item.is-locked .canvas-ebook-head {
+  cursor: grab;
+}
+
+/* 真按住拖起来了，锁块上的光标也要跟着进「抓住」状态（父级的 grabbing 被块自己的 cursor 盖住） */
+.canvas-stage.is-panning .canvas-item.is-locked,
+.canvas-stage.is-panning .canvas-item.is-locked .canvas-ebook-head {
+  cursor: grabbing;
+}
+
+.canvas-lock-dot {
+  position: absolute;
+  top: var(--lock-inset, 0px);
+  right: var(--lock-inset, 0px);
+  z-index: 3;
+  display: none;
+  /* 只留热区，不画任何像素 */
+  width: calc(3px + 19px * var(--canvas-inv, 1));
+  height: calc(3px + 19px * var(--canvas-inv, 1));
+  cursor: pointer;
+}
+
+.canvas-item.is-locked .canvas-lock-dot {
+  display: block;
+}
+
+/* 线/箭头的端点圈视觉层：屏幕坐标，圆是真正的圆；块里的同类元素只留热区 */
+.canvas-handle-visual-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-handle-visual {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent),
+    0 1px 3px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%);
+}
+
+/* 线/箭头端点原来的视觉收掉，只保留 13px 热区 */
+.canvas-handle-point.canvas-handle-hit {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 锁住的文字块悬停也不变色；有边框的保持它自己的边框色 */
+.canvas-item-text.is-locked:hover {
+  border-color: transparent;
+}
+
+.canvas-item-text.is-locked.is-bordered:hover {
+  border-color: var(--text-border, color-mix(in srgb, var(--fg) 65%, transparent));
+}
+
+.canvas-item.is-container.is-locked:hover {
+  outline-color: color-mix(in srgb, var(--accent) 46%, transparent);
+}
+
+.canvas-item-rect,
+.canvas-item-ellipse {
+  border: 2px solid var(--canvas-border, #9a9a9a);
+  cursor: move;
+}
+
+.canvas-item-ellipse {
+  border-radius: 50%;
+}
+
+.canvas-item-text {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px;
+  border: 1px dashed transparent;
+  border-radius: 10px;
+  line-height: 1.5;
+  cursor: move;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.canvas-item-text.is-bordered {
+  /* 失焦时也要一眼看出块的范围，1px 太虚；边框默认就是实线 */
+  border-width: 2px;
+  border-style: solid;
+  border-color: var(--text-border, color-mix(in srgb, var(--fg) 65%, transparent));
+}
+
+.canvas-item-text:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.canvas-item-text.is-editing {
+  border-color: var(--accent);
+  border-style: solid;
+  cursor: text;
+}
+
+.canvas-text-body {
+  width: 100%;
+  min-width: 1px;
+  min-height: 21px;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: inherit;
+}
+
+.canvas-item-text.is-editing .canvas-text-body {
+  cursor: text;
+}
+
+/* 画面块：外壳只管边框和圆角，卡片 overflow:hidden 把画面裁进块里。
+   圆角由 js 同步到卡片上，不然裁出来的是直角。 */
+.canvas-item-picture {
+  cursor: default;
+  border: 1px solid var(--canvas-border, #9a9a9a);
+}
+
+.canvas-picture-card {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.canvas-picture-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 场景块：外壳管边框，卡片管裁剪和圆角，view 是 three.js 挂 <canvas> 的宿主。
+   圆角 inherit 而不是再算一遍——块的半径由 js 写在外壳上，继承才不会裁出直角。 */
+.canvas-item-scene {
+  cursor: default;
+  border: 1px solid var(--canvas-border, #9a9a9a);
+}
+
+.canvas-scene-card {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  cursor: default;
+}
+
+.canvas-scene-card.is-orbiting {
+  cursor: grabbing;
+}
+
+.canvas-scene-card.is-panning,
+.canvas-scene-card.is-placing {
+  cursor: move;
+}
+
+/* 摆放模式没有标题 chip 了，用一圈内描边告诉用户「现在左键拖的是家具」 */
+.canvas-scene-card.is-placing {
+  box-shadow: inset 0 0 0 2px var(--accent, #478ce0);
+}
+
+.canvas-scene-selection {
+  position: absolute;
+  border: 1px solid var(--accent, #478ce0);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #478ce0) 18%, transparent);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+body.is-screen-capturing .canvas-scene-selection {
+  visibility: hidden;
+}
+
+
+.canvas-scene-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-scene-gl {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-scene-hint {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-scene-hint[hidden] {
+  display: none;
+}
+
+/* 生图面板：外壳管边框和圆角（和画面/场景同一套），卡片上半截取景、下半截写提示词。
+   取景窗那块底就是「等这一张」的地方：逐步预览一行行铺上来，成品到了整张换下去。 */
+.canvas-item-gen {
+  cursor: default;
+  border: 1px solid var(--canvas-border, #9a9a9a);
+}
+
+.canvas-item-genvideo {
+  cursor: default;
+  border: 1px solid var(--canvas-border, #9a9a9a);
+}
+
+.canvas-gen-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--surface);
+}
+
+.canvas-gen-stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  /* 图的地板：面板再矮也不让取景窗被提示词挤没 */
+  min-height: 160px;
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--bg));
+}
+
+/* 局部重绘的遮罩层：黑底白笔，白的地方出图时会被重画 */
+.canvas-gen-mask {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  opacity: 0.66;
+  /* 只有涂抹模式开着才吃鼠标，否则这一层让开、面板照常能拖 */
+  pointer-events: none;
+}
+
+.canvas-gen-mask.is-active {
+  pointer-events: auto;
+}
+
+.canvas-gen-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* 逐步预览：小图撑满取景窗，看着是同一张在慢慢显影，不是换了张缩略图 */
+.canvas-gen-image.is-preview {
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-gen-image[hidden] {
+  display: none;
+}
+
+/* 那句话浮在取景窗下沿：出图过程中它是唯一在动的字，别把图挤走 */
+.canvas-gen-hint {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--canvas-muted, #8b8b8b);
+  pointer-events: none;
+}
+
+.canvas-gen-hint[hidden] {
+  display: none;
+}
+
+.canvas-gen-hint.is-error {
+  color: var(--danger);
+}
+
+.canvas-gen-bar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+}
+
+/* 档位一行：纯文字说「这张怎么出」，规格跟下面「开始/落块」同一档 */
+/* 参数行：只报档位几个字 */
+.canvas-gen-mode-label {
+  font-size: 12.5px;
+  line-height: 1;
+  color: var(--fg);
+  margin-right: 2px;
+}
+
+.canvas-gen-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.canvas-gen-controls[hidden] {
+  display: none;
+}
+
+/* 进料提示：接了几张输入图、这一张按哪档走。只在真接了图（或明写了要图）时出现 */
+.canvas-gen-feed {
+  margin: 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-gen-prompt-wrap {
+  position: relative;
+}
+
+/* 涂抹、清除、补细节和开始、落块排一行，规格一致 */
+.canvas-gen-brush,
+.canvas-gen-clear,
+.canvas-gen-refine {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.canvas-gen-brush:hover:not(:disabled),
+.canvas-gen-clear:hover:not(:disabled),
+.canvas-gen-refine:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.canvas-gen-brush:disabled,
+.canvas-gen-clear:disabled,
+.canvas-gen-refine:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 涂抹 / 补细节亮着 = 这一档开着；再点一下关掉 */
+.canvas-gen-brush.is-active,
+.canvas-gen-refine.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.canvas-gen-prompt {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 18px;
+  resize: none;
+  /* 高度由 JS 按块高和内容算：够就撑开，块矮了就在框里滚 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+
+.canvas-gen-prompt::-webkit-scrollbar {
+  width: 4px;
+}
+
+.canvas-gen-prompt::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.canvas-gen-prompt::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.canvas-gen-prompt:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+.canvas-gen-prompt::placeholder {
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-gen-prompt:disabled {
+  opacity: 0.5;
+}
+
+/* 视频面板：取景窗换成播放器，参数只有时长和画幅 */
+.canvas-genvideo-stage video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.canvas-genvideo-stage video[hidden] {
+  display: none;
+}
+
+.canvas-genvideo-prompt {
+  min-height: 62px;
+}
+
+/* 参数两行：时长、像素尺寸。都能手改，右边「常用」给出用户认得的档位 */
+.canvas-genvideo-controls {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.canvas-genvideo-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.canvas-genvideo-label {
+  flex: 0 0 auto;
+  width: 28px;
+  font-size: 11.5px;
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-genvideo-input {
+  /* 输入框的固有宽度会撑爆这一行：基准归零，宽度全交给 flex 分 */
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+}
+
+.canvas-genvideo-unit {
+  flex: 0 0 auto;
+  color: var(--canvas-muted, #8b8b8b);
+  font-size: 11.5px;
+}
+
+/* 「秒」落在输入框里：右边留出文字的位置，输入数字不压到它 */
+.canvas-genvideo-seconds {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.canvas-genvideo-seconds .canvas-genvideo-input {
+  flex: 1 1 auto;
+  width: 100%;
+  padding-right: 24px;
+}
+
+.canvas-genvideo-unit-inside {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  color: var(--canvas-muted, #8b8b8b);
+  font-size: 11.5px;
+  pointer-events: none;
+}
+
+.canvas-genvideo-preset {
+  flex: 0 0 auto;
+}
+
+
+
+.canvas-gen-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* 按钮不参与压缩、文字不换行：面板窄时宁可挤弹性空位，也不能把「隐藏更多设置」折成两行 */
+.canvas-gen-actions > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 更多设置：面板内展开的参数表，两列紧凑排；值都就地改、失焦即存 */
+.canvas-gen-more {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+.canvas-gen-more[hidden] {
+  display: none;
+}
+
+.canvas-gen-more-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--canvas-muted, #8b8b8b);
+}
+
+.canvas-gen-more-row.is-wide {
+  grid-column: 1 / -1;
+}
+
+.canvas-gen-more-row > span {
+  flex: 0 0 auto;
+}
+
+.canvas-gen-more-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 11.5px;
+}
+
+textarea.canvas-gen-more-input {
+  height: auto;
+  padding: 4px 6px;
+  resize: none;
+  line-height: 15px;
+}
+
+.canvas-gen-more-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.canvas-gen-more-size .canvas-gen-more-input {
+  width: 0;
+}
+
+.canvas-gen-more-size > span {
+  flex: 0 0 auto;
+}
+
+.canvas-gen-more-size-preset {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.canvas-gen-more-size-preset:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
+}
+
+.canvas-gen-more-tip {
+  grid-column: 1 / -1;
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+/* 走 API 时本地参数整行撤掉，只留尺寸；顶部一句话说清发的是什么 */
+.canvas-gen-more.is-api .is-local-only {
+  display: none;
+}
+
+.canvas-gen-more-api {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.canvas-gen-more-api[hidden] {
+  display: none;
+}
+
+.canvas-gen-more-check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.canvas-gen-more-check:disabled {
+  opacity: 0.35;
+}
+
+.canvas-gen-more-toggle,
+.canvas-gen-more-reset {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* 更多设置和恢复默认挨在左侧，开始/落块靠右 */
+.canvas-gen-spacer {
+  flex: 1 1 auto;
+}
+
+.canvas-gen-more-toggle:hover,
+.canvas-gen-more-reset:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+
+.canvas-gen-more-toggle.is-open {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
+}
+
+/* 两颗钮照弹层里那套规格：开始走强调色，落块是描边次要钮 */
+.canvas-gen-run,
+.canvas-gen-place {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.canvas-gen-place:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.canvas-gen-run {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.canvas-gen-run:hover {
+  background: color-mix(in srgb, var(--accent) 82%, var(--fg));
+}
+
+.canvas-gen-run:disabled,
+.canvas-gen-place:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+/* 落笔时指针换成十字，一眼看出这一下是画还是挪块 */
+.canvas-item-picture.is-painting .canvas-picture-svg {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.canvas-picture-preview {
+  pointer-events: none;
+}
+
+/* 笔记块：阅读态直接复用 .md-body 的 Markdown 排版 */
+.canvas-item-note {
+  cursor: move;
+}
+
+.canvas-note-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.canvas-note-body {
+  border-radius: 10px;
+  background: var(--surface);
+}

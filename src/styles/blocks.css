@@ -1,0 +1,227 @@
+/* styles/blocks.css —— 从 styles.css 拆出，入口按原顺序 @import。 */
+
+/* ---------- 产品 / 材料卡 ---------- */
+.canvas-item-product,
+.canvas-item-quote {
+  cursor: move;
+}
+
+.canvas-product-card {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.canvas-product-media {
+  flex: 0 0 38%;
+  min-width: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+
+.canvas-product-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.canvas-product-noimg {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+.canvas-product-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+}
+
+.canvas-product-name {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-product-meta,
+.canvas-product-spec {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-product-dot {
+  margin: 0 4px;
+}
+
+.canvas-product-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.canvas-product-price {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-product-qty {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 就地编辑：占满那一格，只用一条强调色下划线提示在改 */
+.canvas-product-edit,
+.canvas-quote-edit {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
+.canvas-product-edit[data-field="price"],
+.canvas-product-edit[data-field="qty"] {
+  width: 72px;
+}
+
+/* ---------- 清单 ---------- */
+.canvas-quote-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.canvas-quote-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+.canvas-quote-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.canvas-quote-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.canvas-quote-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.canvas-quote-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.1fr) 84px 52px 92px;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 14px;
+  min-height: 26px;
+}
+
+.canvas-quote-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-quote-row > span:nth-child(n + 3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-quote-row.is-head {
+  color: var(--muted);
+  font-size: 11px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.canvas-quote-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
+}
+
+.canvas-quote-rows::-webkit-scrollbar {
+  width: 6px;
+}
+
+.canvas-quote-rows::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.canvas-quote-rows::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 3px;
+}
+
+.canvas-quote-row:not(.is-head):nth-child(even) {
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
+.canvas-quote-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.canvas-quote-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+  font-size: 12px;
+}
+
+.canvas-quote-total-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,176 @@
+/* styles/base.css —— 从 styles.css 拆出，入口按原顺序 @import。 */
+
+/* 尺寸与色值取自 UX/首页.png 的像素实测（设计稿 2560×1600，按 2x 折算为逻辑 px）。 */
+:root {
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+
+  /* ---- 主题色板兜底值：theme.js 在首帧前就按选中的主题覆盖掉（默认「雪白」）。
+     这里留一套深色的，是为了 theme.js 没跑起来时页面仍可读。 ---- */
+  --bg: #000000; /* 页面底 */
+  --surface: #141414; /* 浮层/菜单底 */
+  --surface-2: #0d0d0d; /* 输入框等更深的凹陷面 */
+  --fg: #ffffff; /* 主文字 */
+  --muted: #8a8a8a; /* 次要文字 */
+  --line: #bfbfbf; /* 线框描边 */
+  --accent: #7aa2ff; /* 强调色：焦点、选中、拖动高亮 */
+  --accent-fg: #0b0e14; /* 强调色上的文字 */
+  --danger: #ff6b60; /* 危险操作 */
+
+  --titlebar-h: 38px;
+  --label-h: 36px; /* 标签行高 72 设计 px */
+  --pad-x: 9px; /* 内容左边距 */
+
+  color: var(--fg);
+  background: var(--bg);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* display:flex 会盖掉 hidden 属性的 UA 样式，路由切页时必须靠这条隐藏视图 */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---------- 自绘标题栏 ---------- */
+/* 标题栏只属于画布这一列：左边整列让给画布树，树从窗口上沿开始 */
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: var(--titlebar-h);
+  flex: 0 0 var(--titlebar-h);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: no-drag;
+}
+
+/* F10 收起软件头部：标题栏不占位，画布/设置直接顶到窗口上沿 */
+body.is-titlebar-hidden .titlebar {
+  display: none;
+}
+
+.titlebar-right {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+/* 画布路径 + 选中面板：住在标题栏左半边，太长就省略；文字能选中复制 */
+.titlebar-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  margin-right: auto;
+  padding: 0 12px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 画布栏收起按钮：住在标题栏最左端，和窗口按钮同一套扁平样式 */
+.titlebar-side-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 100%;
+  margin-right: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.titlebar-side-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+/* 收起后侧栏那块实心条淡掉，再点一下展开 */
+.titlebar-side-bar {
+  transition: opacity 0.15s ease;
+}
+
+.titlebar-side-toggle.is-collapsed .titlebar-side-bar {
+  opacity: 0.15;
+}
+
+.caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.caption:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+.caption:active {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.caption-close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+
+.icon-restore {
+  display: none;
+}
+
+#win-max.is-maximized .icon-maximize {
+  display: none;
+}
+
+#win-max.is-maximized .icon-restore {
+  display: block;
+}

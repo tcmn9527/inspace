@@ -1,7 +1,6 @@
 /* 从 canvas.js 拆出：scene-tools */
 
-import { CLOSE_X_SVG, active, agentRequireItem, agentRequireSpace, agentSummary, contentBox, current, exportPartsGLB, exportSceneGLB, itemEls, makeScene, moveSceneFurnitureParts, newId, normalizeLight, normalizeSceneCamera, normalizeSceneParts, normalizeSceneSurfaces, openMenu, persistScene, placeBlock, renderModelThumbnail, sceneCameraState, sceneFurnitureGroup, sceneFurnitureInspect, sceneFurnitureMoveDelta, scenePatch, scenePlacementActive, scheduleItemsSave, select, setSceneFurnitureSelection, setScenePlacementMode, showError, showToast, syncItemElement } from "../canvas.js";
-import * as store from "../canvas-store.js";
+import { CLOSE_X_SVG, active, agentRequireItem, agentRequireSpace, agentSummary, contentBox, current, exportPartsGLB, exportSceneGLB, itemEls, makeScene, moveSceneFurnitureParts, newId, normalizeLight, normalizeSceneCamera, normalizeSceneParts, normalizeSceneSurfaces, openMenu, persistScene, placeBlock, renderModelThumbnail, sceneCameraState, sceneFurnitureGroup, sceneFurnitureInspect, sceneFurnitureMoveDelta, scenePatch, scenePlacementActive, scheduleItemsSave, select, setSceneFurnitureSelection, setScenePlacementMode, showError, showToast, store, syncItemElement } from "../canvas.js";
 
 /* ---------- 3D 房间壳 / 灯光 / 机位 ---------- */
 

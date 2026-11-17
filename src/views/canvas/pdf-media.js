@@ -1,7 +1,6 @@
 /* 从 canvas.js 拆出：PDF / 电子书 / 媒体块的 agent 接口 */
 
-import { agentHighlight, agentRequireItem, agentSummary, clamp, current, itemEls, numOr } from "../canvas.js";
-import * as store from "../canvas-store.js";
+import { agentHighlight, agentRequireItem, agentSummary, clamp, current, itemEls, numOr, store } from "../canvas.js";
 
 /* ---------- PDF / 电子书 / 媒体 ---------- */
 

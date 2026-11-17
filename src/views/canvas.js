@@ -44,6 +44,17 @@ import { openImageCompare } from "./image-compare.js";
 import { createExporter, QUALITY, DEFAULT_QUALITY } from "./export.js";
 import { rasterize, toPngDataUrl } from "./raster.js";
 import * as store from "./canvas-store.js";
+export { applyGenFields };
+import { agentFileOf, agentFileRead, agentFileWrite, agentGenCancel, agentGenFamily, agentGenOf, agentGenPlace, agentGenRun, agentGenStatus, agentGenVideo, agentGenVideoCancel, agentGenVideoStatus, agentNoteOf, agentNoteRead, agentNoteWrite, agentOpenImage, agentRevealFile, applyGenFields, waitGenRun } from "./canvas/gen-agent.js";
+export { GEN_CFG_MAX, GEN_MODES, GEN_STEPS_MAX, dropVideoRun, genEngine, genInputItems, genInputPng, genModeFor, placeGenImage, revealTarget, runOrStopGen, snapGenSize, stopGen, videoBusyId };
+import { agentImportFile, agentPictureDraw, agentPictureGet, agentPictureLayers, agentPictureLight, agentPictureOf, mergePictureSymbols, pictureFaceCount, pictureLayersOf, pictureSymbolUses, pictureWashed, rejectFatalDrop, resolvePictureImages } from "./canvas/files-content.js";
+export { PICTURE_MAX_CMDS, PICTURE_MAX_EXPANDED, addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addVideoBlock, normalizeHidden, normalizePictureCmds, normalizePictureSymbols, pictureImageSrc, pictureLayerCensus, pictureTopLayers };
+import { GEN_SIZE_PRESETS, applyGenDefaultsToItem, applySizePreset, attachGenPanel, genApiWatchBound, genDefaultsCache, genDefaultsTimer, genEffective, genEngine, genFamily, genFamilyWatchBound, genFeedOf, genInputItems, genInputPng, genModeFor, keepLastGenImage, loadGenDefaults, onGenDone, otherGenBlocked, paintGenMore, placeGenImage, refreshGenDefaults, refreshGenFeeds, refreshGenPanel, refreshGenRunButtons, runOrStopGen, saveGenDefaults, setupGenEvents, setupVideoEvents, shiftBlocksForPlace, startGenRun, stopGen, switchGenFamily, watchGenApi, watchGenFamily } from "./canvas/gen-defaults.js";
+export { GEN_MIN_HEIGHT, GEN_MODE_LABELS, GEN_TEXT_MAX, dropGenRun, fitImageSize, genBusyId, genRunOf, makeImage, onGenRunChange, patchGenRun, patchVideoRun, syncGen, toPngDataUrl, videoRunOf };
+import { agentPlanArea, agentPlanCalibrate, agentPlanPlaceCamera, agentPlanPlaceProduct, agentPlanRemove, attachPlanBlock, cancelPlanCalibration, finishPlanCalibration, placeProductOnPlanFlow, planAddArea, planAreaOf, planCalibration, planCardOf, planDefaultPoint, planPlaceCamera, planPlaceProduct, planRemove, startPlanCalibration } from "./canvas/floorplan.js";
+export { planPixelsPerMm, promptDialog, setSceneCameraPreset };
+import { FURNITURE_COLORS, SCENE_LIGHT_PRESETS, addSceneFloor, addSceneModel, addSceneModelFlow, agentSceneApplyMaterial, agentSceneCameraPreset, agentSceneFurnitureBind, agentSceneFurnitureMove, agentSceneGet, agentSceneLightPreset, agentScenePlaceProduct, agentSceneRoomShell, agentSceneSurfaceSet, applyFurniture, bufferToBase64, buildFurnitureParts, createFurnitureFlow, editableScene, exportSceneFlow, modelThumbCache, modelThumbnail, newSceneForProduct, openFurnitureDialog, pickProductModel, placeProductInScene, placeProductInSceneFlow, roomShellParts, roomShellSurfaces, saveSceneFurniture, sceneLightOf, sceneSurfacesOf, sceneView, setSceneCameraPreset } from "./canvas/scene-tools.js";
+export { CLOSE_X_SVG, contentBox, exportPartsGLB, exportSceneGLB, makeScene, moveSceneFurnitureParts, newId, normalizeLight, normalizeSceneParts, normalizeSceneSurfaces, openMenu, renderModelThumbnail, sceneFurnitureGroup, sceneFurnitureInspect, sceneFurnitureMoveDelta, scenePlacementActive, setScenePlacementMode };
 export { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, beginSceneFurnitureDrag, fileBlockSize, makeAudio, makeEbook, makeFile, makeNote, makeProduct, makeVideo, normalizeSceneCamera, refreshQuoteCard, sceneCameraState, sceneFurnitureDragDelta, scenePick, setSceneFurnitureSelection, syncItemElement };
 import { CSV_HEADER_ALIASES, addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addVideoBlock, askInsertMode, attachProductCard, attachQuoteCard, attachSceneControls, bytesToBase64, changeProductImage, csvAmount, csvCell, csvColumnIndex, exportQuote, importCsvFromQuote, importProductsFromCsv, inlineEditField, moveSceneFurnitureParts, normalizeCsvHeader, parseCsvText, placeMarkdownFile, placeVideo, productItems, refreshQuotes, resolveCsvImagePath, revealFileBlock, revealTarget, sceneFurnitureGroup, scenePlacementActive, setScenePlacementMode, startProductFieldEdit } from "./canvas/inventory.js";
 export { choiceDialog, store };
@@ -235,14 +246,14 @@ const RESIZE_MIN = {
   genvideo: { w: GEN_VIDEO_MIN_WIDTH, h: GEN_VIDEO_MIN_HEIGHT },
 };
 const NOTE_EDITOR_GUARDS = ".canvas-note-editor, .color-pop, #ctx-menu";
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
-const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "opus", "weba"]);
+export const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
+export const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "opus", "weba"]);
 /* 浏览器能解的容器：不在列表里的也能拖进来，但只能按引用播，交给浏览器试 */
-const VIDEO_EXTS = new Set(["mp4", "m4v", "webm", "mkv", "mov"]);
+export const VIDEO_EXTS = new Set(["mp4", "m4v", "webm", "mkv", "mov"]);
 /* Markdown 不当附件看待：拖进来抄成正文，直接变成一个能编辑的笔记块 */
 const MARKDOWN_EXTS = new Set(["md", "markdown"]);
 /* epub/mobi 能就地在画布上读；azw/azw3 这一版读不了，仍旧按附件收进来 */
-const EBOOK_EXTS = new Set(["epub", "mobi"]);
+export const EBOOK_EXTS = new Set(["epub", "mobi"]);
 
 export const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -253,9 +264,9 @@ let canvases = [];
 export let current = null; // { meta, camera, items }
 /* 选中的块：平时点选只会有一个，Ctrl 点选往里加/摘，Ctrl+A 全往里倒 */
 let selectedIds = new Set();
-let editingId = null;
+export let editingId = null;
 /* 连线中间文字的编辑态 { itemId, el, input, point, original } */
-let edgeLabelEditor = null;
+export let edgeLabelEditor = null;
 let tool = "select";
 let drag = null;
 export let itemEls = new Map();
@@ -274,8 +285,8 @@ let videoCache = new Map();
 let noteImageCache = new Map();
 /* 文本块只读预览：缓存后端解好码的开头一段，切画布就清空重来。
    键带上存在方式，免得同一个路径的拷贝态和引用态串了。 */
-let filePreviewCache = new Map();
-const previewKey = (item) => `${item.linked ? "L" : "C"}|${item.src}`;
+export let filePreviewCache = new Map();
+export const previewKey = (item) => `${item.linked ? "L" : "C"}|${item.src}`;
 /* PDF 块的 asset 地址：一份文件问后端一次（顺带开的那次读权限也就够了），
    翻页和拖角缩放重画都复用这条地址 */
 let pdfUrlCache = new Map();
@@ -338,7 +349,7 @@ const rawExporter = createExporter({
 });
 
 /* 导出/截图要看到整张画布，先把视口裁剪暂时松开，克隆完再按视口收回去 */
-const exporter = {
+export const exporter = {
   ...rawExporter,
   exportAs: (...args) => withAllVisible(() => rawExporter.exportAs(...args)),
   exportSlices: (...args) => withAllVisible(() => rawExporter.exportSlices(...args)),
@@ -2384,7 +2395,7 @@ function syncConnector(item) {
 }
 
 /* 连线本身没有坐标，块一动就得重算一遍 */
-function refreshConnectors() {
+export function refreshConnectors() {
   if (!current) return;
   for (const item of current.items) {
     if (item.type === "connector") syncConnector(item);
@@ -2721,7 +2732,7 @@ function lightOrDay(item) {
   return got.light || normalizeLight(SCENE_LIGHT_PRESETS.day).light;
 }
 
-function scenePatch(item, patch, options = {}) {
+export function scenePatch(item, patch, options = {}) {
   if (item.locked) {
     showError("场景已锁定，先解锁再改");
     return;
@@ -3275,7 +3286,7 @@ function updateMetrics() {
   ui.metrics.innerHTML = `${lock}${seq ? `${seq} · ` : ""}${pos} ${size}${count}`;
 }
 
-function updateSelection() {
+export function updateSelection() {
   if (!ui) return;
   syncTreeSelection();
   refreshTitlebarPath();
@@ -4735,7 +4746,7 @@ function portTargets() {
   return out.map((t) => ({ ...t, marksOnly }));
 }
 
-function updatePorts() {
+export function updatePorts() {
   if (!ui?.world) return;
   for (const stale of ui.world.querySelectorAll(".canvas-port-box")) stale.remove();
   if (ui.portVisualLayer) ui.portVisualLayer.textContent = "";
@@ -5080,7 +5091,7 @@ function openImageByDoubleClick(e, item) {
   return true;
 }
 
-function openImageExternally(item) {
+export function openImageExternally(item) {
   const canvasId = current?.meta?.id;
   if (!canvasId) return Promise.resolve();
   /* 块上的路径可能还没落盘（生图刚出完那一下），先把这笔存下去，后端才认得 */
@@ -5966,7 +5977,7 @@ function setConnectorProp(item, prop, value) {
   scheduleItemsSave();
 }
 
-function applyColor(item, prop, color) {
+export function applyColor(item, prop, color) {
   item[prop] = color;
   /* 文字块的边框随颜色开关：选了颜色才显示边框，选「透明」就去掉 */
   if (item.type === "text" && prop === "borderColor") {
@@ -6250,7 +6261,7 @@ function onTextBlur() {
   if (editingId || edgeLabelEditor) commitEditing();
 }
 
-function commitEditing() {
+export function commitEditing() {
   if (edgeLabelEditor) commitEdgeLabelEdit();
   if (!editingId) return;
   const editing = findItem(editingId);
@@ -6302,7 +6313,7 @@ function scheduleContentWrite(timers, key, write) {
   );
 }
 
-function persistNote(item) {
+export function persistNote(item) {
   if (!current || item.type !== "note" || item.linked) return;
   const canvasId = current.meta.id;
   scheduleContentWrite(noteTimers, item.id, () => {
@@ -6314,7 +6325,7 @@ function persistNote(item) {
 
 /* 画面的指令和素材表只认 pictures/<块id>.json 那一份：items.json 里没有它们，
    块自己的笔画撤销管的是画笔那层栈，和这儿无关。 */
-function persistPicture(item) {
+export function persistPicture(item) {
   if (!current || item.type !== "picture") return;
   const canvasId = current.meta.id;
   scheduleContentWrite(pictureTimers, item.id, () => {
@@ -6337,7 +6348,7 @@ export function persistScene(item) {
 
 /* 面板写的那句话和那几个参数只认 genpanels/<块id>.json 那一份；
    出的那张图不在这一份里：它和 img 块一样是 images/ 里的真文件，路径记在块上。 */
-function persistGen(item) {
+export function persistGen(item) {
   if (!current || item.type !== "gen") return;
   const canvasId = current.meta.id;
   scheduleContentWrite(genTimers, item.id, () => {
@@ -6475,7 +6486,7 @@ async function loadBlockContents() {
    这儿只负责起一轮和收事件；面板上不摆「保存」——图一落成就自己进 images/，
    点「落块」才在外面另摆一张独立图片块。 */
 
-const GEN_PLACE_GAP = 24;
+export const GEN_PLACE_GAP = 24;
 
 /* 这个路径还有谁指着（独立图片块、别的面板、画面块垫的位图都算一份）：
    回收旧图之前问一句，有人指着的就别动 */
@@ -6491,23 +6502,23 @@ export const srcInUse = (src) =>
 /* ---------- 局部重绘：遮罩层 ----------
    每块一张 512×512 的黑底画布，白笔迹 = 要重绘的地方；出图时整张当 mask 传给引擎。 */
 const GEN_MASK_SIZE = 512;
-const genMaskBases = new Map(); // 块 id -> 取景窗里垫的底图地址
+export const genMaskBases = new Map(); // 块 id -> 取景窗里垫的底图地址
 /* 块 id -> 涂抹模式开着没有：开着遮罩层才吃鼠标，关着就能拖面板 */
-const genMaskModes = new Map();
+export const genMaskModes = new Map();
 /* agent 临时递过来的遮罩（base64），只在下一张用一次 */
-const genRunMasks = new Map();
+export const genRunMasks = new Map();
 let maskPainting = null;
 
-function applyGenMaskMode(el, id, on) {
+export function applyGenMaskMode(el, id, on) {
   genMaskModes.set(id, on);
   genMaskCanvasOf(el)?.classList.toggle("is-active", on);
 }
 
-function genMaskCanvasOf(el) {
+export function genMaskCanvasOf(el) {
   return el?.querySelector(".canvas-gen-mask") || null;
 }
 
-function resetGenMask(canvas) {
+export function resetGenMask(canvas) {
   canvas.width = GEN_MASK_SIZE;
   canvas.height = GEN_MASK_SIZE;
   const ctx = canvas.getContext("2d");
@@ -6515,7 +6526,7 @@ function resetGenMask(canvas) {
   ctx.fillRect(0, 0, GEN_MASK_SIZE, GEN_MASK_SIZE);
 }
 
-function attachGenMask(el, item) {
+export function attachGenMask(el, item) {
   const canvas = genMaskCanvasOf(el);
   if (!canvas || canvas.dataset.ready) return;
   canvas.dataset.ready = "1";
@@ -6559,7 +6570,7 @@ function attachGenMask(el, item) {
 }
 
 /* 局部重绘面板的底图：连线过来的第一张图；没有就清掉 */
-async function refreshGenMaskBase(item) {
+export async function refreshGenMaskBase(item) {
   if (!current) return;
   const mode = genModeFor(item, genInputItems(item).length);
   const source = mode === "inpaint" ? genInputItems(item)[0] : null;
@@ -6591,7 +6602,7 @@ async function refreshGenMaskBase(item) {
    面板再矮也要给图留这么高，提示词在它自己的框里滚。 */
 const GEN_STAGE_MIN_HEIGHT = 160;
 
-function fitGenPrompt(itemId, prompt, grow = false) {
+export function fitGenPrompt(itemId, prompt, grow = false) {
   const item = findItem(itemId);
   const el = itemEls.get(itemId);
   if (!item || !prompt || !el) return;
@@ -6616,828 +6627,6 @@ function fitGenPrompt(itemId, prompt, grow = false) {
   prompt.style.overflowY = want > height ? "auto" : "hidden";
 }
 
-/* ---------- 生图面板的参数默认值（每模型一套） ---------- */
-
-const genDefaultsCache = new Map();
-let genFamily = "qwen21";
-/* 生图引擎走哪条路：local 用本地权重，api 发远端。API 模式下本地参数不生效，
-   面板上要撤掉它们；尺寸仍然有用。 */
-let genEngine = { provider: "local", apiModel: "" };
-
-async function loadGenDefaults(family) {
-  const value = await store.genDefaults(family).catch(() => null);
-  if (value) genDefaultsCache.set(family, value);
-  return value;
-}
-
-async function refreshGenDefaults() {
-  const status = await store.genStatus().catch(() => null);
-  if (status?.family) genFamily = status.family;
-  if (status?.provider) {
-    genEngine = { provider: status.provider, apiModel: status.apiModel || "" };
-  }
-  if (status?.defaults) genDefaultsCache.set(genFamily, status.defaults);
-  const other = genFamily === "qwen21" ? "h3image" : "qwen21";
-  loadGenDefaults(other);
-  /* 引擎换了（本地 ↔ API）：并行规则跟着换，把面板的开始按钮重排一遍 */
-  refreshGenRunButtons();
-}
-
-/* 新建面板：把当前模型那套默认参数带上，用户不用每块重新设。 */
-function applyGenDefaultsToItem(item) {
-  const family = genFamily;
-  const value = genDefaultsCache.get(family);
-  item.model = family;
-  if (!value) return item;
-  item.imageW = value.width;
-  item.imageH = value.height;
-  item.steps = value.steps;
-  item.cfg = value.cfg;
-  item.seed = value.seed;
-  item.mode = value.mode;
-  item.strength = value.strength;
-  item.negative = value.negative || "";
-  item.refine = Boolean(value.refine);
-  return item;
-}
-
-/* 面板上改的值同时记成该模型的新建默认（其它已有面板不动）。 */
-let genDefaultsTimer = 0;
-function saveGenDefaults(item) {
-  clearTimeout(genDefaultsTimer);
-  genDefaultsTimer = setTimeout(() => {
-    const family = item.model === "h3image" || item.model === "qwen21" ? item.model : genFamily;
-    const fallback = genDefaultsCache.get(family) || {};
-    const value = {
-      width: item.imageW,
-      height: item.imageH,
-      steps: item.steps > 0 ? item.steps : fallback.steps ?? 30,
-      cfg: item.cfg > 0 ? item.cfg : fallback.cfg ?? 6,
-      seed: item.seed,
-      mode: item.mode,
-      strength: item.strength,
-      negative: item.negative || "",
-      refine: Boolean(item.refine),
-    };
-    genDefaultsCache.set(family, value);
-    store.genDefaultsSet(value, family).catch(() => {});
-  }, 400);
-}
-
-/* 面板里显示的实际生效值：0 是「跟模型走」，用该模型默认补齐。 */
-function genEffective(item, field, fallback) {
-  const value = item[field];
-  if (field === "steps" || field === "cfg") return value > 0 ? value : fallback;
-  return value;
-}
-
-function paintGenMore(item, el) {
-  const more = el.querySelector(".canvas-gen-more");
-  if (!more) return;
-  /* 走 API：本地参数（模型档位、步数、CFG、种子、负向、改动幅度）整行撤掉，
-     只留尺寸；顶部一行说清这一张走的是哪个 API 模型。 */
-  const usingApi = genEngine.provider === "api";
-  more.classList.toggle("is-api", usingApi);
-  const apiNote = more.querySelector(".canvas-gen-more-api");
-  if (apiNote) {
-    apiNote.hidden = !usingApi;
-    apiNote.textContent = usingApi
-      ? `走 API${genEngine.apiModel ? `（${genEngine.apiModel}）` : ""}：只发提示词、尺寸和参考图`
-      : "";
-  }
-  const family = item.model === "h3image" || item.model === "qwen21" ? item.model : genFamily;
-  const fallback = genDefaultsCache.get(family) || {};
-  const set = (field, value) => {
-    const control = more.querySelector(`[data-gen-field="${field}"]`);
-    if (!control || document.activeElement === control) return;
-    if (control.type === "checkbox") control.checked = Boolean(value);
-    else control.value = value ?? "";
-  };
-  set("model", family);
-  set("imageW", item.imageW);
-  set("imageH", item.imageH);
-  set("steps", genEffective(item, "steps", fallback.steps ?? 30));
-  set("cfg", genEffective(item, "cfg", fallback.cfg ?? 6));
-  set("seed", item.seed);
-  set("strength", item.strength);
-  set("negative", item.negative || "");
-  /* 改动幅度只对图生图/局部重绘有意义：其它模式（含 H3 的全部模式）这一行不摆 */
-  const effectiveMode = genModeFor(item, genInputItems(item).length);
-  const strengthRow = more.querySelector('[data-gen-field="strength"]')?.closest(".canvas-gen-more-row");
-  if (strengthRow) {
-    strengthRow.hidden = effectiveMode !== "i2i" && effectiveMode !== "inpaint";
-  }
-  /* 高清放大只吃「输入图 + 放大权重」：模型、尺寸、步数、CFG、种子、负向都不参与，
-     摆在这里只会让人以为调了有用。整行撤掉，连「更多设置」入口一起撤。 */
-  const upscale = effectiveMode === "upscale";
-  for (const field of ["model", "imageW", "imageH", "steps", "cfg", "seed", "negative"]) {
-    const row = more.querySelector(`[data-gen-field="${field}"]`)?.closest(".canvas-gen-more-row");
-    if (row) row.hidden = upscale;
-  }
-  const seedTip = more.querySelector(".canvas-gen-more-tip");
-  if (seedTip) seedTip.hidden = upscale;
-  const moreToggle = el.querySelector(".canvas-gen-more-toggle");
-  if (moreToggle) moreToggle.hidden = upscale;
-  /* 补细节只在「高清放大」这一档有意义（放大后按提示词重绘一遍）。
-     文生图、编辑、局部重绘都不读这个开关，H3 的放大也不支持重绘，都不显示。 */
-  const refineButton = el.querySelector(".canvas-gen-refine");
-  if (refineButton) refineButton.hidden = !upscale || family === "h3image";
-}
-
-/* 常用尺寸：宽高都是 32 的倍数；超出当前模型边长上限的项在菜单里自动过滤 */
-const GEN_SIZE_PRESETS = [
-  {
-    label: "1K",
-    items: [
-      { label: "1:1 · 1024×1024", w: 1024, h: 1024 },
-      { label: "3:4 · 896×1152", w: 896, h: 1152 },
-      { label: "4:3 · 1152×896", w: 1152, h: 896 },
-      { label: "9:16 · 768×1344", w: 768, h: 1344 },
-      { label: "16:9 · 1344×768", w: 1344, h: 768 },
-      { label: "2:3 · 832×1248", w: 832, h: 1248 },
-      { label: "3:2 · 1248×832", w: 1248, h: 832 },
-    ],
-  },
-  {
-    label: "手机壁纸",
-    items: [
-      { label: "1080p 手机 · 1088×1920", w: 1088, h: 1920 },
-      { label: "2K 手机 · 1440×2560", w: 1440, h: 2560 },
-      { label: "16MP 竖屏 · 2304×4096", w: 2304, h: 4096 },
-    ],
-  },
-  {
-    label: "电脑壁纸",
-    items: [
-      { label: "1080p · 1920×1088", w: 1920, h: 1088 },
-      { label: "2K · 2560×1440", w: 2560, h: 1440 },
-      { label: "16MP 横屏 · 4096×2304", w: 4096, h: 2304 },
-    ],
-  },
-  {
-    label: "方形",
-    items: [
-      { label: "1024 × 1024", w: 1024, h: 1024 },
-      { label: "2048 × 2048", w: 2048, h: 2048 },
-      { label: "16MP · 4096×4096", w: 4096, h: 4096 },
-    ],
-  },
-  {
-    label: "海报 / 竖版",
-    items: [
-      { label: "2:3 · 1024×1536", w: 1024, h: 1536 },
-      { label: "2:3 大图 · 2048×3072", w: 2048, h: 3072 },
-      { label: "4:5 · 1024×1280", w: 1024, h: 1280 },
-    ],
-  },
-  {
-    label: "超宽",
-    items: [
-      { label: "21:9 · 2560×1088", w: 2560, h: 1088 },
-      { label: "21:9 大图 · 4096×1728", w: 4096, h: 1728 },
-    ],
-  },
-];
-
-function applySizePreset(item, preset) {
-  if (!applyGenFields(item, { imageW: preset.w, imageH: preset.h })) return;
-  persistGen(item);
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  refreshGenPanel(item.id);
-  saveGenDefaults(item);
-}
-
-/* 面板里换模型：块上那套参数跟着换成目标模型的默认值。 */
-async function switchGenFamily(item, family) {
-  let value = genDefaultsCache.get(family);
-  if (!value) value = await loadGenDefaults(family);
-  const patch = { model: family };
-  if (value) {
-    patch.imageW = value.width;
-    patch.imageH = value.height;
-    patch.steps = value.steps;
-    patch.cfg = value.cfg;
-    patch.seed = value.seed;
-    patch.mode = value.mode;
-    patch.strength = value.strength;
-    patch.negative = value.negative || "";
-    patch.refine = Boolean(value.refine);
-  }
-  if (!applyGenFields(item, patch)) return;
-  persistGen(item);
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  refreshGenPanel(item.id);
-}
-
-let genFamilyWatchBound = false;
-function watchGenFamily() {
-  if (genFamilyWatchBound) return;
-  const listen = window.__TAURI__?.event?.listen;
-  if (typeof listen !== "function") return;
-  genFamilyWatchBound = true;
-  listen("inspace:gen-family", (event) => {
-    const next = event.payload?.family;
-    if (next !== "qwen21" && next !== "h3image") return;
-    genFamily = next;
-    if (!genDefaultsCache.has(next)) loadGenDefaults(next);
-  }).catch(() => {});
-}
-
-/* 设置里切了「本地 / API」：重读状态，再把每块面板的档位行和更多设置刷一遍。 */
-let genApiWatchBound = false;
-function watchGenApi() {
-  if (genApiWatchBound) return;
-  const listen = window.__TAURI__?.event?.listen;
-  if (typeof listen !== "function") return;
-  genApiWatchBound = true;
-  listen("inspace:gen-api", () => {
-    void refreshGenDefaults().then(() => refreshGenFeeds());
-  }).catch(() => {});
-}
-
-function attachGenPanel(el, item) {
-  const bar = el.querySelector(".canvas-gen-bar");
-  const prompt = el.querySelector(".canvas-gen-prompt");
-  const runButton = el.querySelector(".canvas-gen-run");
-  const placeButton = el.querySelector(".canvas-gen-place");
-  if (!bar || !prompt || !runButton || !placeButton) return;
-  /* 只有真正的控件吃掉按下：提示词框、下拉、按钮、涂抹层；
-     行与行之间、按钮与按钮之间的空白留给拖整块 */
-  bar.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("textarea, input, button, select, canvas")) e.stopPropagation();
-  });
-  /* 参数行这几颗下拉：点开一列，选中就写回块上，面板立刻跟着换字 */
-  const select = (selector, makeEntries) => {
-    const button = el.querySelector(selector);
-    if (!button) return;
-    button.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const target = findItem(item.id);
-      if (!target) return;
-      const rect = button.getBoundingClientRect();
-      openMenu(rect.left, rect.bottom + 6, makeEntries(target), { kind: "gen-select" });
-    });
-  };
-  const check = (on) =>
-    on
-      ? '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.4 8.4 6.6 11.6 12.6 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-      : "";
-  prompt.addEventListener("input", () => {
-    const target = findItem(item.id);
-    if (!target) return;
-    target.prompt = prompt.value.slice(0, GEN_TEXT_MAX);
-    persistGen(target);
-    fitGenPrompt(item.id, prompt, true);
-  });
-  prompt.addEventListener("keydown", (e) => {
-    /* 回车这一下是发出去，换行要按 Shift+Enter：框就三行高，写一句话用不着回车 */
-    if (e.key !== "Enter" || e.shiftKey) return;
-    e.preventDefault();
-    runOrStopGen(item.id);
-  });
-  runButton.addEventListener("click", () => runOrStopGen(item.id));
-  placeButton.addEventListener("click", () => placeGenImage(item.id));
-  /* 上一张出的图跟着块一起回来：运行态记的是「这一轮」，重开画布时从 images/ 里接上 */
-  const run = genRunOf(item.id);
-  if (run.phase === "idle" && !run.imageUrl && !run.previewUrl && item.src) {
-    patchGenRun(item.id, { imageUrl: imageCache.get(item.src) || "" });
-  }
-  attachGenMask(el, item);
-  /* 涂抹开关：开着遮罩吃鼠标，关着才拖得动面板 */
-  const brushButton = el.querySelector(".canvas-gen-brush");
-  brushButton?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyGenMaskMode(el, item.id, !genMaskModes.get(item.id));
-    refreshGenPanel(item.id);
-  });
-  const clearButton = el.querySelector(".canvas-gen-clear");
-  clearButton?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const canvas = genMaskCanvasOf(el);
-    if (canvas) resetGenMask(canvas);
-    showToast("遮罩已清空");
-  });
-  /* 高清放大的「补细节」开关：开了就在放大之后按提示词低强度重绘一遍 */
-  const refineButton = el.querySelector(".canvas-gen-refine");
-  refineButton?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const target = findItem(item.id);
-    if (!target) return;
-    target.refine = !target.refine;
-    scheduleItemsSave();
-    refreshGenPanel(target.id);
-  });
-  /* 更多设置：展开/收起、改参数、换模型、恢复默认 */
-  const more = el.querySelector(".canvas-gen-more");
-  const moreToggle = el.querySelector(".canvas-gen-more-toggle");
-  if (more && moreToggle) {
-    moreToggle.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const target = findItem(item.id);
-      const targetEl = itemEls.get(item.id);
-      if (!target || !targetEl) return;
-      const box = targetEl.querySelector(".canvas-gen-more");
-      if (!box) return;
-      const open = box.hidden;
-      box.hidden = !open;
-      moreToggle.classList.toggle("is-open", open);
-      moreToggle.textContent = open ? "隐藏更多设置" : "更多设置";
-      moreToggle.title = open
-        ? "收起尺寸、步数、CFG、种子、模式等参数"
-        : "展开尺寸、步数、CFG、种子、模式等参数";
-      const resetButton = targetEl.querySelector(".canvas-gen-more-reset");
-      if (resetButton) resetButton.hidden = !open;
-      if (open) {
-        box.dataset.height = String(box.offsetHeight + 6);
-        targetEl.dataset.openHeight = String(target.h);
-        target.h = Math.max(GEN_MIN_HEIGHT, target.h + (Number(box.dataset.height) || 0));
-      } else {
-        const before = Number(targetEl.dataset.openHeight);
-        target.h = Number.isFinite(before)
-          ? before
-          : Math.max(GEN_MIN_HEIGHT, target.h - (Number(box.dataset.height) || 0));
-        delete targetEl.dataset.openHeight;
-      }
-      /* 展开只是看参数，不把临时高度写进画布文件 */
-      syncItemElement(targetEl, target);
-      /* 块高变了，选中框和端口要立刻跟到新边缘，不能停在展开前的位置 */
-      updateSelection();
-      updatePorts();
-      paintGenMore(target, targetEl);
-    });
-    const applyMore = (event) => {
-      const control = event.target.closest?.("[data-gen-field]");
-      if (!control) return;
-      event.stopPropagation();
-      const target = findItem(item.id);
-      if (!target) return;
-      const field = control.dataset.genField;
-      if (field === "model") {
-        switchGenFamily(target, control.value);
-        return;
-      }
-      const value = control.type === "checkbox" ? control.checked : control.value;
-      if (!applyGenFields(target, { [field]: value })) return;
-      persistGen(target);
-      const targetEl = itemEls.get(target.id);
-      if (targetEl) syncItemElement(targetEl, target);
-      scheduleItemsSave();
-      refreshGenPanel(target.id);
-      saveGenDefaults(target);
-    };
-    more.addEventListener("change", applyMore);
-    /* 输入框敲一下就生效，不用等失焦：面板上没有「保存」 */
-    more.addEventListener("input", (event) => {
-      const control = event.target.closest?.("[data-gen-field]");
-      if (!control || control.tagName === "SELECT" || control.type === "checkbox") return;
-      applyMore(event);
-    });
-    const reset = el.querySelector(".canvas-gen-more-reset");
-    reset?.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      const target = findItem(item.id);
-      if (!target) return;
-      const family = target.model === "h3image" || target.model === "qwen21" ? target.model : genFamily;
-      const value = await store.genDefaultsReset(family).catch((error) => {
-        showError(error);
-        return null;
-      });
-      if (!value) return;
-      genDefaultsCache.set(family, value);
-      applyGenFields(target, {
-        imageW: value.width,
-        imageH: value.height,
-        steps: value.steps,
-        cfg: value.cfg,
-        seed: value.seed,
-        mode: value.mode,
-        strength: value.strength,
-        negative: value.negative || "",
-        refine: Boolean(value.refine),
-      });
-      persistGen(target);
-      const targetEl = itemEls.get(target.id);
-      if (targetEl) syncItemElement(targetEl, target);
-      scheduleItemsSave();
-      refreshGenPanel(target.id);
-    });
-    /* 常用尺寸：按当前模型能出的边长过滤，选完直接写块并记成默认 */
-    const sizePreset = el.querySelector(".canvas-gen-more-size-preset");
-    sizePreset?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const target = findItem(item.id);
-      if (!target) return;
-      const family = target.model === "h3image" || target.model === "qwen21" ? target.model : genFamily;
-      const maxSide = family === "h3image" ? 4096 : 2048;
-      const entries = GEN_SIZE_PRESETS.map((group) => ({
-        label: group.label,
-        children: group.items
-          .filter((preset) => preset.w <= maxSide && preset.h <= maxSide)
-          .map((preset) => ({
-            label: preset.label,
-            onClick: () => applySizePreset(target, preset),
-          })),
-      })).filter((group) => group.children.length);
-      if (!entries.length) return;
-      const rect = sizePreset.getBoundingClientRect();
-      openMenu(rect.left, rect.bottom + 6, entries, { kind: "gen-size" });
-    });
-  }
-  /* 局部重绘面板一建好就进涂抹态：拉开就是要涂的 */
-  if (genModeFor(item, genInputItems(item).length) === "inpaint") {
-    applyGenMaskMode(el, item.id, true);
-  }
-  syncGen(el, item, genFeedOf(item), { blocked: otherGenBlocked(item.id) });
-  paintGenMore(item, el);
-  fitGenPrompt(item.id, prompt);
-  void refreshGenMaskBase(item);
-}
-
-/* 本地引擎一次只吃一张：别的面板在跑时这块的开始要灰掉；走 API 放开并行 */
-function otherGenBlocked(id) {
-  if (genEngine.provider === "api") return false;
-  const busy = genBusyId();
-  return Boolean(busy && busy !== id);
-}
-
-/* 运行态变了：把所有生图面板的「开始/停止」按新的占用情况重排一遍 */
-function refreshGenRunButtons() {
-  if (!current) return;
-  for (const item of current.items) {
-    if (item.type !== "gen") continue;
-    const el = itemEls.get(item.id);
-    const btn = el?.querySelector(".canvas-gen-run");
-    if (!btn) continue;
-    const run = genRunOf(item.id);
-    const busy = run.phase === "loading" || run.phase === "running";
-    btn.textContent = busy ? "停止" : "开始";
-    btn.disabled = !busy && otherGenBlocked(item.id);
-  }
-}
-
-onGenRunChange(refreshGenRunButtons);
-
-function refreshGenPanel(id) {
-  const item = findItem(id);
-  const el = itemEls.get(id);
-  if (!item || !el) return;
-  syncGen(el, item, genFeedOf(item), { blocked: otherGenBlocked(item.id) });
-  paintGenMore(item, el);
-  /* 只量不涨：打开画布、拖块、连线、刷新引擎状态都会走到这里，
-     这些都该保持用户上次的尺寸。提示词变长由输入/改词那一趟单独 grow */
-  fitGenPrompt(id, el.querySelector(".canvas-gen-prompt"), false);
-}
-
-/* 面板上那一行进料提示：接了几张、这一张会按哪档走。
-   连线一改就有新答案，所以 refreshConnectors 末尾统一刷一遍。 */
-function genFeedOf(item) {
-  const sources = genInputItems(item);
-  const mode = genModeFor(item, sources.length);
-  const base = GEN_MODE_LABELS[mode] || mode;
-  const label =
-    genEngine.provider === "api"
-      ? `${base} · API${genEngine.apiModel ? ` ${genEngine.apiModel}` : ""}`
-      : base;
-  return {
-    mode,
-    label,
-    count: sources.length,
-    baseUrl: genMaskBases.get(item.id) || "",
-  };
-}
-
-function refreshGenFeeds() {
-  if (!current) return;
-  for (const item of current.items) {
-    if (item.type === "gen") void refreshGenMaskBase(item);
-    if (item.type === "gen") refreshGenPanel(item.id);
-    if (item.type === "genvideo") refreshVideoPanel(item.id);
-  }
-}
-
-/* 这一轮没出成：把上一次那张接回来显示。文件还在盘上，取景窗不该空着。 */
-function keepLastGenImage(id) {
-  const item = findItem(id);
-  patchGenRun(id, { imageUrl: item && item.src ? imageCache.get(item.src) || "" : "" });
-}
-
-/* 面板的进料口就是连线：谁用线连到这块，谁就是输入图。
-   一条线 = 拿那张当底图重绘，多条线 = 几张一起当参考图。
-   块上明写了 t2i / i2i / edit 才盖掉这个推断——画风锚点那种「只有一张、
-   但它是参考图不是底图」就得明写。 */
-function genInputItems(item) {
-  const out = [];
-  for (const link of current?.items || []) {
-    if (link.type !== "connector" || link.to?.item !== item.id) continue;
-    const source = findItem(link.from?.item);
-    if (source && source.id !== item.id && !out.includes(source)) out.push(source);
-  }
-  return out;
-}
-
-function genModeFor(item, count) {
-  const stated = item.mode && item.mode !== "auto" ? item.mode : "";
-  if (stated) return stated;
-  if (!count) return "t2i";
-  return count === 1 ? "i2i" : "edit";
-}
-
-/* 一块东西画成引擎能吃的 PNG。图片块和面板自己那张都在 images/ 里，读字节就行；
-   画面块是矢量，走导出那套光栅化。场景块这一版还不吃——three.js 抓帧是另一件事。 */
-async function genInputPng(item) {
-  const space = current?.meta?.id;
-  if (!space) throw new Error("没有打开的画布");
-  if (item.type === "image" || (item.type === "gen" && item.src)) {
-    return toPngDataUrl(await store.imageData(space, item.src, Boolean(item.linked)));
-  }
-  if (item.type === "picture") {
-    /* 走导出那条光栅化：只画这一块，位图底会内联成 data:，纸色和笔迹都在 */
-    const shot = await exporter.snapshot({
-      region: { x: item.x, y: item.y, w: item.w, h: item.h },
-      only: item.id,
-      maxSide: 1024,
-    });
-    return `data:image/png;base64,${shot.data}`;
-  }
-  throw new Error(`「${item.type}」这块当不了输入图`);
-}
-
-function runOrStopGen(id) {
-  const item = findItem(id);
-  if (!item || item.type !== "gen") return;
-  const run = genRunOf(id);
-  if (run.phase === "loading" || run.phase === "running") {
-    void stopGen(id);
-    return;
-  }
-  /* 本地引擎一次一张由后端拒绝；API 通道按设置并行，这里不拦 */
-  /* 放大这一档不读提示词，那句「先写一句提示词」在这儿是拦错人 */
-  const mode = genModeFor(item, genInputItems(item).length);
-  if (mode !== "upscale" && !(item.prompt || "").trim()) {
-    showError("先写一句提示词");
-    return;
-  }
-  patchGenRun(id, {
-    phase: "loading",
-    step: 0,
-    steps: item.steps,
-    previewUrl: "",
-    imageUrl: "",
-    error: "",
-  });
-  refreshGenPanel(id);
-  void startGenRun(item);
-}
-
-async function startGenRun(item) {
-  const id = item.id;
-  const fail = (text) => {
-    patchGenRun(id, { phase: "failed", error: text });
-    keepLastGenImage(id);
-    refreshGenPanel(id);
-  };
-  let body;
-  try {
-    const sources = genInputItems(item);
-    const mode = genModeFor(item, sources.length);
-    /* 一张一张取，别攒：一张就是几 MB 的 base64，同时来几张没意义 */
-    const images = [];
-    if (mode !== "t2i") {
-      for (const source of sources) images.push(await genInputPng(source));
-    }
-    let mask = genRunMasks.get(id) || "";
-    if (!mask && mode === "inpaint") {
-      const canvas = genMaskCanvasOf(itemEls.get(id));
-      if (!canvas) throw new Error("遮罩层没准备好，重开一下面板再试");
-      mask = canvas.toDataURL("image/png");
-    }
-    genRunMasks.delete(id);
-    body = {
-      block: id,
-      prompt: (item.prompt || "").trim(),
-      mask,
-      refine: mode === "upscale" ? Boolean(item.refine) : false,
-      negative: item.negative || "",
-      width: item.imageW,
-      height: item.imageH,
-      steps: item.steps,
-      cfg: item.cfg,
-      seed: item.seed,
-      mode,
-      family: item.model || undefined,
-      strength: item.strength,
-      images,
-    };
-  } catch (error) {
-    fail(String(error?.message || error || "输入图取不出来"));
-    return;
-  }
-  store.genStart(body).catch((error) => {
-    const text = String(error?.message || error || "出图失败");
-    if (genRunOf(id).phase === "canceled" || text === "已取消") {
-      patchGenRun(id, { phase: "canceled" });
-      refreshGenPanel(id);
-      return;
-    }
-    fail(text);
-  });
-}
-
-async function stopGen(id) {
-  /* 点了就是停了，先按画面判；后端那边走它的硬取消，不用这儿等 */
-  patchGenRun(id, { phase: "canceled" });
-  refreshGenPanel(id);
-  await store.genCancel(id).catch(() => {});
-}
-
-/* 落块时右边放不下：把面板右侧、和新图同一水平线的块整体右移，给新图片留出位置。
-   只看块的起点在不在面板右边缘之外；垂直不重叠的块属于别的行，不动。
-   连线跟着端点重算，不参与平移。 */
-function shiftBlocksForPlace(panel, x, y, width, height) {
-  if (!current) return;
-  const right = x + width + GEN_PLACE_GAP;
-  const threshold = panel.x + panel.w;
-  const blocks = current.items.filter(
-    (other) =>
-      other !== panel &&
-      other.type !== "connector" &&
-      Number.isFinite(other.x) &&
-      other.x >= threshold &&
-      other.y < y + height &&
-      other.y + (other.h || 0) > y,
-  );
-  if (!blocks.length) return;
-  const nearest = Math.min(...blocks.map((block) => block.x));
-  if (right <= nearest) return;
-  const delta = right - nearest;
-  for (const block of blocks) {
-    block.x += delta;
-    const el = itemEls.get(block.id);
-    if (el) syncItemElement(el, block);
-  }
-  refreshConnectors();
-  updateSelection();
-  updatePorts();
-  scheduleItemsSave();
-}
-
-async function placeGenImage(id) {
-  const item = findItem(id);
-  const run = genRunOf(id);
-  if (!item || !item.src || run.phase === "loading" || run.phase === "running" || !current) return null;
-  const canvasId = current.meta.id;
-  try {
-    /* 落块是复制不是搬走：面板接着显示它那张，图片块自己带一份文件，
-       删哪一块都不该把另一块清空 */
-    const rel = await store.duplicatePictureImage(canvasId, item.src, false, canvasId);
-    if (!current || current.meta.id !== canvasId) return null;
-    const url = imageCache.get(rel) || (await store.imageUrl(canvasId, rel, false).catch(() => ""));
-    imageCache.set(rel, url || null);
-    const size = await imageSize(url || run.imageUrl);
-    const fit = fitImageSize(size.width, size.height);
-    const placeX = item.x + item.w + GEN_PLACE_GAP;
-    shiftBlocksForPlace(item, placeX, item.y, fit.w, fit.h);
-    return placeBlock(makeImage(placeX, item.y, fit.w, fit.h, rel));
-  } catch (error) {
-    showError(error);
-    return null;
-  }
-}
-
-async function onGenDone(payload) {
-  const item = findItem(payload.block);
-  if (!item) {
-    dropGenRun(payload.block);
-    return;
-  }
-  const dataUrl = payload.dataUrl || "";
-  patchGenRun(payload.block, {
-    phase: dataUrl ? "idle" : "failed",
-    step: payload.steps || item.steps,
-    seconds: payload.seconds || 0,
-    previewUrl: "",
-    imageUrl: dataUrl,
-    error: dataUrl ? "" : "出图失败：结果是空的",
-  });
-  refreshGenPanel(payload.block);
-  if (!dataUrl) {
-    keepLastGenImage(payload.block);
-    refreshGenPanel(payload.block);
-    return;
-  }
-  const canvasId = current?.meta.id;
-  const comma = dataUrl.indexOf(",");
-  if (!canvasId || comma < 0) return;
-  try {
-    const rel = await store.saveCanvasImage(canvasId, dataUrl.slice(comma + 1), "png");
-    if (!current || current.meta.id !== canvasId) return;
-    const target = findItem(payload.block);
-    if (!target) {
-      void store.deleteCanvasImage(canvasId, rel, false).catch(() => {});
-      return;
-    }
-    const old = target.src;
-    target.src = rel;
-    imageCache.set(rel, dataUrl);
-    /* 上一张没人指着了才回收：跟删块同一套，当场进回收站 */
-    if (old && old !== rel && !srcInUse(old)) {
-      void store.deleteCanvasImage(canvasId, old, false).catch(() => {});
-    }
-    scheduleItemsSave();
-  } catch (error) {
-    showError(error);
-  }
-}
-
-function setupGenEvents() {
-  const listen = window.__TAURI__?.event?.listen;
-  if (!listen) return;
-  const on = (name, handler) => {
-    Promise.resolve(listen(name, (event) => handler(event?.payload))).catch(() => {});
-  };
-  on("gen-progress", (payload) => {
-    if (!payload || !findItem(payload.block)) return;
-    patchGenRun(payload.block, { phase: "running", step: payload.step, steps: payload.steps });
-    refreshGenPanel(payload.block);
-  });
-  on("gen-preview", (payload) => {
-    if (!payload || !findItem(payload.block)) return;
-    patchGenRun(payload.block, {
-      phase: "running",
-      step: payload.step,
-      steps: payload.steps,
-      previewUrl: payload.dataUrl || "",
-    });
-    refreshGenPanel(payload.block);
-  });
-  on("gen-done", (payload) => {
-    if (payload) void onGenDone(payload);
-  });
-  on("gen-failed", (payload) => {
-    if (!payload) return;
-    if (!findItem(payload.block)) {
-      dropGenRun(payload.block);
-      return;
-    }
-    patchGenRun(payload.block, {
-      phase: payload.canceled ? "canceled" : "failed",
-      error: payload.error || "",
-    });
-    keepLastGenImage(payload.block);
-    refreshGenPanel(payload.block);
-  });
-}
-
-/* 视频任务的回执：进度写进这一块的运行态，面板据此画「排队中/生成中」；
-   出片路径也在这里，点「落块」时从这儿取。 */
-function setupVideoEvents() {
-  const listen = window.__TAURI__?.event?.listen;
-  if (!listen) return;
-  const on = (name, handler) => {
-    Promise.resolve(listen(name, (event) => handler(event?.payload))).catch(() => {});
-  };
-  on("video-progress", (payload) => {
-    if (!payload?.block) return;
-    patchVideoRun(payload.block, {
-      phase: "running",
-      label: payload.label || "生成中",
-      waited: payload.waited || 0,
-    });
-    refreshVideoPanel(payload.block);
-  });
-  on("video-done", (payload) => {
-    if (!payload?.block) return;
-    patchVideoRun(payload.block, {
-      phase: "done",
-      path: payload.path || "",
-      seconds: payload.seconds || 0,
-      label: "",
-    });
-    refreshVideoPanel(payload.block);
-  });
-  on("video-failed", (payload) => {
-    if (!payload?.block) return;
-    patchVideoRun(payload.block, {
-      phase: payload.canceled ? "canceled" : "failed",
-      error: payload.error || "",
-      canceled: Boolean(payload.canceled),
-    });
-    refreshVideoPanel(payload.block);
-  });
-  /* 生成中每秒刷一遍面板：后端 5 秒才报一次，秒数不能让用户数着事件跳 */
-  setInterval(() => {
-    if (!current) return;
-    for (const item of current.items) {
-      if (item.type === "genvideo" && videoRunOf(item.id).phase === "running") {
-        refreshVideoPanel(item.id);
-      }
-    }
-  }, 1000);
-}
 
 /* ---------- 视频面板 ---------- */
 
@@ -7445,7 +6634,7 @@ function videoFeedOf(item) {
   return { count: genInputItems(item).length };
 }
 
-function refreshVideoPanel(id) {
+export function refreshVideoPanel(id) {
   const item = findItem(id);
   const el = itemEls.get(id);
   if (!item || !el) return;
@@ -7605,7 +6794,7 @@ async function startVideoRun(item) {
   }
 }
 
-async function stopVideo(id) {
+export async function stopVideo(id) {
   /* 点了就是不等了；后端那边只置标志位，平台任务照样跑完、费用照算 */
   patchVideoRun(id, { phase: "canceled" });
   refreshVideoPanel(id);
@@ -7883,7 +7072,7 @@ function syncPictureChrome(el, item) {
   el.classList.toggle("is-painting", editor.editing && !item.locked);
 }
 
-function refreshPictureChrome(id) {
+export function refreshPictureChrome(id) {
   const item = findItem(id);
   const el = itemEls.get(id);
   if (item && el) syncPictureChrome(el, item);
@@ -8268,7 +7457,7 @@ function commitNoteEditing() {
   }
 }
 
-function renderNoteBody(item, el) {
+export function renderNoteBody(item, el) {
   const body = el.querySelector(".canvas-note-body");
   if (!body) return;
   body.innerHTML = renderMarkdown(item.source);
@@ -8293,7 +7482,7 @@ function convertNoteToCopy(item) {
 let fileEditor = null; // { itemId, canvasId, item, el, box, preview, textarea, body, saving, closing, refreshed }
 let fileAskId = null;
 
-function isFileEditable(item) {
+export function isFileEditable(item) {
   return item?.type === "file" && Boolean(item.text) && Boolean(item.src);
 }
 
@@ -8436,7 +7625,7 @@ function fileDraftDirty(state) {
   return state.textarea.value !== state.body.text;
 }
 
-async function closeFileEdit() {
+export async function closeFileEdit() {
   const state = fileEditor;
   if (!state) return true;
   if (state.closing) return false;
@@ -8509,7 +7698,7 @@ async function persistFileEdit(state) {
 }
 
 /* 预览是异步填的，改过盘就要把整块重做一遍，卡片上的体积和正文才跟得上 */
-function refreshFileBlock(item) {
+export function refreshFileBlock(item) {
   if (!itemEls.has(item.id)) return;
   removeItemFromDom(item.id);
   addItemElement(item);
@@ -8896,7 +8085,7 @@ async function onPaste(e) {
   }
 }
 
-function fileExt(name) {
+export function fileExt(name) {
   const clean = String(name || "").split(/[?#]/)[0];
   const dot = clean.lastIndexOf(".");
   return dot >= 0 ? clean.slice(dot + 1).toLowerCase() : "";
@@ -8967,7 +8156,7 @@ function fileToDataUrl(file) {
 
 /* 量一张图多大。读不出来时给个兜底的框是图片块用的（宁可先摆个空卡片），
    画面里垫的参考图宁可报失败也不能编一个尺寸出来，所以兜底值由调用方给。 */
-function imageSize(src, fallback = { width: 320, height: 200 }) {
+export function imageSize(src, fallback = { width: 320, height: 200 }) {
   return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
@@ -9086,7 +8275,7 @@ export function baseName(path) {
 
 /* 图片：两种存在方式都要先拿到显示地址才知道原始比例，量完才定块的大小。
    引用态不拷字节，地址直接指向原图，几百 MB 的扫描件也不会整份进内存。 */
-async function addImageBlock(path, point, mode) {
+export async function addImageBlock(path, point, mode) {
   if (!current) return null;
   const canvasId = current.meta.id;
   const linked = mode === "link";
@@ -9898,7 +9087,7 @@ function agentFocusBlock(id, patch = {}) {
 }
 
 /* 新块落在视野外时把镜头带过去；本来就在眼前就不动，免得用户明明看得见还给他跳一下 */
-function agentRevealBlock(id) {
+export function agentRevealBlock(id) {
   /* 批量铺东西时镜头不该跟着每个块跳：整批完成后用户自己看一眼就够 */
   if (batching) return false;
   const item = findItem(String(id));
@@ -10159,1010 +9348,7 @@ function applyProductFields(item, spec = {}) {
   }
 }
 
-/* ---------- 3D 房间壳 / 灯光 / 机位 ---------- */
 
-function sceneSurfacesOf(value) {
-  if (!Array.isArray(value)) throw new Error("附着面必须是数组");
-  const result = normalizeSceneSurfaces(value);
-  if (result.dropped.length) throw new Error(result.dropped[0].why);
-  return result.surfaces;
-}
-
-function editableScene(id) {
-  const item = agentRequireItem(id);
-  if (item.type !== "scene") throw new Error("id 要传场景块");
-  if (item.locked) throw new Error("场景已锁定，请先解锁");
-  return item;
-}
-
-function sceneView(item) {
-  return itemEls.get(item.id)?.querySelector(".canvas-scene-view");
-}
-
-function saveSceneFurniture(item, indices, delta) {
-  const view = sceneView(item);
-  item.camera = normalizeSceneCamera(sceneCameraState(item, view));
-  moveSceneFurnitureParts(item, indices.map((index) => ({ index, ...item.parts[index] })), delta);
-  persistScene(item);
-  scheduleItemsSave();
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  if (scenePlacementActive(item)) setSceneFurnitureSelection(view, indices);
-  return { id: item.id, clamped: delta.clamped,
-    parts: indices.map((index) => ({ index, x: item.parts[index].x, y: item.parts[index].y, z: item.parts[index].z })) };
-}
-
-function agentSceneGet({ id }) {
-  const item = agentRequireItem(id);
-  if (item.type !== "scene") throw new Error("id 要传场景块");
-  return { ...agentSummary(item), parts: item.parts.map((part, index) => ({ ...part, index })),
-    rendering: sceneFurnitureInspect(sceneView(item)) };
-}
-
-function agentSceneSurfaceSet({ id, surface }) {
-  const item = editableScene(id);
-  const [next] = sceneSurfacesOf([surface]);
-  const old = item.surfaces.find((one) => one.id === next.id);
-  if (old && item.parts.some((part) => part.surface === old.id) &&
-      ["kind", "x", "y", "z", "w", "h", "rotate"].some((key) => old[key] !== next[key])) {
-    throw new Error("这个面已有家具，请先解除绑定再修改附着面");
-  }
-  item.surfaces = [...item.surfaces.filter((one) => one.id !== next.id), next];
-  scheduleItemsSave();
-  return { id, surface: next };
-}
-
-function agentSceneFurnitureBind(spec) {
-  const item = editableScene(spec.id);
-  if (!Array.isArray(spec.parts) || !spec.parts.length || spec.parts.some((index) =>
-      !Number.isInteger(index) || index < 0 || index >= item.parts.length)) throw new Error("parts 要传有效的零件序号数组");
-  const indices = [...new Set(spec.parts)];
-  const surfaceId = String(spec.surface || "").trim();
-  if (!surfaceId) {
-    for (const index of indices) { item.parts[index].group = ""; item.parts[index].surface = ""; }
-    setSceneFurnitureSelection(sceneView(item), []);
-    persistScene(item);
-    return { id: item.id, parts: indices, unbound: true };
-  }
-  const surface = item.surfaces.find((one) => one.id === surfaceId);
-  if (!surface) throw new Error(`找不到附着面 ${surfaceId}`);
-  const group = String(spec.group || newId()).trim().slice(0, 128);
-  if (!group || item.parts.some((part, index) => part.group === group && !indices.includes(index))) {
-    throw new Error("家具组名为空或已被其他零件占用，请把整件家具的零件一起绑定");
-  }
-  const delta = sceneFurnitureMoveDelta(sceneView(item), indices, surface, 0, 0);
-  for (const index of indices) { item.parts[index].group = group; item.parts[index].surface = surfaceId; }
-  return { ...saveSceneFurniture(item, indices, delta), group, surface: surfaceId };
-}
-
-function agentSceneFurnitureMove({ id, part, du = 0, dv = 0 }) {
-  const item = editableScene(id);
-  if (!Number.isFinite(du) || !Number.isFinite(dv)) throw new Error("du / dv 要传有限数值");
-  const furniture = sceneFurnitureGroup(item, part);
-  if (!furniture) throw new Error("这件物体还没绑定附着面，不能移动");
-  const delta = sceneFurnitureMoveDelta(sceneView(item), furniture.indices, furniture.surface, du, dv);
-  return saveSceneFurniture(item, furniture.indices, delta);
-}
-
-const SCENE_LIGHT_PRESETS = {
-  /* 白天：太阳高、天光足，颜色尽量保持固有色 */
-  day: { angle: 35, elev: 52, k: 0.55, lit: "#fff4e2", dark: "#dbe7f2" },
-  /* 傍晚：低角度暖光，影子里带一点蓝 */
-  warm: { angle: 210, elev: 22, k: 0.42, lit: "#ffc07a", dark: "#71809a" },
-  /* 夜里开着暖灯：太阳从屋子前方打进来，天光留得多一点，别让一面墙黑成一块 */
-  night: { angle: 150, elev: 48, k: 0.6, lit: "#ffd9b0", dark: "#5b6781" },
-};
-
-/* 房间壳的单位是厘米：客厅 6.2m × 5.2m、墙高 2.8m。
-   墙只做背面和左侧，前面敞开给相机；窗是贴在墙上的一块亮面。 */
-function roomShellParts(preset, options = {}) {
-  const specs = {
-    living: { w: 620, d: 520, rug: true, console: true },
-    bedroom: { w: 500, d: 460, rug: true, console: false },
-    dining: { w: 560, d: 470, rug: false, console: true },
-  };
-  const spec = specs[preset] || specs.living;
-  const wall = options.wallColor || "#ece7de";
-  const floor = options.floorColor || "#b98a5e";
-  const { w, d } = spec;
-  const wallH = 280;
-  const t = 12;
-  const winX = w * 0.22;
-  const winY = d / 2 - t - 1;
-  const winW = Math.min(240, w * 0.38);
-  const winH = 140;
-  const winZ = 90;
-  const frame = "#d8d2c8";
-  const parts = [
-    { op: "box", x: 0, y: 0, z: 0, w, d, h: 2, color: floor, name: "地板" },
-    { op: "box", x: 0, y: d / 2 - t / 2, z: 0, w, d: t, h: wallH, color: wall, name: "背景墙" },
-    { op: "box", x: -w / 2 + t / 2, y: 0, z: 0, w: t, d, h: wallH, color: wall, name: "侧墙" },
-    { op: "box", x: winX, y: winY, z: winZ, w: winW, d: 2, h: winH, color: "#cfe2ef", name: "窗" },
-    { op: "box", x: winX, y: winY + 1, z: winZ - 8, w: winW + 12, d: 4, h: 8, color: frame, name: "窗框" },
-    { op: "box", x: winX, y: winY + 1, z: winZ + winH, w: winW + 12, d: 4, h: 8, color: frame, name: "窗框" },
-    { op: "box", x: winX - winW / 2 - 6, y: winY + 1, z: winZ, w: 12, d: 4, h: winH, color: frame, name: "窗框" },
-    { op: "box", x: winX + winW / 2 + 6, y: winY + 1, z: winZ, w: 12, d: 4, h: winH, color: frame, name: "窗框" },
-  ];
-  if (spec.rug) {
-    parts.push({ op: "box", x: 0, y: -d * 0.06, z: 2, w: w * 0.56, d: d * 0.48, h: 1.4, color: "#c9b9a6", name: "地毯", group: "rug", surface: "floor" });
-  }
-  if (spec.console) {
-    parts.push({ op: "box", x: w * 0.22, y: d / 2 - t - 22, z: 2, w: 180, d: 38, h: 46, color: "#8a6f55", name: "边柜", group: "console", surface: "floor" });
-  }
-  return parts;
-}
-
-function roomShellSurfaces(parts) {
-  const floor = parts[0];
-  const wall = parts[1];
-  return sceneSurfacesOf([
-    { id: "floor", name: "房间地面", kind: "floor", x: 6, y: -6, z: floor.h, w: floor.w - 12, h: floor.d - 12 },
-    { id: "back-wall", name: "背景墙", kind: "wall", x: 0, y: floor.d / 2 - 12, z: floor.h, w: floor.w - 24, h: wall.h - floor.h },
-    { id: "left-wall", name: "侧墙", kind: "wall", x: -floor.w / 2 + 12, y: -6, z: floor.h, w: floor.d - 12, h: wall.h - floor.h, rotate: 90 },
-  ]);
-}
-
-function sceneLightOf(preset) {
-  const got = normalizeLight(SCENE_LIGHT_PRESETS[preset]);
-  if (got.why) throw new Error(got.why);
-  return got.light;
-}
-
-function agentSceneRoomShell(spec = {}) {
-  agentRequireSpace();
-  const item = agentRequireItem(spec.id);
-  if (item.type !== "scene") throw new Error("id 要传场景块");
-  const preset = ["living", "bedroom", "dining"].includes(spec.preset) ? spec.preset : "living";
-  const got = normalizeSceneParts(roomShellParts(preset, { wallColor: spec.wallColor, floorColor: spec.floorColor }));
-  if (got.dropped.length) throw new Error(got.dropped[0].why);
-  item.parts = got.parts;
-  item.surfaces = roomShellSurfaces(got.parts);
-  setSceneFurnitureSelection(sceneView(item), []);
-  item.light = sceneLightOf("day");
-  item.camera = null;
-  persistScene(item);
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  return { ...agentSummary(item), preset };
-}
-
-function agentSceneLightPreset(spec = {}) {
-  const item = agentRequireItem(spec.id);
-  if (item.type !== "scene") throw new Error("id 要传场景块");
-  const preset = String(spec.preset || "");
-  if (preset === "off") item.light = null;
-  else if (SCENE_LIGHT_PRESETS[preset]) item.light = sceneLightOf(preset);
-  else throw new Error("灯光预设只有 day / warm / night / off");
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  return agentSummary(item);
-}
-
-function setSceneCameraPreset(item, preset) {
-  if (item.type !== "scene") throw new Error("id 要传场景块");
-  if (preset === "auto") {
-    item.camera = null;
-  } else {
-    const box = contentBox(item.parts, item.light);
-    const span = Math.max(box.dx, box.dy, 1);
-    const angles = { front: [180, 16, 1.02], left: [212, 24, 0.95], right: [148, 24, 0.95], top: [180, 66, 1] };
-    const p = angles[preset];
-    if (!p) throw new Error("机位预设只有 auto / front / left / right / top");
-    item.camera = normalizeSceneCamera({
-      azim: p[0],
-      elev: p[1],
-      dist: Math.max(280, span * p[2]),
-      tx: box.cx,
-      ty: box.cy,
-      tz: Math.max(60, box.dz * 0.35),
-      fov: 45,
-    });
-  }
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  return agentSummary(item);
-}
-
-function agentSceneCameraPreset(spec = {}) {
-  const item = agentRequireItem(spec.id);
-  return setSceneCameraPreset(item, String(spec.preset || ""));
-}
-
-/* 一张产品卡落进场景：读卡上的 model 和真实尺寸，模型自带单位由渲染器按尺寸等比缩。
-   卡片上没有模型就不放——空一块假家具比报错更难查。 */
-async function placeProductInScene(product, scene, options = {}) {
-  if (!product || product.type !== "product") throw new Error("要放进去的是一张产品卡");
-  if (!scene || scene.type !== "scene") throw new Error("要放进的是场景块");
-  if (!product.model) {
-    throw new Error("这张产品卡还没设 3D 模型：右键「设置 3D 模型…」或 block_update 写 model");
-  }
-  const models = await invoke("model_library_list").catch(() => []);
-  if (!models.some((one) => one.name === product.model)) {
-    throw new Error(`模型库里没有 ${product.model}，去设置窗口「3D 模型库」导入`);
-  }
-  let floors = scene.surfaces.filter((one) => one.kind === "floor");
-  if (!scene.parts.length && !floors.length && !options.surface) {
-    const [floor] = sceneSurfacesOf([{ id: "ground", name: "地面", kind: "floor", w: 1000, h: 1000 }]);
-    scene.surfaces.push(floor);
-    floors = [floor];
-  }
-  const surface = options.surface
-    ? floors.find((one) => one.id === options.surface)
-    : floors.length === 1 ? floors[0] : null;
-  if (!surface) throw new Error("请先配置地面附着面；多个地面时用 surface 指定放入哪个区域");
-  const dims = product.dims || {};
-  const part = {
-    op: "model",
-    group: newId(),
-    surface: surface.id,
-    src: product.model,
-    x: Number.isFinite(Number(options.x)) ? Number(options.x) : surface.x,
-    y: Number.isFinite(Number(options.y)) ? Number(options.y) : surface.y,
-    z: surface.z,
-    rotate: Number.isFinite(Number(options.rotate)) ? Number(options.rotate) : 0,
-    w: dims.w > 0 ? dims.w / 10 : 0,
-    d: dims.d > 0 ? dims.d / 10 : 0,
-    h: dims.h > 0 ? dims.h / 10 : 0,
-    name: product.name,
-    color: "",
-  };
-  if (!part.h) part.h = 80;
-  const got = normalizeSceneParts([part]);
-  if (got.dropped.length) throw new Error(got.dropped[0].why);
-  scene.parts = [...scene.parts, got.parts[0]];
-  persistScene(scene);
-  const el = itemEls.get(scene.id);
-  if (el) syncItemElement(el, scene);
-  scheduleItemsSave();
-  return { ...agentSummary(scene), placed: product.model, partIndex: scene.parts.length - 1 };
-}
-
-async function agentScenePlaceProduct(spec = {}) {
-  agentRequireSpace();
-  const scene = agentRequireItem(spec.scene);
-  const product = agentRequireItem(spec.product);
-  return placeProductInScene(product, scene, spec);
-}
-
-/* 把产品卡的图当材质贴到场景的某个实体面上：地板、墙、柜子都行，模型件不接 */
-function agentSceneApplyMaterial(spec = {}) {
-  const item = agentRequireItem(spec.scene);
-  if (item.type !== "scene") throw new Error("scene 要传场景块");
-  const target = spec.target;
-  let part = null;
-  if (target !== undefined && target !== "" && /^\d+$/.test(String(target))) {
-    part = item.parts[Number(target)] || null;
-  } else {
-    const needle = String(target || "").trim();
-    if (needle) part = item.parts.find((one) => (one.name || "").includes(needle)) || null;
-  }
-  if (!part) {
-    throw new Error("找不到要贴的面：target 给 parts 序号或件名（地板 / 背景墙 / 侧墙 / 边柜 / 地毯）");
-  }
-  if (part.op === "model") throw new Error("模型件不能贴材质图；要换材质请直接改模型");
-  if (spec.clear === true) {
-    delete part.tex;
-    delete part.texRepeat;
-  } else {
-    const product = agentRequireItem(spec.product);
-    if (product.type !== "product") throw new Error("product 要传产品卡");
-    if (!product.src) throw new Error("这张产品卡还没有图：先给它换一张材质图");
-    part.tex = product.src;
-    const repeat = Number(spec.repeat);
-    part.texRepeat = Number.isFinite(repeat) && repeat >= 10 ? repeat : 100;
-  }
-  persistScene(item);
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  return { ...agentSummary(item), target: part.name || String(target), tex: part.tex || "" };
-}
-
-async function placeProductInSceneFlow(product, scene) {
-  try {
-    await placeProductInScene(product, scene);
-    showToast("已放进场景");
-  } catch (error) {
-    showError(error);
-  }
-}
-
-function newSceneForProduct(product) {
-  const scene = makeScene(product.x + product.w + 40, product.y, 720, 480);
-  placeBlock(scene);
-  persistScene(scene);
-  void placeProductInSceneFlow(product, scene);
-}
-
-/* 产品卡选模型：菜单里列模型库里的 .glb，选完只改卡上的 model 字段 */
-async function pickProductModel(item) {
-  const models = await invoke("model_library_list").catch(() => []);
-  const el = itemEls.get(item.id);
-  const r = el ? el.getBoundingClientRect() : { left: 200, top: 200 };
-  const entries = models.length
-    ? models.map((model) => ({
-        label: `${model.name}${model.name === item.model ? " ✓" : ""}`,
-        thumb: modelThumbnail(model.name),
-        onClick: () => {
-          item.model = model.name;
-          scheduleItemsSave();
-          showToast(`模型：${model.name}`);
-        },
-      }))
-    : [{ label: "模型库还没有 .glb（去设置窗口导入）", disabled: true }];
-  openMenu(r.left + 24, r.top + 24, entries, { label: "3D 模型", searchable: true });
-}
-
-/* ---------- 场景里从模型库加家具 ---------- */
-
-const modelThumbCache = new Map();
-/* 模型库缩略图：同一份只渲一次，失败给空串（菜单里显示占位块） */
-function modelThumbnail(name) {
-  if (!modelThumbCache.has(name)) {
-    modelThumbCache.set(name, renderModelThumbnail(name).catch(() => ""));
-  }
-  return modelThumbCache.get(name);
-}
-
-async function addSceneModelFlow(scene) {
-  const models = await invoke("model_library_list").catch(() => []);
-  const el = itemEls.get(scene.id);
-  const r = el ? el.getBoundingClientRect() : { left: 200, top: 200 };
-  const entries = models.length
-    ? models.map((model) => ({
-        label: model.name,
-        thumb: modelThumbnail(model.name),
-        onClick: () => void addSceneModel(scene, model.name),
-      }))
-    : [{ label: "模型库还没有 .glb（去设置窗口「3D 模型库」导入）", disabled: true }];
-  openMenu(r.left + 24, r.top + 24, entries, { label: "从模型库添加", searchable: true });
-}
-
-/* 删掉地板之后能加回来：一张 6.2×5.2m 的地板 + 地面附着面（没有才补，不重复加） */
-function addSceneFloor(item) {
-  if (item.parts.some((part) => part.name === "地板")) {
-    showError("场景里已经有地板了");
-    return;
-  }
-  let surfaces = item.surfaces;
-  if (!surfaces.some((one) => one.kind === "floor")) {
-    surfaces = sceneSurfacesOf([
-      ...surfaces,
-      { id: "floor", name: "地面", kind: "floor", x: 0, y: 0, z: 2, w: 608, h: 508 },
-    ]);
-  }
-  const got = normalizeSceneParts([
-    ...item.parts,
-    { op: "box", x: 0, y: 0, z: 0, w: 620, d: 520, h: 2, color: "#b98a5e", name: "地板" },
-  ]);
-  if (got.dropped.length) {
-    showError(got.dropped[0].why);
-    return;
-  }
-  scenePatch(item, { parts: got.parts, surfaces });
-  setSceneFurnitureSelection(sceneView(item), [item.parts.length - 1]);
-  showToast("已添加地板");
-}
-
-/* 把模型库里的一份 .glb 放进场景：没有地面就补一块 10m 地面，
-   加完直接进摆放模式并选中这件，用户可以马上拖着摆位置。 */
-async function addSceneModel(scene, name) {
-  try {
-    let floor = scene.surfaces.find((one) => one.kind === "floor");
-    if (!floor) {
-      const list = sceneSurfacesOf([
-        ...scene.surfaces,
-        { id: "ground", name: "地面", kind: "floor", w: 1000, h: 1000 },
-      ]);
-      scene.surfaces = list;
-      floor = list.find((one) => one.kind === "floor");
-    }
-    const part = {
-      op: "model",
-      group: newId(),
-      surface: floor.id,
-      src: name,
-      x: floor.x,
-      y: floor.y,
-      z: floor.z,
-      rotate: 0,
-      w: 0,
-      d: 0,
-      h: 80,
-      name: String(name).replace(/\.glb$/i, ""),
-      color: "",
-    };
-    const got = normalizeSceneParts([...scene.parts, part]);
-    if (got.dropped.length) throw new Error(got.dropped[0].why);
-    scene.parts = got.parts;
-    persistScene(scene);
-    const el = itemEls.get(scene.id);
-    if (el) syncItemElement(el, scene);
-    scheduleItemsSave();
-    /* 直接进入摆放模式并选中新加的这件：拖动就能挪位置 */
-    setScenePlacementMode(scene, true);
-    setSceneFurnitureSelection(sceneView(scene), [scene.parts.length - 1]);
-    showToast(`已加入 ${part.name}，拖动它摆位置`);
-    return { index: scene.parts.length - 1, name: part.name };
-  } catch (error) {
-    showError(error);
-    return null;
-  }
-}
-
-/* ---------- 参数化家具 ---------- */
-
-const FURNITURE_COLORS = [
-  { label: "浅木", value: "#d2b48c" },
-  { label: "原木", value: "#b98a5e" },
-  { label: "深木", value: "#8a6f55" },
-  { label: "白", value: "#ece7de" },
-  { label: "灰", value: "#9aa0a6" },
-  { label: "黑", value: "#3c3f43" },
-];
-
-/* 按参数拼零件：全部以原点为中心、底面 z=0（调用方再平移到放置点）。
-   每件家具的零件共用一个 group，拖动时整体一起走。 */
-function buildFurnitureParts(spec) {
-  const W = spec.w;
-  const D = spec.d;
-  const H = spec.h;
-  const color = spec.color;
-  /* 基础几何体：一块方块，或一个圆柱/球/圆锥 */
-  if (["box", "cylinder", "sphere", "cone", "torus", "capsule"].includes(spec.kind)) {
-    if (spec.kind === "box") {
-      return [{ op: "box", x: 0, y: 0, z: 0, w: W, d: D, h: H, color, name: "方块" }];
-    }
-    const name = { cylinder: "圆柱", sphere: "球体", cone: "圆锥", torus: "圆环", capsule: "胶囊" }[spec.kind];
-    return [{ op: "solid", shape: spec.kind, x: 0, y: 0, z: 0, w: W, d: D, h: H, color, name }];
-  }
-  const parts = [];
-  if (spec.kind === "cabinet") {
-    const legH = spec.leg;
-    const bodyH = Math.max(20, H - legH);
-    parts.push({ op: "box", x: 0, y: 0, z: legH, w: W, d: D, h: bodyH, color, name: "柜体" });
-    if (spec.doors > 0) {
-      const gap = 2;
-      const side = 2;
-      const td = 2;
-      const dw = (W - side * 2 - gap * (spec.doors - 1)) / spec.doors;
-      const dh = Math.max(10, bodyH - 4);
-      for (let i = 0; i < spec.doors; i += 1) {
-        const x = -W / 2 + side + dw / 2 + i * (dw + gap);
-        parts.push({ op: "box", x, y: -D / 2 - td / 2, z: legH + 2, w: dw, d: td, h: dh, color, name: "柜门" });
-        parts.push({
-          op: "box",
-          x,
-          y: -D / 2 - td - 1,
-          z: legH + 2 + dh / 2 - 5,
-          w: 2,
-          d: 2,
-          h: 10,
-          color: "#6b6f74",
-          name: "把手",
-        });
-      }
-    }
-    if (legH > 0) {
-      const lx = W / 2 - 5;
-      const ly = D / 2 - 5;
-      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-        parts.push({ op: "box", x: sx * lx, y: sy * ly, z: 0, w: 5, d: 5, h: legH, color: "#6b5138", name: "柜腿" });
-      }
-    }
-    return parts;
-  }
-  /* 桌子：桌面 + 四条腿 */
-  parts.push({ op: "box", x: 0, y: 0, z: H - 4, w: W, d: D, h: 4, color, name: "桌面" });
-  const lx = W / 2 - 5;
-  const ly = D / 2 - 5;
-  for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    parts.push({ op: "box", x: sx * lx, y: sy * ly, z: 0, w: 5, d: 5, h: H - 4, color, name: "桌腿" });
-  }
-  return parts;
-}
-
-function openFurnitureDialog() {
-  return new Promise((resolve) => {
-    const mask = document.createElement("div");
-    mask.className = "dialog-mask";
-    mask.innerHTML = `
-      <div class="dialog dialog-furniture" role="dialog" aria-modal="true">
-        <p class="dialog-title">新建模型</p>
-        <button class="dialog-close" type="button" aria-label="关闭">${CLOSE_X_SVG}</button>
-        <div class="furn-row">
-          <span>模板</span>
-          <select data-furn="kind"><option value="cabinet">柜子</option><option value="table">桌子</option><option value="box">方块</option><option value="cylinder">圆柱</option><option value="sphere">球体</option><option value="cone">圆锥</option><option value="torus">圆环</option><option value="capsule">胶囊</option></select>
-        </div>
-        <div class="furn-row">
-          <span>宽</span><input data-furn="w" type="number" value="160" min="40" max="320" step="1" /><em>cm</em>
-        </div>
-        <div class="furn-row">
-          <span>深</span><input data-furn="d" type="number" value="45" min="20" max="120" step="1" /><em>cm</em>
-        </div>
-        <div class="furn-row">
-          <span>高</span><input data-furn="h" type="number" value="80" min="20" max="240" step="1" /><em>cm</em>
-        </div>
-        <div class="furn-row" data-furn-row="cabinet">
-          <span>柜门</span>
-          <select data-furn="doors"><option value="0">无门</option><option value="1">1 扇</option><option value="2" selected>2 扇</option><option value="3">3 扇</option><option value="4">4 扇</option></select>
-        </div>
-        <div class="furn-row" data-furn-row="cabinet">
-          <span>腿高</span>
-          <select data-furn="leg"><option value="0">落地</option><option value="10" selected>10 cm</option><option value="15">15 cm</option></select>
-        </div>
-        <div class="furn-row">
-          <span>颜色</span>
-          <div class="furn-colors">${FURNITURE_COLORS.map(
-            (color, index) =>
-              `<button type="button" class="furn-color${index === 1 ? " is-active" : ""}" data-color="${color.value}" title="${color.label}" style="--c:${color.value}"></button>`,
-          ).join("")}</div>
-        </div>
-        <label class="furn-save"><input type="checkbox" data-furn="save" /> 同时存进模型库（下次直接从库里摆）</label>
-        <div class="furn-actions"><button class="plain-btn furn-ok" type="button">放到场景</button></div>
-      </div>
-    `;
-    const dialog = mask.querySelector(".dialog");
-    const finish = (value) => {
-      mask.remove();
-      resolve(value);
-    };
-    const kindSel = mask.querySelector('[data-furn="kind"]');
-    /* 每类模板一套默认尺寸；切到基础几何体时把柜门/腿高行收起来 */
-    const KIND_PRESETS = {
-      cabinet: { w: 160, d: 45, h: 80, cabinet: true },
-      table: { w: 140, d: 70, h: 75, cabinet: false },
-      box: { w: 100, d: 100, h: 100, cabinet: false },
-      cylinder: { w: 80, d: 80, h: 120, cabinet: false },
-      sphere: { w: 100, d: 100, h: 100, cabinet: false },
-      cone: { w: 100, d: 100, h: 120, cabinet: false },
-      torus: { w: 100, d: 100, h: 30, cabinet: false },
-      capsule: { w: 60, d: 60, h: 120, cabinet: false },
-    };
-    const syncKind = () => {
-      const preset = KIND_PRESETS[kindSel.value] || KIND_PRESETS.cabinet;
-      for (const row of mask.querySelectorAll('[data-furn-row="cabinet"]')) row.hidden = !preset.cabinet;
-      const set = (key, value) => {
-        const input = mask.querySelector(`[data-furn="${key}"]`);
-        if (input) input.value = String(value);
-      };
-      set("w", preset.w);
-      set("d", preset.d);
-      set("h", preset.h);
-    };
-    kindSel.addEventListener("change", syncKind);
-    syncKind();
-    mask.addEventListener("click", (e) => {
-      const dot = e.target.closest?.(".furn-color");
-      if (!dot) return;
-      for (const one of mask.querySelectorAll(".furn-color")) {
-        one.classList.toggle("is-active", one === dot);
-      }
-    });
-    mask.querySelector(".dialog-close").addEventListener("click", () => finish(null));
-    mask.addEventListener("pointerdown", (e) => {
-      if (!dialog.contains(e.target)) finish(null);
-    });
-    mask.querySelector(".furn-ok").addEventListener("click", () => {
-      const read = (key, fallback) => {
-        const input = mask.querySelector(`[data-furn="${key}"]`);
-        const value = Number(input?.value);
-        return Number.isFinite(value) ? value : fallback;
-      };
-      finish({
-        kind: KIND_PRESETS[kindSel.value] ? kindSel.value : "cabinet",
-        w: Math.min(320, Math.max(40, Math.round(read("w", 160)))),
-        d: Math.min(120, Math.max(20, Math.round(read("d", 45)))),
-        h: Math.min(240, Math.max(20, Math.round(read("h", 80)))),
-        doors: Number(mask.querySelector('[data-furn="doors"]').value) || 0,
-        leg: Number(mask.querySelector('[data-furn="leg"]').value) || 0,
-        color: mask.querySelector(".furn-color.is-active")?.dataset.color || "#b98a5e",
-        save: mask.querySelector('[data-furn="save"]').checked,
-      });
-    });
-    document.body.append(mask);
-  });
-}
-
-async function createFurnitureFlow(scene) {
-  const spec = await openFurnitureDialog();
-  if (!spec) return;
-  try {
-    const result = await applyFurniture(scene, spec);
-    if (spec.save) showToast(`已放进场景，并存进模型库：${result.saved}`);
-    else showToast("已放进场景，拖动它摆位置");
-  } catch (error) {
-    showError(error);
-  }
-}
-
-/* 生成 + 摆进场景 +（可选）入库；返回 {start, count, saved}，MCP 也走这条。 */
-async function applyFurniture(scene, spec) {
-  const rel = buildFurnitureParts(spec);
-  let floor = scene.surfaces.find((one) => one.kind === "floor");
-  if (!floor) {
-    const list = sceneSurfacesOf([
-      ...scene.surfaces,
-      { id: "ground", name: "地面", kind: "floor", w: 1000, h: 1000 },
-    ]);
-    scene.surfaces = list;
-    floor = list.find((one) => one.kind === "floor");
-  }
-  const groupId = newId();
-  const placed = rel.map((part) => ({
-    ...part,
-    group: groupId,
-    surface: floor.id,
-    x: part.x + floor.x,
-    y: part.y + floor.y,
-    z: part.z + floor.z,
-  }));
-  const got = normalizeSceneParts([...scene.parts, ...placed]);
-  if (got.dropped.length) throw new Error(got.dropped[0].why);
-  scene.parts = got.parts;
-  persistScene(scene);
-  const el = itemEls.get(scene.id);
-  if (el) syncItemElement(el, scene);
-  scheduleItemsSave();
-  const start = scene.parts.length - rel.length;
-  const indices = rel.map((_, k) => start + k);
-  setScenePlacementMode(scene, true);
-  setSceneFurnitureSelection(sceneView(scene), indices);
-  let saved = "";
-  if (spec.save) {
-    const buffer = await exportPartsGLB(rel);
-    const name = {
-      cabinet: "参数柜",
-      table: "参数桌",
-      box: "方块",
-      cylinder: "圆柱",
-      sphere: "球体",
-      cone: "圆锥",
-      torus: "圆环",
-      capsule: "胶囊",
-    }[spec.kind] || "模型";
-    const file = await store.modelLibrarySave(name, bufferToBase64(buffer));
-    saved = file.name;
-  }
-  return { start, count: rel.length, saved };
-}
-
-/* ---------- 场景导出 GLB ---------- */
-
-function bufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
-async function exportSceneFlow(item) {
-  try {
-    const buffer = await exportSceneGLB(sceneView(item));
-    const base = current?.meta.name || "场景";
-    const suffix = item.seq ? `-#${item.seq}` : "";
-    const name = `${base}${suffix}.glb`;
-    const data = bufferToBase64(buffer);
-    const path = await store.exportSaveFile(name, data);
-    if (path) showToast(`已导出：${path}`);
-  } catch (error) {
-    showError(error);
-  }
-}
-
-/* ---------- 户型块 ---------- */
-
-let planCalibration = null; // { itemId, points: [{ fx, fy }] }
-
-function planCardOf(itemId) {
-  return itemEls.get(itemId)?.querySelector(".canvas-plan-card") || null;
-}
-
-function startPlanCalibration(item) {
-  const card = planCardOf(item.id);
-  if (!card) return;
-  planCalibration = { itemId: item.id, points: [] };
-  card.classList.add("is-calibrating");
-  showToast("在户型图上点这条已知长度的两个端点");
-}
-
-function cancelPlanCalibration() {
-  if (!planCalibration) return;
-  const { itemId } = planCalibration;
-  planCalibration = null;
-  planCardOf(itemId)?.classList.remove("is-calibrating");
-  const el = itemEls.get(itemId);
-  const item = findItem(itemId);
-  if (el && item) syncItemElement(el, item);
-}
-
-async function finishPlanCalibration(item, a, b) {
-  const canvasId = current?.meta.id;
-  planCardOf(item.id)?.classList.remove("is-calibrating");
-  const pixelDist = Math.hypot((b.fx - a.fx) * item.imageW, (b.fy - a.fy) * item.imageH);
-  if (!(pixelDist > 0)) {
-    const el = itemEls.get(item.id);
-    if (el) syncItemElement(el, item);
-    showToast("两个点重合了，再来一次");
-    return;
-  }
-  const answer = await promptDialog({
-    title: "标定比例",
-    label: "这两点实际多少毫米？（例如 4200）",
-    value: "",
-    okText: "定标",
-  });
-  if (!current || current.meta.id !== canvasId) return;
-  const mm = Number(String(answer || "").replace(/[,\s]/g, ""));
-  if (!(mm > 0)) {
-    const el = itemEls.get(item.id);
-    if (el) syncItemElement(el, item);
-    return;
-  }
-  item.calibration = { x1: a.fx, y1: a.fy, x2: b.fx, y2: b.fy, mm };
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  showToast("已定标，现在可以放家具和机位了");
-}
-
-function attachPlanBlock(el, item) {
-  const card = el.querySelector(".canvas-plan-card");
-  if (!card) return;
-
-  /* 定标模式：按下两下各取一个点，再问这条线的实际长度 */
-  card.addEventListener(
-    "pointerdown",
-    (event) => {
-      if (planCalibration?.itemId !== item.id) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const rect = card.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const fx = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-      const fy = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
-      planCalibration.points.push({ fx, fy });
-      const svg = card.querySelector(".canvas-plan-svg");
-      if (svg && item.imageW > 0 && item.imageH > 0) {
-        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        dot.setAttribute("class", "canvas-plan-cal-dot");
-        dot.setAttribute("cx", String(fx * item.imageW));
-        dot.setAttribute("cy", String(fy * item.imageH));
-        dot.setAttribute("r", String(Math.max(12, Math.min(item.imageW, item.imageH) / 45)));
-        svg.append(dot);
-      }
-      if (planCalibration.points.length === 1) {
-        showToast("再点另一头");
-        return;
-      }
-      const [a, b] = planCalibration.points;
-      planCalibration = null;
-      void finishPlanCalibration(item, a, b);
-    },
-    true,
-  );
-
-  /* 脚印：按住拖动位置；松手没怎么动就选中对应产品卡 */
-  card.addEventListener(
-    "pointerdown",
-    (event) => {
-      if (planCalibration) return;
-      const footprint = event.target.closest?.(".canvas-plan-footprint");
-      if (!footprint) {
-        if (event.target.closest?.(".canvas-plan-camera")) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      if (item.locked) return;
-      const scale = planPixelsPerMm(item);
-      if (!(scale > 0)) return;
-      const fp = item.footprints.find((one) => one.id === footprint.getAttribute("data-footprint"));
-      if (!fp) return;
-      const rect = card.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const origin = { x: fp.x, y: fp.y };
-      let moved = false;
-      const move = (e) => {
-        const dxPx = (e.clientX - startX) * (item.imageW / rect.width);
-        const dyPx = (e.clientY - startY) * (item.imageH / rect.height);
-        fp.x = origin.x + dxPx / scale;
-        fp.y = origin.y + dyPx / scale;
-        if (Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) > 2) moved = true;
-        footprint.setAttribute(
-          "transform",
-          `translate(${(fp.x * scale).toFixed(1)} ${(fp.y * scale).toFixed(1)}) rotate(${fp.rotate.toFixed(1)})`,
-        );
-      };
-      const up = () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        if (moved) {
-          const target = itemEls.get(item.id);
-          if (target) syncItemElement(target, item);
-          scheduleItemsSave();
-        } else {
-          select(fp.product);
-        }
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    },
-    true,
-  );
-
-  /* 点机位：把链接的场景切到对应机位并跟过去 */
-  card.addEventListener("click", (event) => {
-    if (planCalibration) return;
-    const camera = event.target.closest?.(".canvas-plan-camera");
-    if (!camera) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const marker = item.cameras.find((one) => one.id === camera.getAttribute("data-camera"));
-    if (!marker) return;
-    const scene = findItem(marker.scene);
-    if (!scene || scene.type !== "scene") {
-      showError("这个机位链接的场景块不在了");
-      return;
-    }
-    setSceneCameraPreset(scene, marker.preset);
-    select(scene.id);
-    revealItem(scene);
-  });
-}
-
-function planDefaultPoint(plan) {
-  const scale = planPixelsPerMm(plan);
-  if (!(scale > 0)) return { x: 0, y: 0 };
-  return { x: plan.imageW / scale / 2, y: plan.imageH / scale / 2 };
-}
-
-function planAreaOf(points) {
-  let sum = 0;
-  for (let i = 0; i < points.length; i += 1) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    sum += a.x * b.y - b.x * a.y;
-  }
-  return Math.abs(sum) / 2 / 1_000_000;
-}
-
-function planPlaceProduct(product, plan, options = {}) {
-  if (!plan || plan.type !== "plan") throw new Error("要放进的是一块户型图");
-  if (!plan.calibration) {
-    throw new Error("这张户型图还没定标：右键「标定比例…」，或先 plan_calibrate");
-  }
-  const dims = product.dims || {};
-  const w = dims.w > 0 ? dims.w : 600;
-  const d = dims.d > 0 ? dims.d : 600;
-  const center = planDefaultPoint(plan);
-  const footprint = {
-    id: newId(),
-    product: product.id,
-    name: product.name || "产品",
-    x: Number.isFinite(Number(options.x)) ? Number(options.x) : center.x,
-    y: Number.isFinite(Number(options.y)) ? Number(options.y) : center.y,
-    w,
-    d,
-    rotate: Number.isFinite(Number(options.rotate)) ? ((Number(options.rotate) % 360) + 360) % 360 : 0,
-  };
-  plan.footprints.push(footprint);
-  const el = itemEls.get(plan.id);
-  if (el) syncItemElement(el, plan);
-  scheduleItemsSave();
-  return { ...agentSummary(plan), footprint };
-}
-
-function planPlaceCamera(plan, scene, options = {}) {
-  if (!plan || plan.type !== "plan") throw new Error("要放机位的是一块户型图");
-  if (!plan.calibration) throw new Error("这张户型图还没定标，放不了机位");
-  const center = planDefaultPoint(plan);
-  const marker = {
-    id: newId(),
-    scene: scene.id,
-    x: Number.isFinite(Number(options.x)) ? Number(options.x) : center.x,
-    y: Number.isFinite(Number(options.y)) ? Number(options.y) : center.y,
-    rotate: Number.isFinite(Number(options.rotate)) ? ((Number(options.rotate) % 360) + 360) % 360 : 0,
-    preset: ["front", "left", "right", "top", "auto"].includes(options.preset) ? options.preset : "front",
-  };
-  plan.cameras.push(marker);
-  const el = itemEls.get(plan.id);
-  if (el) syncItemElement(el, plan);
-  scheduleItemsSave();
-  return { ...agentSummary(plan), camera: marker };
-}
-
-function planAddArea(plan, points) {
-  if (!plan || plan.type !== "plan") throw new Error("要量面积的是一块户型图");
-  if (!plan.calibration) throw new Error("这张户型图还没定标，量不了面积");
-  const pts = [];
-  for (const one of Array.isArray(points) ? points : []) {
-    const x = Number(one?.x);
-    const y = Number(one?.y);
-    if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y });
-  }
-  if (pts.length < 3) throw new Error("面积至少给 3 个点（毫米坐标）");
-  const area = { id: newId(), points: pts };
-  plan.areas.push(area);
-  const el = itemEls.get(plan.id);
-  if (el) syncItemElement(el, plan);
-  scheduleItemsSave();
-  return { ...agentSummary(plan), area, squareMeters: planAreaOf(pts) };
-}
-
-function planRemove(plan, kind, itemId) {
-  const list = kind === "footprint" ? plan.footprints : kind === "camera" ? plan.cameras : kind === "area" ? plan.areas : null;
-  if (!list) throw new Error("kind 只有 footprint / camera / area");
-  const index = list.findIndex((one) => one.id === itemId);
-  if (index < 0) throw new Error("没找到这一项");
-  const [removed] = list.splice(index, 1);
-  const el = itemEls.get(plan.id);
-  if (el) syncItemElement(el, plan);
-  scheduleItemsSave();
-  return { ...agentSummary(plan), removed };
-}
-
-async function placeProductOnPlanFlow(product, plan) {
-  try {
-    if (!active || !current) return;
-    planPlaceProduct(product, plan);
-    showToast("已放到户型图中央，拖动脚印调整位置");
-  } catch (error) {
-    showError(error);
-  }
-}
-
-function agentPlanCalibrate(spec = {}) {
-  const item = agentRequireItem(spec.id);
-  if (item.type !== "plan") throw new Error("id 要传户型块");
-  const nums = ["x1", "y1", "x2", "y2", "mm"].map((key) => Number(spec[key]));
-  if (!nums.every(Number.isFinite) || !(nums[4] > 0)) {
-    throw new Error("要给 x1 / y1 / x2 / y2（0~1 的图片比例）和 mm（这段实际毫米数）");
-  }
-  const [x1, y1, x2, y2, mm] = nums;
-  if (Math.hypot(x2 - x1, y2 - y1) < 1e-4) throw new Error("两个点重合了");
-  const clamp01 = (v) => Math.min(1, Math.max(0, v));
-  item.calibration = { x1: clamp01(x1), y1: clamp01(y1), x2: clamp01(x2), y2: clamp01(y2), mm };
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  return agentSummary(item);
-}
-
-function agentPlanPlaceProduct(spec = {}) {
-  const plan = agentRequireItem(spec.plan);
-  const product = agentRequireItem(spec.product);
-  if (product.type !== "product") throw new Error("product 要传产品卡");
-  return planPlaceProduct(product, plan, { x: spec.x, y: spec.y, rotate: spec.rotate });
-}
-
-function agentPlanPlaceCamera(spec = {}) {
-  const plan = agentRequireItem(spec.plan);
-  const scene = agentRequireItem(spec.scene);
-  if (scene.type !== "scene") throw new Error("scene 要传场景块");
-  return planPlaceCamera(plan, scene, { x: spec.x, y: spec.y, rotate: spec.rotate, preset: spec.preset });
-}
-
-function agentPlanArea(spec = {}) {
-  const plan = agentRequireItem(spec.plan);
-  return planAddArea(plan, spec.points);
-}
-
-function agentPlanRemove(spec = {}) {
-  const plan = agentRequireItem(spec.plan);
-  return planRemove(plan, String(spec.kind || ""), String(spec.item || ""));
-}
 
 /* ---------- 提案页与客户版交付 ---------- */
 
@@ -12311,804 +10497,7 @@ async function agentUpdateBlock(id, patch = {}) {
   return pictureDropped.length ? { ...agentSummary(item), dropped: pictureDropped } : agentSummary(item);
 }
 
-/* ---------- 文件 / 笔记内容 ---------- */
 
-/* agent 插文件不走弹窗：拷进画布还是引用原文件由调用方直接给 mode。 */
-async function agentImportFile(spec = {}) {
-  agentRequireSpace();
-  if (editingId || edgeLabelEditor) commitEditing();
-  const canvasId = current.meta.id;
-  const path = String(spec.path || "").trim();
-  if (!path) throw new Error("需要文件在本机的路径 path");
-  const mode = spec.mode === "link" ? "link" : "copy";
-  const point =
-    Number.isFinite(Number(spec.x)) && Number.isFinite(Number(spec.y))
-      ? { x: Number(spec.x), y: Number(spec.y) }
-      : null;
-  const ext = fileExt(path);
-  const force = String(spec.as || "");
-  let placed = null;
-  try {
-    if (force === "image" || (!force && IMAGE_EXTS.has(ext))) {
-      placed = await addImageBlock(path, point, mode);
-    } else if (force === "audio" || (!force && AUDIO_EXTS.has(ext))) {
-      placed = await addAudioBlock(path, point, mode);
-    } else if (force === "video" || (!force && VIDEO_EXTS.has(ext))) {
-      placed = await addVideoBlock(path, point, mode);
-    } else if (force === "ebook" || (!force && EBOOK_EXTS.has(ext))) {
-      placed = await addEbookBlock(path, point, mode);
-    } else {
-      const info = await store.fileInfo(path);
-      if (!current || current.meta.id !== canvasId) throw new Error("导入时画布被切走了");
-      if (force === "file") {
-        const size = fileBlockSize(info);
-        placed = await addFileBlock(info, point || insertPoint(size.w, size.h), mode);
-      } else {
-        placed = await addDroppedFile(info, point, mode);
-      }
-    }
-  } catch (error) {
-    throw new Error(`没能把这份文件放进画布：${error?.message || error}`);
-  }
-  if (!current || current.meta.id !== canvasId) throw new Error("导入时画布被切走了");
-  if (!placed) throw new Error("没能把这份文件放进画布");
-  if (spec.borderColor !== undefined) applyColor(placed, "borderColor", String(spec.borderColor || ""));
-  if (spec.fillColor !== undefined) applyColor(placed, "fillColor", String(spec.fillColor || ""));
-  if (spec.borderColor !== undefined || spec.fillColor !== undefined) scheduleItemsSave();
-  agentRevealBlock(placed.id);
-  agentHighlight([placed.id], 1400);
-  return agentSummary(placed);
-}
-
-function agentPictureOf(id) {
-  const item = agentRequireItem(id);
-  if (item.type !== "picture") throw new Error("这不是画面块");
-  return item;
-}
-
-/* 这块有哪几层：同名指令算一层（几笔一起开关就包一层 group 起同名），组里起了名的那笔也算。
-   没起名的指令单独报个数——agent 得知道自己画的有多少还没成组，不然会以为整幅就这几层。 */
-function pictureLayersOf(item) {
-  const hidden = Array.isArray(item.hidden) ? item.hidden : [];
-  const census = pictureLayerCensus(item.cmds);
-  return {
-    layers: census.order.map((name) => ({ name, cmds: census.counts.get(name), hidden: hidden.includes(name) })),
-    unnamed: census.unnamed,
-    hidden,
-  };
-}
-
-/* 这块有多少笔声明了朝向（组里、素材表里的都算）：一条都没声明的话打光等于没打，
-   截图看不出变化。报给 agent，别让它对着一张「光没生效」的画面瞎猜是自己画歪了。 */
-function pictureFaceCount(item) {
-  let n = 0;
-  const walk = (list) => {
-    for (const cmd of Array.isArray(list) ? list : []) {
-      if (!cmd || typeof cmd !== "object") continue;
-      if (cmd.face) n += 1;
-      if (cmd.op === "group") walk(cmd.cmds);
-    }
-  };
-  walk(item.cmds);
-  for (const symbol of Object.values(item.symbols || {})) walk(symbol?.cmds);
-  return n;
-}
-
-function agentPictureGet(id) {
-  const item = agentPictureOf(id);
-  const cmds = Array.isArray(item.cmds) ? item.cmds : [];
-  const symbols = item.symbols || {};
-  const expanded = normalizePictureCmds(cmds, PICTURE_MAX_CMDS, { symbols }).expanded;
-  const drawn = pictureTopLayers(cmds, item.hidden).filter((one) => one.drawn).length;
-  return {
-    ...agentSummary(item),
-    paperColor: item.paperColor || "",
-    cmds,
-    /* 素材表整个交回去：use 只记一个名字，看不到名字背后是什么就没法接着画 */
-    symbols,
-    /* 一条 use 顶一整个素材，所以除了条数还要报展开后多少个节点 */
-    expanded,
-    symbolNames: Object.keys(symbols),
-    /* 图层开关：hidden 是关着的层名，layers 是这块现有的层，drawn 是真画出来的条数（不等于 cmds 的条数） */
-    hidden: Array.isArray(item.hidden) ? item.hidden : [],
-    layers: pictureLayersOf(item).layers,
-    drawn,
-    /* 一套光：light 是这块的光，faced 是有多少笔声明了朝向。
-       回读的 cmds 里颜色是固有色，屏幕上看到的是打过光的——对不上不是画丢了 */
-    light: item.light || null,
-    faced: pictureFaceCount(item),
-    /* 块自身的左上角就是画面坐标原点；框外的部分不显示但数据还在，拉大块就露出来 */
-    frame: { x: Math.round(item.x), y: Math.round(item.y), w: Math.round(item.w), h: Math.round(item.h) },
-    limit: PICTURE_MAX_CMDS,
-    expandedLimit: PICTURE_MAX_EXPANDED,
-  };
-}
-
-/* 素材表并进块里现有的那一份：给了定义就按名字盖上去，值给 null 就是删掉它。
-   这里只算出新表返回，不改 item —— 调用方要等指令也归一化通过了再落手，
-   半途抛错的话块上会留下改了一半的素材表。
-   还有指令在用的素材不许删：悄悄把那些实例一起抹掉，等于少写一个字段就丢一片画。
-   数的是 incoming（这次请求结束后要留在块上的那一串），不是 item.cmds ——
-   同批把用到它的指令一起撤掉的那种请求本来就干净，拦它就是把人逼成两次调用。
-   没并进去的定义（名字不对、里面一条指令都不成立）报回去，旧的照原样留着。 */
-function mergePictureSymbols(item, given, incoming) {
-  if (!given || typeof given !== "object" || Array.isArray(given)) {
-    throw new Error('symbols 得是一个 {"名字":{cmds:[...]}} 对象；要删素材就把这个名的值写成 null');
-  }
-  const table = normalizePictureSymbols(given);
-  /* 空原型：素材名是调用方给的，"__proto__" 往普通对象上塞会改掉原型链 */
-  const next = Object.assign(Object.create(null), item.symbols || {});
-  for (const key of Object.keys(given)) {
-    const name = String(key).trim();
-    if (!name) continue;
-    if (given[key] == null) {
-      const used = pictureSymbolUses(incoming ?? item.cmds, name);
-      if (used) {
-        throw new Error(`素材「${name}」还有 ${used} 处在用（use 摆的、tile 平铺铺的、clip / mask 当剪刀的），删了它们就空了：把用到它们的指令一起去掉（mode:"delete" 或整幅 replace）再删这个素材`);
-      }
-      delete next[name];
-    } else if (table.symbols[name]) {
-      next[name] = table.symbols[name];
-    }
-  }
-  const merged = normalizePictureSymbols(next);
-  /* 新并的、和整表重归一化时被掉的，都得报出去——不报就是「你说存好了，其实没存」 */
-  return { symbols: merged.symbols, dropped: [...table.dropped, ...merged.dropped] };
-}
-
-/* 有多少地方在用这个素材：use 摆的一份、tile 图案铺的一份、当剪刀使的一份都算。
-   图案漆里的 tile 也认素材名，只看 use 会漏——漏了就是一次悄悄丢指令。
-   剪刀漏了更难看：素材一删，那条的 clip 就剪不出形，被遮住的那片画会凭空露出来。 */
-function pictureSymbolUses(cmds, name) {
-  let uses = 0;
-  const tiled = (paint) =>
-    paint && typeof paint === "object" && paint.type === "pattern" && paint.pattern === "tile" && paint.ref === name;
-  const cut = (shape) => shape && typeof shape === "object" && shape.ref === name;
-  const walk = (list) => {
-    for (const cmd of list || []) {
-      if (!cmd || typeof cmd !== "object") continue;
-      if (cmd.op === "use" && cmd.ref === name) uses += 1;
-      if (tiled(cmd.fill) || tiled(cmd.stroke)) uses += 1;
-      if (cut(cmd.clip) || cut(cmd.mask) || tiled(cmd.mask?.fill)) uses += 1;
-      if (cmd.op === "group") walk(cmd.cmds);
-    }
-  };
-  walk(cmds);
-  return uses;
-}
-
-/* 画面里垫一张位图，发过来最常见的两种写法是「只有本机路径」和「没写多大」。
-   归一化那一步是同步的、量不了图，所以三个写入口（block_create / block_update / picture_draw）
-   先异步补一圈：写了 path 的拷进这个画布、把回来的相对路径填进 src；w / h 缺的照原图量。
-   拷不动、量不出都直接抛——悄悄少一块画，调用方会以为画面本来就该长这样。
-   地址顺手放进 imageCache，画的第一遍就是真图，不用等下一次重画。
-   src 自己写坏了的这里不动它，留给归一化去说那句 why（它会进返回的 dropped，比抛错好定位）。 */
-async function resolvePictureImages(spec, canvasId) {
-  const found = [];
-  const walk = (list) => {
-    for (const cmd of list || []) {
-      if (!cmd || typeof cmd !== "object") continue;
-      if (cmd.op === "image") found.push(cmd);
-      else if (cmd.op === "group") walk(cmd.cmds);
-    }
-  };
-  walk(spec.cmds);
-  for (const symbol of Object.values(spec.symbols || {})) walk(symbol && symbol.cmds);
-  for (const cmd of found) {
-    const path = String(cmd.path || "").trim();
-    const needsSize = !(Number(cmd.w) > 0 && Number(cmd.h) > 0);
-    let parsed = pictureImageSrc(cmd.src);
-    if (path) {
-      if (!IMAGE_EXTS.has(fileExt(path))) {
-        throw new Error(`垫进画面的 path 得是一张图片（「${path.slice(0, 40)}」不是）——要放文档就另建一个文件块`);
-      }
-      let rel = "";
-      try {
-        rel = await store.importCanvasImage(canvasId, path);
-      } catch (error) {
-        throw new Error(`没能把「${path.slice(0, 48)}」拷进这个画布：${error?.message || error}`);
-      }
-      parsed = pictureImageSrc(rel);
-    }
-    if (parsed.why) continue;
-    cmd.src = parsed.src;
-    let url = imageCache.get(parsed.src) || "";
-    if (!url) {
-      try {
-        url = await store.imageUrl(canvasId, parsed.src, parsed.linked);
-      } catch (error) {
-        throw new Error(`读不到这张垫图：${parsed.src}——${error?.message || error}`);
-      }
-    }
-    if (!current || current.meta.id !== canvasId) throw new Error("垫图进画面的时候画布被切走了");
-    imageCache.set(parsed.src, url);
-    if (!needsSize) continue;
-    const size = await imageSize(url, null);
-    if (!size || !size.width || !size.height) {
-      throw new Error(
-        `量不出这张图有多大：${parsed.src}——原文件可能读不出来或已经不是图片了；自己写上 w 和 h 就能垫进去`,
-      );
-    }
-    cmd.w = Math.round(size.width);
-    cmd.h = Math.round(size.height);
-  }
-}
-
-/* 已经画好的指令在这轮归一化里没过 = 这一笔会把画好的东西洗掉（多半是它用的素材被删了）。
-   不能只报一声就写下去：append 报的 at 减掉了前面旧的那一截，成了负数，
-   调用方根本对不上是哪条。所以直接拒掉，让调用方先把素材补回来。
-   oldCount 是「送进归一化的那串里，前多少条是块上原有的」。 */
-function pictureWashed(result, oldCount, wanted) {
-  const broke = result.dropped.find((one) => one.at < oldCount);
-  if (!broke) return;
-  const lost = wanted[broke.at];
-  throw new Error(
-    `这一笔会把已有的第 ${lost?.i ?? broke.at + 1} 条（${lost?.op || broke.op}）洗掉：${broke.why}` +
-      "——素材要先补回来，或先用 mode:\"delete\" 把用它的指令一起删掉；整幅重画就明说 mode:\"replace\"",
-  );
-}
-
-/* 名字写错的那一类（use 的 ref / variant / hide、tile 漆的 ref、剪刀的 ref）整笔请求失败。
-   以前它们只进 dropped，于是「一个变体名拼错 → 十七个小人没了」要回看渲染才发现，
-   而回话里那句「画好了」把人骗过去。报错时把这块现在有的名字一起带回去，改起来不用猜。
-   用户手绘那一路不过这里：手绘不会写错名字，也不该为这个丢一笔。 */
-function rejectFatalDrop(list) {
-  const bad = (list || []).find((one) => one.fatal);
-  if (bad) throw new Error(bad.why);
-}
-
-/* 画进去三种走法：replace 整幅换掉（默认）、append 追加、delete 按号删。
-   按号删是给橡皮和「洗掉画歪那一笔」用的——整幅重替换风险大得多。 */
-async function agentPictureDraw(id, patch = {}) {
-  const item = agentPictureOf(id);
-  if (item.locked) throw new Error("这块已锁定，先解锁再画");
-  /* 垫的位图得先拷进来、量好尺寸，下面归一化才认得这条 image */
-  const canvasId = current.meta.id;
-  await resolvePictureImages(patch, canvasId);
-  if (!current || current.meta.id !== canvasId) throw new Error("画这一笔的时候画布被切走了，什么都没改");
-  const before = Array.isArray(item.cmds) ? item.cmds : [];
-  const mode = String(patch.mode || "replace");
-  const given = Array.isArray(patch.cmds) ? patch.cmds : [];
-  /* 图层开关是块上的属性（和纸色同一类，走 items.json）：坏拼写在这儿就抛，
-     别等指令已经落了一半才发现改不动。 */
-  const hidden = patch.hidden === undefined ? null : normalizeHidden(patch.hidden);
-  if (hidden?.why) throw new Error(hidden.why);
-  const light = patch.light === undefined ? null : normalizeLight(patch.light);
-  if (light?.why) throw new Error(light.why);
-  /* 先定下这一请求结束后块上留的是哪一串（还没归一化）：素材删除的守卫数的是它，
-     不是块上旧的那一串——同批把用到它的指令一起撤干净的那种请求本来就安全，
-     拦它等于逼人多跑一趟。mode 不对也在这儿就抛，别抛在素材已经改了之后。 */
-  let incoming = before;
-  if (mode === "delete") {
-    const ids = new Set((Array.isArray(patch.ids) ? patch.ids : []).map(Number));
-    if (!ids.size) throw new Error("delete 需要 ids：要删的指令号，从 picture_get 里拿");
-    incoming = before.filter((cmd) => !ids.has(cmd.i));
-  } else if (mode === "append") {
-    incoming = [...before, ...given];
-  } else if (mode === "replace") {
-    incoming = given;
-  } else {
-    throw new Error("mode 只能是 replace / append / delete");
-  }
-  /* 素材先并进来：同一个请求里的 cmds 才认得刚起的名字，use 不用分两次发。
-     并出来的是新表，先攥在手里，等指令也归一化通过了一起换上——半途抛错不能留下改到一半的块 */
-  const merged = patch.symbols === undefined ? null : mergePictureSymbols(item, patch.symbols, incoming);
-  const symbols = merged ? merged.symbols : item.symbols || {};
-  let next = before;
-  let dropped = [];
-  let deleted = 0;
-  let expanded = 0;
-  if (mode === "delete") {
-    next = incoming;
-    deleted = before.length - next.length;
-    const rest = normalizePictureCmds(next, PICTURE_MAX_CMDS, { symbols });
-    pictureWashed(rest, next.length, next);
-    expanded = rest.expanded;
-  } else {
-    const result = normalizePictureCmds(incoming, PICTURE_MAX_CMDS, { symbols });
-    next = result.cmds;
-    expanded = result.expanded;
-    if (mode === "append") pictureWashed(result, before.length, incoming);
-    /* append 洗的是「旧的 + 新发的」拼起来的表，下标得减掉前面旧的那一截，
-       报回去的 at 才是调用方自己发出去的 cmds 里的第几条 */
-    const offset = mode === "append" ? before.length : 0;
-    dropped = result.dropped.map((one) => ({ ...one, at: one.at - offset }));
-  }
-  const rejected = [...(merged ? merged.dropped : []), ...dropped];
-  /* 名字写错的那一类在这儿拦下来：拼错一个 variant / ref 只悄悄少一片画、回话还说画好了，
-     agent 会照着这个半成品继续往下画。整笔请求先失败，改对了再发一次。 */
-  rejectFatalDrop(rejected);
-  if (merged) item.symbols = merged.symbols;
-  item.cmds = next;
-  /* 指令和素材不归 items.json 管，改完单独落 pictures/<块id>.json 那一份 */
-  persistPicture(item);
-  if (patch.paperColor !== undefined) {
-    item.paperColor = String(patch.paperColor || "");
-    refreshPictureChrome(item.id);
-  }
-  /* 开关要在重画之前就写上，不然这一帧还是按旧的层画 */
-  if (hidden) item.hidden = hidden.hidden;
-  if (light) item.light = light.light;
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  agentHighlight([item.id]);
-  return {
-    ...agentSummary(item),
-    added: next.length - before.length,
-    deleted,
-    total: next.length,
-    expanded,
-    symbolNames: Object.keys(symbols),
-    /* 回显图层开关：只改素材或纸色的那一次也要看得见现在关着哪几层，
-       不然 agent 以为画面上少了那一片是自己画丢了 */
-    hidden: Array.isArray(item.hidden) ? item.hidden : [],
-    layers: pictureLayersOf(item).layers,
-    light: item.light || null,
-    drawn: pictureTopLayers(next, item.hidden).filter((one) => one.drawn).length,
-    limit: PICTURE_MAX_CMDS,
-    expandedLimit: PICTURE_MAX_EXPANDED,
-    /* 认不了的指令原样报回去：at 是你在 cmds 里提交的下标，why 说清是哪个字段写成了什么。
-       不报的话 agent 会以为画面本来就该长这样 */
-    ...(rejected.length
-      ? {
-          dropped: rejected,
-          hint: `有 ${rejected.length} 条指令或素材被丢了，按每条的 why 改掉再发一次；改完要拿 picture_get 回读编号，别按提交下标删`,
-        }
-      : {}),
-  };
-}
-
-/* 图层单独一个工具：读这块有哪些层、关着哪几层；带 hide / show 就动开关。
-   开关不碰指令——为了关一层把几千条整幅 replace 一遍，风险和开销都不该在那头。
-   同名同时出现在 hide 和 show 里按 show 算（开着），返回里照实回显，不用猜。 */
-function agentPictureLayers(id, patch = {}) {
-  const item = agentPictureOf(id);
-  if (item.locked) throw new Error("这块已锁定，先解锁再改图层");
-  const off = Array.isArray(item.hidden) ? [...item.hidden] : [];
-  const read = (raw, key) => {
-    if (raw === undefined) return null;
-    const got = normalizeHidden(raw);
-    if (got.why) throw new Error(`${key} ${got.why.replace(/^hidden /, "")}`);
-    return got.hidden;
-  };
-  const hide = read(patch.hide, "hide");
-  const show = read(patch.show, "show");
-  const census = pictureLayersOf(item);
-  const known = census.layers.map((one) => one.name);
-  const asked = [...new Set([...(hide || []), ...(show || [])])];
-  const unknown = asked.filter((name) => !known.includes(name));
-  if (unknown.length) {
-    throw new Error(
-      `这块没有「${unknown.join(" / ")}」这些图层——${
-        known.length ? `现在有的层是：${known.slice(0, 12).join(" / ")}` : "这块一条指令都还没起 name（想整层开关，就给那几条指令写同一个 name，几笔一起开关就包一层 group 起名）"
-      }`,
-    );
-  }
-  if (hide || show) {
-    const next = [...off];
-    for (const name of hide || []) if (!next.includes(name)) next.push(name);
-    for (const name of show || []) {
-      const at = next.indexOf(name);
-      if (at >= 0) next.splice(at, 1);
-    }
-    item.hidden = next;
-    const el = itemEls.get(item.id);
-    if (el) syncItemElement(el, item);
-    scheduleItemsSave();
-    agentHighlight([item.id]);
-  }
-  const layers = census.layers.map((one) => ({ ...one, hidden: item.hidden.includes(one.name) }));
-  return {
-    ...agentSummary(item),
-    hidden: [...item.hidden],
-    layers,
-    unnamed: census.unnamed,
-    drawn: pictureTopLayers(item.cmds, item.hidden).filter((one) => one.drawn).length,
-    total: (Array.isArray(item.cmds) ? item.cmds : []).length,
-    ...(layers.length ? {} : { hint: "这块还没分层：想整层开关，就给那几条指令写同一个 name（几笔一起开关就包一层 group 起名）" }),
-  };
-}
-
-/* 一套光单独一个工具：只带 id 就是问「这块现在怎么打的光」。
-   带哪个字段就改哪个字段，没带的沿用块上现值——为了挪五度方位角要把光色、影色、强度重发一遍，
-   等于把用户定好的那几样洗回默认，这正是「改一处丢一片」那类坑。
-   关掉光写 off:true。 */
-function agentPictureLight(id, patch = {}) {
-  const item = agentPictureOf(id);
-  const wanted = patch.off === true || patch.off === "true" || ["angle", "elev", "lit", "dark", "k"].some((key) => patch[key] !== undefined);
-  /* 只带 id 是「问这块现在怎么打的光」，锁着也得答——锁拦的是改，不是看 */
-  if (wanted && item.locked) throw new Error("这块已锁定，先解锁再改光");
-  if (patch.off === true || patch.off === "true") {
-    item.light = null;
-  } else {
-    const given = ["angle", "elev", "lit", "dark", "k"].filter((key) => patch[key] !== undefined);
-    if (given.length) {
-      /* 从没挂过光的块起步：没有现值可沿用，angle 没给就报错，不替它挑一个方向 */
-      const merged = { ...(item.light || {}) };
-      for (const key of given) merged[key] = patch[key];
-      const got = normalizeLight(merged);
-      if (got.why) throw new Error(got.why);
-      item.light = got.light;
-    }
-  }
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  agentHighlight([item.id]);
-  const faced = pictureFaceCount(item);
-  return {
-    ...agentSummary(item),
-    light: item.light || null,
-    faced,
-    cmds: (Array.isArray(item.cmds) ? item.cmds : []).length,
-    ...(item.light && !faced
-      ? { hint: "这块还没有一笔声明 face，光打上去不会有任何明暗变化——要给受光的那几笔写 face（up/down/left/right/front/back），整面墙就包一层 group 写一次" }
-      : {}),
-  };
-}
-
-/* ---------- 生图面板（agent） ----------
-   引擎一次只吃一张，所以「现在能不能开始」看的不是这一块，而是 genBusyId() 那一个 id。
-   gen_run 默认把这一趟等完：出图半分钟，比分几次去问相位省事；
-   头一次跑还要先把权重读进来，那一两分钟也在同一个等待里。 */
-
-function agentGenOf(id) {
-  const item = agentRequireItem(id);
-  if (item.type !== "gen") throw new Error("这不是生图面板");
-  return item;
-}
-
-/* 出图参数只认块上这几个字段：给了才改，认不出的数收成最接近的合法值。
-   尺寸得贴到 32 的倍数上（snapGenSize），步数、cfg、seed 的区间和建块时同一套。 */
-function applyGenFields(item, spec = {}) {
-  let touched = false;
-  if (spec.prompt !== undefined) {
-    item.prompt = String(spec.prompt).slice(0, GEN_TEXT_MAX);
-    touched = true;
-  }
-  if (spec.negative !== undefined) {
-    item.negative = String(spec.negative).slice(0, GEN_TEXT_MAX);
-    touched = true;
-  }
-  if (Number.isFinite(Number(spec.imageW))) {
-    item.imageW = snapGenSize(Number(spec.imageW));
-    touched = true;
-  }
-  if (Number.isFinite(Number(spec.imageH))) {
-    item.imageH = snapGenSize(Number(spec.imageH));
-    touched = true;
-  }
-  if (Number.isFinite(Number(spec.steps))) {
-    item.steps = clamp(Math.round(Number(spec.steps)), 0, GEN_STEPS_MAX);
-    touched = true;
-  }
-  if (Number.isFinite(Number(spec.cfg))) {
-    item.cfg = clamp(Number(spec.cfg), 0, GEN_CFG_MAX);
-    touched = true;
-  }
-  if (spec.seed !== undefined) {
-    /* -1 是「每张换一个」的哨兵，别的认不出的数也退回它 */
-    const want = Number(spec.seed);
-    item.seed = Number.isFinite(want) && want >= -1 ? Math.trunc(want) : -1;
-    touched = true;
-  }
-  if (spec.mode !== undefined) {
-    const want = String(spec.mode).trim().toLowerCase();
-    if (!GEN_MODES.includes(want)) throw new Error(`mode 只认 ${GEN_MODES.join(" / ")}`);
-    item.mode = want;
-    touched = true;
-  }
-  if (spec.model !== undefined) {
-    const want = String(spec.model).trim().toLowerCase();
-    if (!["", "qwen21", "h3image"].includes(want)) {
-      throw new Error("model 只认 qwen21 / h3image，空串是跟随设置里的当前模型");
-    }
-    item.model = want;
-    touched = true;
-  }
-  if (spec.strength !== undefined) {
-    const want = Number(spec.strength);
-    if (!Number.isFinite(want)) throw new Error("strength 得是个 0~1 的数");
-    item.strength = clamp(want, 0, 1);
-    touched = true;
-  }
-  return touched;
-}
-
-async function agentGenStatus() {
-  agentRequireSpace();
-  const engine = await store.genStatus();
-  return {
-    loaded: Boolean(engine.loaded),
-    busyBlock: genBusyId() || null,
-    family: engine.family || "",
-    familyLabel: engine.familyLabel || "",
-    provider: engine.provider || "local",
-    apiModel: engine.apiModel || "",
-    apiProblem: engine.apiProblem || null,
-    modelsDir: engine.modelsDir || "",
-    missing: Array.isArray(engine.missing) ? engine.missing : [],
-    dit: engine.dit || "",
-    encoder: engine.encoder || "",
-    idleSeconds: engine.idleSeconds || 0,
-    panels: current.items.filter((item) => item.type === "gen").map(agentSummary),
-  };
-}
-
-/* 看/切当前生图模型族。切换会放掉已载入的权重，下一次出图按新族重新载入。 */
-async function agentGenFamily(family) {
-  agentRequireSpace();
-  const want = typeof family === "string" ? family.trim() : "";
-  const info = want ? await store.genFamilySet(want) : await store.genModels();
-  return {
-    family: info.family || "",
-    familyLabel: info.familyLabel || "",
-    modes: Array.isArray(info.modes) ? info.modes : [],
-    maxSide: info.maxSide || 0,
-    modelsDir: info.modelsDir || "",
-    currentDit: info.currentDit || "",
-    currentEncoder: info.currentEncoder || "",
-    missing: Array.isArray(info.missing) ? info.missing : [],
-    advice: info.advice || "",
-  };
-}
-
-/* 等到这一轮出完、失败或取消。运行态是事件写回来的，这儿只能轮询着读。 */
-async function waitGenRun(id, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const run = genRunOf(id);
-    if (run.phase !== "loading" && run.phase !== "running") return run;
-    if (Date.now() > deadline) return run;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-}
-
-async function agentGenRun(id, patch = {}, mask = "") {
-  const item = agentGenOf(id);
-  /* 锁拦改不拦看，但这一趟既改字段又发任务：先看锁，不许把提示词写进一块锁着的面板 */
-  /* 锁只锁坐标：出图、改参数、落块这些照常走 */
-  if (!item.prompt?.trim() && genModeFor(item, genInputItems(item).length) !== "upscale") {
-    throw new Error("提示词是空的");
-  }
-  const busy = genBusyId();
-  const usingApi = genEngine.provider === "api";
-  if (!usingApi && busy && busy !== item.id) {
-    throw new Error(`引擎正被生图面板 ${busy} 占着，一次只出一张`);
-  }
-  if (mask) genRunMasks.set(item.id, String(mask));
-  else genRunMasks.delete(item.id);
-  /* 补细节是块上的开关，不走 applyGenFields */
-  let refined = false;
-  if (patch.refine !== undefined) {
-    item.refine = Boolean(patch.refine);
-    refined = true;
-  }
-  /* 改字段和发出去是同一次调用：先落到块上，出图取的就是块上这一份 */
-  if (applyGenFields(item, patch) || refined) {
-    persistGen(item);
-    const el = itemEls.get(item.id);
-    if (el) syncItemElement(el, item);
-    scheduleItemsSave();
-  }
-  const nowRun = genRunOf(item.id);
-  const running = nowRun.phase === "loading" || nowRun.phase === "running";
-  if (running) runOrStopGen(item.id);
-  else if (usingApi || !busy) runOrStopGen(item.id);
-  agentHighlight([item.id], 1600);
-  if (patch.wait === false) return { ...agentSummary(item), waited: false };
-  const seconds = Math.min(600, Math.max(1, numOr(patch.timeout, 300)));
-  const run = await waitGenRun(item.id, seconds * 1000);
-  const still = findItem(item.id);
-  if (!still) throw new Error(`生图面板 ${item.id} 已经不在这块画布里了`);
-  return {
-    ...agentSummary(still),
-    waited: true,
-    timedOut: run.phase === "loading" || run.phase === "running",
-  };
-}
-
-/* 停一块的取消：给了块 id 就停那一块，不给就停当前在跑的第一块（兼容老调用） */
-function agentGenCancel(id) {
-  const target = id ? String(id) : genBusyId();
-  if (!target) return { canceled: false, note: "现在没有在出图" };
-  const run = genRunOf(target);
-  if (run.phase !== "loading" && run.phase !== "running") {
-    return { canceled: false, note: "这块现在没有在出图" };
-  }
-  void stopGen(target);
-  return { canceled: true, block: target };
-}
-
-/* 把最近那张落成一块独立图片块：面板留着继续改词重出，图片块自己带一份文件 */
-async function agentGenPlace(id) {  const item = agentGenOf(id);
-  if (!item.src) throw new Error("这块还没出过图，先 gen_run");
-  const run = genRunOf(item.id);
-  if (run.phase === "loading" || run.phase === "running") {
-    throw new Error("正在出图，等这一张跑完再落块");
-  }
-  const placed = await placeGenImage(item.id);
-  if (!placed) throw new Error("没能落块：那张图的文件读不出来，具体原因弹在界面右下角了");
-  agentRevealBlock(placed.id);
-  return agentSummary(placed);
-}
-
-/* 视频生成：提交一条任务，等它出片。首帧可以给画布块 id（图片块、画面块、
-   已出图的生图面板），也可以直接给 PNG 的 base64。产物是 gen/videos 下的缓存文件。 */
-async function agentGenVideo(args = {}) {
-  agentRequireSpace();
-  /* 给了 genvideo 面板就按面板走：提示词、秒数、尺寸、首帧都从面板上取，
-     结果也写在面板的取景窗里，和手点「开始」完全一样，出完能直接落块。 */
-  const panel = args.block ? findItem(String(args.block)) : null;
-  const usePanel = panel && panel.type === "genvideo";
-  const prompt = String(args.prompt || (usePanel ? panel.prompt : "") || "").trim();
-  if (!prompt) throw new Error("prompt 是空的");
-  let image = "";
-  const first = args.firstFrame ? String(args.firstFrame) : "";
-  if (first) {
-    const item = findItem(first);
-    image = item ? await genInputPng(item) : first;
-  } else if (usePanel) {
-    const sources = genInputItems(panel);
-    if (sources.length) image = await genInputPng(sources[0]);
-  }
-  const block = usePanel ? panel.id : `video-${Date.now()}`;
-  dropVideoRun(block);
-  if (usePanel) {
-    patchVideoRun(block, {
-      phase: "running",
-      label: "提交中…",
-      startedAt: Date.now(),
-      path: "",
-      seconds: 0,
-      error: "",
-      canceled: false,
-    });
-    refreshVideoPanel(block);
-  }
-  await store.genVideoStart({
-    block,
-    prompt,
-    image: image || undefined,
-    seconds: numOr(args.seconds, usePanel ? panel.seconds : 6),
-    ratio: args.ratio || "16:9",
-    width: args.imageW ? Math.round(Number(args.imageW)) : usePanel ? panel.width : undefined,
-    height: args.imageH ? Math.round(Number(args.imageH)) : usePanel ? panel.height : undefined,
-    model: args.model || undefined,
-  });
-  const timeout = Math.min(1800, Math.max(30, numOr(args.timeout, 600)));
-  const deadline = Date.now() + timeout * 1000;
-  for (;;) {
-    const run = videoRunOf(block);
-    if (run?.phase === "failed") {
-      throw new Error(run.canceled ? "已取消" : run.error || "视频生成失败");
-    }
-    if (run?.phase === "done") {
-      return { path: run.path, seconds: run.seconds };
-    }
-    if (Date.now() > deadline) {
-      const status = await store.genVideoStatus().catch(() => null);
-      return { timedOut: true, status };
-    }
-    await new Promise((resolve) => setTimeout(resolve, 800));
-  }
-}
-
-async function agentGenVideoStatus() {
-  agentRequireSpace();
-  return store.genVideoStatus();
-}
-
-async function agentGenVideoCancel(id) {
-  const target = id ? String(id) : videoBusyId();
-  if (target) {
-    const run = videoRunOf(target);
-    if (run?.phase === "running") {
-      void stopVideo(target);
-      return { canceled: true, block: target };
-    }
-  }
-  const canceled = await store.genVideoCancel(target || undefined).catch(() => false);
-  return { canceled };
-}
-
-function agentNoteOf(id) {
-  const item = agentRequireItem(id);
-  if (item.type !== "note") throw new Error("这不是笔记块");
-  return item;
-}
-
-function agentNoteRead(id) {
-  const item = agentNoteOf(id);
-  return { ...agentSummary(item), markdown: item.source || "" };
-}
-
-async function agentNoteWrite(id, text) {
-  const item = agentNoteOf(id);
-  if (editingId === item.id) commitEditing();
-  const body = String(text ?? "");
-  const canvasId = current.meta.id;
-  if (item.linked) {
-    await store.writeBackNote(canvasId, item.id, body);
-    if (!current || current.meta.id !== canvasId) throw new Error("写回时画布被切走了");
-  } else {
-    item.source = body;
-    persistNote(item);
-  }
-  item.source = body;
-  const el = itemEls.get(item.id);
-  if (el) renderNoteBody(item, el);
-  agentHighlight([item.id]);
-  return { ...agentSummary(item), markdown: body };
-}
-
-async function agentFileOf(id) {
-  const item = agentRequireItem(id);
-  if (!isFileEditable(item)) throw new Error("这块不是可直接读写正文的文本文件");
-  return item;
-}
-
-async function agentFileRead(id, maxChars) {
-  const item = await agentFileOf(id);
-  const canvasId = current.meta.id;
-  const body = await store.readFileBody(canvasId, item.id);
-  if (!current || current.meta.id !== canvasId) throw new Error("读文件时画布被切走了");
-  agentHighlight([item.id]);
-  const limit = Math.max(0, Math.trunc(numOr(maxChars, 20000)));
-  const full = body.text || "";
-  const text = limit && full.length > limit ? full.slice(0, limit) : full;
-  return {
-    ...agentSummary(item),
-    text,
-    chars: full.length,
-    truncated: text.length < full.length,
-    encoding: body.encoding,
-  };
-}
-
-async function agentFileWrite(id, text, force = false) {
-  const item = await agentFileOf(id);
-  const canvasId = current.meta.id;
-  /* 块里的编辑框开着就先收掉，不然它手上的旧正文会把这次写回盖掉 */
-  if (!(await closeFileEdit())) throw new Error("块里的编辑框还开着，先处理那边的保存");
-  if (!current || current.meta.id !== canvasId) throw new Error("写文件时画布被切走了");
-  const body = await store.readFileBody(canvasId, item.id);
-  const next = String(text ?? "");
-  const result = await store.writeBackCanvasFile(canvasId, item.id, next, body, Boolean(force));
-  if (!current || current.meta.id !== canvasId) throw new Error("写文件时画布被切走了");
-  if (result?.conflict) {
-    throw new Error("原文件在读取之后被别的程序改过；确认用这份覆盖请再带 force: true 调一次");
-  }
-  item.size = Number(result?.size) || item.size;
-  filePreviewCache.delete(previewKey(item));
-  refreshFileBlock(item);
-  scheduleItemsSave();
-  agentHighlight([item.id]);
-  return { ...agentSummary(item), chars: next.length, encoding: body.encoding };
-}
-
-function agentRevealFile(id) {
-  const item = agentRequireItem(id);
-  const target = revealTarget(item);
-  if (!target) throw new Error("这块没有对应的磁盘文件");
-  const call = target.block
-    ? store.revealBlock(current.meta.id, item.id)
-    : store.revealCanvasFile(current.meta.id, target.rel, target.linked);
-  call.catch(showError);
-  agentHighlight([item.id]);
-  return agentSummary(item);
-}
-
-/* 用系统看图工具打开那块图：跟用户在画布上双击那一下是一回事 */
-async function agentOpenImage(id) {
-  const item = agentRequireItem(id);
-  if (item.type !== "image" && item.type !== "gen") throw new Error("这不是图片块");
-  if (!item.src) throw new Error("这块还没有图");
-  await openImageExternally(item);
-  agentHighlight([item.id]);
-  return agentSummary(item);
-}
 
 /* ---------- 汇总出口 ---------- */
 

@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：alt-measure */
 
-import { CONNECTOR_MAX_POINTS, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, RESIZE_MIN, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, active, addItemElement, applyCamera, assignMeasureHeld, bendInsertIndex, boundsOfItem, capturePagePin, clientToWorld, connectHit, connectorGeometry, current, drag, drawConnectPreview, drawSnapGuides, dropTool, editingId, findItem, finishConnect, finishConnectEnd, finishMarquee, finishPaint, fitGenPrompt, itemBounds, itemEls, loneSelected, makeBox, makeLine, makePicture, makeScene, makeText, measureFrame, measureHeld, nearestPathPoint, onPaintPointerMove, pinEbookPage, reassignContainerOwners, refreshConnectors, refreshMinimap, releaseEbookPage, removeItemFromDom, scheduleCameraSave, scheduleItemsSave, select, setConnectTarget, setDrag, setHoverId, setMeasureFrame, setTool, snapLineAngle, snapOffset, snapResize, startTextEdit, stretchEbookPage, syncConnector, syncItemElement, tool, ui, updateMarquee, updateMetrics, updatePorts, updateSelection, worldToStage } from "../canvas.js";
+import { CONNECTOR_MAX_POINTS, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, RESIZE_MIN, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, active, addItemElement, applyCamera, assignMeasureHeld, bendInsertIndex, boundsOfItem, capturePagePin, clientToWorld, connectHit, connectorGeometry, current, drag, drawConnectPreview, drawSnapGuides, dropTool, editingId, findItem, finishConnect, finishConnectEnd, finishMarquee, finishPaint, fitGenPrompt, itemBounds, itemEls, loneSelected, makeBox, makeLine, makePicture, makeScene, makeText, measureFrame, measureHeld, nearestPathPoint, onPaintPointerMove, pinEbookPage, reassignContainerOwners, refreshConnectors, refreshMinimap, releaseEbookPage, removeItemFromDom, scheduleCameraSave, scheduleItemsSave, select, setConnectTarget, setDrag, setHoverId, setMeasureFrame, setTool, snapLineAngle, snapOffset, snapResize, startTextEdit, stretchEbookPage, syncConnector, syncItemElement, tool, ui, updateMarquee, updatePorts, updateSelection, worldToStage } from "../canvas.js";
 
 /* ---------- Alt 测距 ---------- */
 
@@ -279,7 +279,6 @@ export function onWindowPointerMove(e) {
        走完整的 updateSelection 会把每个框都拆了重建，一次拖几十块就卡。 */
     refreshConnectors();
     updatePorts();
-    updateMetrics();
     refreshMinimap();
     scheduleMeasurements();
     return;

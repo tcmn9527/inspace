@@ -148,30 +148,6 @@
   }
 }
 
-/* 左下角信息条：选中面板的 (X, Y) 和 [W, H]，样式跟右下角缩放条同一路子（浮层控件） */
-.canvas-metrics {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  z-index: 6;
-  margin: 0;
-  padding: 5px 10px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
-  color: var(--muted);
-  font-size: 12px;
-  /* 拖动途中数字一直在跳，等宽数字才不会左右抖 */
-  font-variant-numeric: tabular-nums;
-  /* 默认只报编号，点一下展开坐标尺寸；宽度跟内容走 */
-  pointer-events: auto;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-
 /* 锁定块在 #N 前面挂的小锁，跟着 12px 字走 */
 .canvas-metrics-lock {
   width: 11px;

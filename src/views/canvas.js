@@ -52,7 +52,7 @@ import { closeFileEdit, commitNoteEditing, fileEditor, flushFileEditor, hydrateN
 import { PICTURE_BRUSH_SPEED, PICTURE_UNDO_LIMIT, attachPictureTools, dropRegionImage, exportPictureImage, paintingTarget, pictureEditorOf, pictureEditors, pictureMenuEntries, refreshPictureChrome, setPictureEditing } from "./canvas/paint.js";
 import { agentEbookGoto, agentEbookToc, agentMediaControl, agentMediaState, agentPdfGoto, agentPdfState } from "./canvas/pdf-media.js";
 import { addItemElement, boundsOfItem, findItem, refreshConnectors, renderAll, revealSelectionInTree, select, selectAll, syncConnector, syncSelectedClasses } from "./canvas/render.js";
-import { LOCK_BADGE_SVG, addOverlayBox, enterScenePart, loneSelected, refreshSceneToolbar, refreshTitlebarPath, scenePartBaseLabel, scenePatch, updateMetrics, updateSelection } from "./canvas/scene-toolbar.js";
+import { LOCK_BADGE_SVG, addOverlayBox, enterScenePart, loneSelected, refreshSceneToolbar, refreshTitlebarPath, scenePartBaseLabel, scenePatch, updateSelection } from "./canvas/scene-toolbar.js";
 import { FURNITURE_COLORS, SCENE_LIGHT_PRESETS, addSceneFloor, addSceneModel, addSceneModelFlow, agentSceneApplyMaterial, agentSceneCameraPreset, agentSceneFurnitureBind, agentSceneFurnitureMove, agentSceneGet, agentSceneLightPreset, agentScenePlaceProduct, agentSceneRoomShell, agentSceneSurfaceSet, applyFurniture, bufferToBase64, createFurnitureFlow, exportSceneFlow, newSceneForProduct, pickProductModel, placeProductInSceneFlow, roomShellParts, roomShellSurfaces, sceneLightOf, sceneSurfacesOf } from "./canvas/scene-tools.js";
 import { sceneView, setSceneCameraPreset } from "./canvas/scene-tools.js";
 import { commitEditing, startTextEdit } from "./canvas/text-edit.js";
@@ -88,7 +88,7 @@ export { refreshFileBlock, refreshGenFeeds, refreshGenMaskBase, refreshGenPanel,
 export { revealFileBlock, revealItem, revealSelectionInTree, revealTarget, roomShellParts, roomShellSurfaces, routeConnectorPreview, runOrStopGen, sceneCameraState, sceneFurnitureDragDelta, sceneFurnitureGroup, sceneFurnitureInspect, sceneFurnitureMoveDelta, sceneLightOf, scenePartBaseLabel, scenePatch, scenePick, scenePlacementActive, sceneSurfacesOf, sceneTimers, sceneView, scheduleCameraSave, scheduleCulling, scheduleItemsSave, scheduleMeasurements };
 export { select, selectAll, setConnectTarget, setConnectorBend, setCosmosCamera, setFontSize, setHoverId, setLocked, setLockedMany, setMeasureHeld, setPageOrderFlow, setPageRatio, setPictureEditing, setSceneCameraPreset, setSceneCameraScale, setSceneFurnitureSelection, setScenePlacementMode, setTextAlign, setTool, showError, showToast, snapGenSize, snapLineAngle, snapOffset, snapResize };
 export { srcInUse, stageCenterWorld, stageTargetAt, startDraw, startEdgeLabelEdit, startFileEdit, startNoteEdit, startPlanCalibration, startTextEdit, startTreeRename, stopGen, stopVideo, store, stretchEbookPage, syncConnector, syncConnectorElement, syncGen, syncItemElement, syncSelectedClasses, syncVideoPanel, tidySelected, toPersisted, toPngDataUrl, toggleContainer, toolMenuEntries };
-export { treeCollapsed, treeData, treeGroupList, treePanelCollapsed, treeSavePrefs, treeUi, updateMarquee, updateMetrics, updatePorts, updateSelection, videoBusyId, videoControlOf, videoRunOf, withAllVisible, worldToStage };
+export { treeCollapsed, treeData, treeGroupList, treePanelCollapsed, treeSavePrefs, treeUi, updateMarquee, updatePorts, updateSelection, videoBusyId, videoControlOf, videoRunOf, withAllVisible, worldToStage };
 
 
 
@@ -236,7 +236,6 @@ export function setPreviewPath(value) { previewPath = value; }
 export function assignTool(value) { tool = value; }
 export function setToolboxMarkup(value) { toolboxMarkup = value; }
 export function setCtrlHeld(value) { ctrlHeld = value; }
-export let metricsOpen = false;
 export let treeRenaming = null;
 export function setTreeRenaming(value) { treeRenaming = value; }
 export function setNoteWriteBack(value) { noteWriteBack = value; }
@@ -250,7 +249,6 @@ export function setActive(value) { active = value; }
 export function setDrag(value) { drag = value; }
 export function setLastPointer(value) { lastPointer = value; }
 export function setSearchApi(value) { searchApi = value; }
-export function setMetricsOpen(value) { metricsOpen = value; }
 export function setEdgeLabelEditor(value) { edgeLabelEditor = value; }
 export function setCurrent(value) { current = value; }
 export function setEditingId(value) { editingId = value; }
@@ -270,7 +268,6 @@ export function initCanvas() {
     measureLayer: document.querySelector("#canvas-measure-layer"),
     portVisualLayer: document.querySelector("#canvas-port-visual-layer"),
     handleVisualLayer: document.querySelector("#canvas-handle-visual-layer"),
-    metrics: document.querySelector("#canvas-metrics"),
     tools: document.querySelector("#canvas-tools"),
     toolMenu: document.querySelector("#canvas-tool-menu"),
     toolIcon: document.querySelector("#canvas-tool-icon"),
@@ -334,12 +331,6 @@ export function initCanvas() {
       ui.zoomValue.value = zoomLabel();
       ui.zoomValue.blur();
     }
-  });
-
-  /* 左下角信息条：默认只报编号，点一下展开坐标和尺寸，再点收起 */
-  ui.metrics.addEventListener("click", () => {
-    metricsOpen = !metricsOpen;
-    updateMetrics();
   });
 
   ui.stage.addEventListener("pointerdown", onStagePointerDown);
@@ -807,7 +798,6 @@ export function showEmpty() {
   ebookTocCache.clear();
   mediaMissing = new Set();
   updateChrome();
-  updateMetrics();
 }
 
 

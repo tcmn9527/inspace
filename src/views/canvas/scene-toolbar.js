@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：scene-toolbar */
 
-import { FURNITURE_COLORS, SCENE_LIGHT_PRESETS, active, addSceneFloor, addSceneModelFlow, agentHighlight, agentRevealBlock, boundsOfItem, closeColorPicker, connectorGeometry, createFurnitureFlow, current, dropRegionImage, exportSceneFlow, findItem, itemBounds, itemEls, metricsOpen, newId, normalizeLight, normalizeSceneCamera, normalizeSceneParts, onSceneFurnitureSelection, openColorPicker, panelTreeLabel, persistScene, refreshConnectors, refreshMinimap, renderTree, revealSelectionInTree, sceneCameraState, sceneLightOf, scenePlacementActive, sceneView, scheduleItemsSave, scheduleMeasurements, select, selectedIds, setMetricsOpen, setSceneCameraPreset, setSceneFurnitureSelection, setScenePlacementMode, showError, showToast, syncItemElement, tool, treeUi, ui, updatePorts, worldToStage } from "../canvas.js";
+import { FURNITURE_COLORS, SCENE_LIGHT_PRESETS, active, addSceneFloor, addSceneModelFlow, agentHighlight, agentRevealBlock, boundsOfItem, closeColorPicker, connectorGeometry, createFurnitureFlow, current, dropRegionImage, exportSceneFlow, findItem, itemBounds, itemEls, newId, normalizeLight, normalizeSceneCamera, normalizeSceneParts, onSceneFurnitureSelection, openColorPicker, panelTreeLabel, persistScene, refreshConnectors, refreshMinimap, renderTree, revealSelectionInTree, sceneCameraState, sceneLightOf, scenePlacementActive, sceneView, scheduleItemsSave, scheduleMeasurements, select, selectedIds, setSceneCameraPreset, setSceneFurnitureSelection, setScenePlacementMode, showError, showToast, syncItemElement, tool, treeUi, ui, updatePorts, worldToStage } from "../canvas.js";
 
 /* ---------- 3D 场景工具条 ----------
    选中恰好一个场景块时，画布底部浮一条：环境 / 灯光 / 机位 / 内容 / 输出。
@@ -608,48 +608,6 @@ export function loneSelected() {
 /* 锁定的块在左下角信息条的 #N 前面挂一枚小锁；非锁定不挂 */
 export const LOCK_BADGE_SVG = `<svg class="canvas-metrics-lock" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.3" y="5.3" width="7.4" height="5.4" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M4.1 5.3V4a1.9 1.9 0 0 1 3.8 0v1.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
 
-/* 左下角信息条：选中谁就报谁的编号；(X, Y) 和 [W, H] 点一下才展开，再点收起。
-   多选取整组的外接框，收起时只报块数。连线没有自己的位置，单独选中它时这条不出现。 */
-export let metricsSignature = "";
-
-export function updateMetrics() {
-  if (!ui?.metrics) return;
-  let left = Infinity;
-  let top = Infinity;
-  let right = -Infinity;
-  let bottom = -Infinity;
-  for (const id of selectedIds) {
-    const item = findItem(id);
-    const el = itemEls.get(id);
-    if (!item || !el || item.type === "connector") continue;
-    const bounds = itemBounds(item, el);
-    left = Math.min(left, bounds.x);
-    top = Math.min(top, bounds.y);
-    right = Math.max(right, bounds.x + bounds.w);
-    bottom = Math.max(bottom, bounds.y + bounds.h);
-  }
-  const shown = Number.isFinite(left);
-  ui.metrics.hidden = !shown;
-  if (!shown) return;
-  /* 换了一批选中就回到收起态；拖动同一批时展开状态保持 */
-  const signature = [...selectedIds].sort().join("|");
-  if (signature !== metricsSignature) {
-    metricsSignature = signature;
-    setMetricsOpen(false);
-  }
-  const count = selectedIds.size > 1 ? ` · ${selectedIds.size} 块` : "";
-  const single = selectedIds.size === 1 ? findItem([...selectedIds][0]) : null;
-  const lock = single?.locked ? LOCK_BADGE_SVG : "";
-  const seq = single && single.type !== "connector" && single.seq ? `#${single.seq}` : "";
-  const pos = `(${Math.round(left)}, ${Math.round(top)})`;
-  const size = `[${Math.round(right - left)}, ${Math.round(bottom - top)}]`;
-  if (!metricsOpen) {
-    ui.metrics.innerHTML = `${lock}${seq || (single ? size : `${selectedIds.size} 块`)}`;
-    return;
-  }
-  ui.metrics.innerHTML = `${lock}${seq ? `${seq} · ` : ""}${pos} ${size}${count}`;
-}
-
 export function updateSelection() {
   if (!ui) return;
   syncTreeSelection();
@@ -660,7 +618,6 @@ export function updateSelection() {
   ui.endpointLayer.textContent = "";
   if (ui.handleVisualLayer) ui.handleVisualLayer.textContent = "";
   updatePorts();
-  updateMetrics();
   refreshMinimap();
   if (!selectedIds.size) return;
   /* 四角缩放把手和线的端点拖拽只给「就选了一个」：一堆块同时缩放没意义，把手糊成一片也没法点 */

@@ -42,11 +42,6 @@ export function onStagePointerDown(e) {
     dropTool();
     return;
   }
-  /* 左下角信息条自己处理点击（展开/收起），别当成点空白清选择 */
-  if (e.target.closest?.("#canvas-metrics")) {
-    dropTool();
-    return;
-  }
   /* 回到画布上操作，方向键就不再是挪视野 */
   blurMinimapFocus();
   /* 连线文字的输入框自己收指针：选字、挪光标，不是平移画布 */

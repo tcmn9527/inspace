@@ -21,7 +21,8 @@ import { renderMarkdown } from "./markdown.js";
 import {
   disposeScene, setSceneCameraScale, setSceneAssetProvider, contentBox, sceneCameraState,
   scenePick, sceneFurnitureMoveDelta, beginSceneFurnitureDrag, sceneFurnitureDragDelta,
-  setSceneFurnitureSelection, sceneFurnitureInspect,
+  setSceneFurnitureSelection, sceneFurnitureInspect, exportSceneGLB, exportPartsGLB,
+  onSceneFurnitureSelection, renderModelThumbnail,
 } from "./scene3d.js";
 import {
   dropGenRun,
@@ -898,6 +899,7 @@ async function switchTo(id) {
     /* 块的容器归属按新画布重算：重叠的框先到先得 */
     rebuildContainerOwners();
     refreshTitlebarPath();
+    refreshSceneToolbar();
     /* 源 .md 读不到的笔记块整块换成丢文件卡，不再拿最后一次缓存的正文糊弄用户 */
     for (const item of staleNotes) {
       renderMissing(itemEls.get(item.id), item, current.meta.path || "");
@@ -1595,14 +1597,15 @@ function renderPanelTree(body) {
   }
   const renderPanelRow = (item, depth, seen) => {
     const isCont = item.type === "rect" && isContainer(item);
+    const isScene = item.type === "scene";
     const row = document.createElement("div");
     row.className = "space-tree-row";
     row.dataset.kind = "panel";
     row.dataset.id = item.id;
-    row.style.paddingLeft = `${6 + depth * 14 + (isCont ? 0 : 17)}px`;
+    row.style.paddingLeft = `${6 + depth * 14 + (isCont || isScene ? 0 : 17)}px`;
     if (selectedIds.has(item.id)) row.classList.add("is-selected");
     const expanded = !treePanelCollapsed.has(item.id);
-    if (isCont) {
+    if (isCont || isScene) {
       const chevron = document.createElement("span");
       chevron.className = `space-tree-chevron${expanded ? " is-open" : ""}`;
       chevron.innerHTML = TREE_CHEVRON;
@@ -1651,7 +1654,7 @@ function renderPanelTree(body) {
         renderTree();
         return;
       }
-      if (!isCont) return;
+      if (!isCont && !isScene) return;
       event.preventDefault();
       event.stopPropagation();
       if (treePanelCollapsed.has(now.id)) treePanelCollapsed.delete(now.id);
@@ -1675,6 +1678,29 @@ function renderPanelTree(body) {
     if (isCont && expanded && !seen.has(item.id)) {
       seen.add(item.id);
       for (const kid of kidsOf.get(item.id) || []) renderPanelRow(kid, depth + 1, seen);
+    }
+    if (isScene && expanded) {
+      const labelCount = new Map();
+      (item.parts || []).forEach((part, index) => {
+        const base = scenePartBaseLabel(part);
+        const count = (labelCount.get(base) || 0) + 1;
+        labelCount.set(base, count);
+        const partRow = document.createElement("div");
+        partRow.className = "space-tree-row";
+        partRow.dataset.kind = "scene-part";
+        partRow.dataset.id = item.id;
+        partRow.dataset.index = String(index);
+        partRow.style.paddingLeft = `${6 + (depth + 1) * 14 + 17}px`;
+        const partSelection = sceneView(item)?.__sceneSelection?.indices || [];
+        if (partSelection.includes(index)) partRow.classList.add("is-selected");
+        const partLabel = document.createElement("span");
+        partLabel.className = "space-tree-label";
+        partLabel.textContent = count > 1 ? `${base} ${count}` : base;
+        partLabel.title = partLabel.textContent;
+        partRow.append(partLabel);
+        partRow.addEventListener("click", () => enterScenePart(item, index));
+        body.append(partRow);
+      });
     }
   };
   const seen = new Set();
@@ -1997,7 +2023,35 @@ function toolMenuEntries() {
         insertVideoPanel();
       },
     },
+    {
+      label: "3D 场景",
+      onClick: () => {
+        dropTool();
+        insertSceneBlock();
+      },
+    },
   ];
+}
+
+/* 用户自己建 3D 场景：起手就是一间能用的客厅（地板/背景墙/侧墙/窗/地毯/边柜 + 白天光） */
+function insertSceneBlock() {
+  if (!current) return;
+  const at = insertPoint(SCENE_DEFAULT_WIDTH, SCENE_DEFAULT_HEIGHT);
+  const item = makeScene(at.x, at.y);
+  /* 默认就一个空间 + 一块地板：墙/窗要的话自己加（或让 agent 铺房间壳） */
+  const got = normalizeSceneParts([
+    { op: "box", x: 0, y: 0, z: 0, w: 620, d: 520, h: 2, color: "#b98a5e", name: "地板" },
+  ]);
+  item.parts = got.parts;
+  item.surfaces = sceneSurfacesOf([
+    { id: "floor", name: "地面", kind: "floor", x: 0, y: 0, z: 2, w: 608, h: 508 },
+  ]);
+  item.light = sceneLightOf("day");
+  placeBlock(item);
+  persistScene(item);
+  select(item.id);
+  agentRevealBlock(item.id);
+  scheduleItemsSave();
 }
 
 function armAndInsertGen(mode) {
@@ -2567,6 +2621,572 @@ function revealSelectionInTree() {
   }
 }
 
+/* ---------- 3D 场景工具条 ----------
+   选中恰好一个场景块时，画布底部浮一条：环境 / 灯光 / 机位 / 内容 / 输出。
+   所有控件都改块上的现有字段（groundColor / parts / surfaces / light / camera），
+   agent 的 block_update 改的也是同一份，两边即时互通。 */
+const SCENE_TOOL_LABELS = [
+  ["environment", "环境"],
+  ["light", "灯光"],
+  ["camera", "机位"],
+  ["content", "内容"],
+  ["export", "输出"],
+];
+const GROUND_COLORS = [
+  { value: "", title: "默认灰" },
+  { value: "#f2efe9", title: "白" },
+  { value: "#cfc4b0", title: "浅米" },
+  { value: "#9a917d", title: "暖灰" },
+  { value: "#4a4a48", title: "深灰" },
+];
+const LIGHT_LIT_COLORS = [
+  { value: "#fff4e2", title: "暖白" },
+  { value: "#ffc07a", title: "暖橙" },
+  { value: "#ffffff", title: "纯白" },
+];
+const LIGHT_DARK_COLORS = [
+  { value: "#dbe7f2", title: "冷灰蓝" },
+  { value: "#71809a", title: "蓝灰" },
+  { value: "#5b6781", title: "深蓝" },
+];
+let sceneToolbar = null;
+let scenePop = null;
+let scenePopKind = "";
+
+function soloSceneItem() {
+  if (selectedIds.size !== 1) return null;
+  const item = findItem([...selectedIds][0]);
+  return item && item.type === "scene" ? item : null;
+}
+
+function installSceneToolbar() {
+  const main = document.querySelector(".canvas-main");
+  if (!main || sceneToolbar) return;
+  sceneToolbar = document.createElement("div");
+  sceneToolbar.className = "scene-toolbar";
+  sceneToolbar.hidden = true;
+  scenePop = document.createElement("div");
+  scenePop.className = "scene-pop";
+  scenePop.hidden = true;
+  main.append(sceneToolbar, scenePop);
+  sceneToolbar.addEventListener("click", (event) => {
+    const btn = event.target.closest?.("[data-scene-tool]");
+    if (!btn || btn.disabled) return;
+    handleSceneTool(btn.dataset.sceneTool);
+  });
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!scenePop || scenePop.hidden) return;
+      if (scenePop.contains(event.target) || sceneToolbar.contains(event.target)) return;
+      /* 点取色盘浮层不算点了外面，不然一按颜色区整个面板就被关了 */
+      if (event.target.closest?.(".color-pop")) return;
+      closeScenePop();
+    },
+    true,
+  );
+}
+
+function closeScenePop() {
+  scenePopKind = "";
+  closeColorPicker(false);
+  if (scenePop) scenePop.hidden = true;
+  for (const btn of sceneToolbar?.querySelectorAll(".scene-tool-btn") || []) {
+    btn.classList.remove("is-open");
+  }
+}
+
+function openScenePop(item, kind) {
+  scenePopKind = kind;
+  scenePop.hidden = false;
+  for (const btn of sceneToolbar.querySelectorAll(".scene-tool-btn")) {
+    btn.classList.toggle("is-open", btn.dataset.sceneTool === kind);
+  }
+  renderScenePop(item, kind);
+}
+
+function sceneLightPatch(item, patch, options = {}) {
+  const base = lightOrDay(item);
+  const got = normalizeLight({ ...base, ...patch });
+  if (got.light) scenePatch(item, { light: got.light }, options);
+}
+
+function lightOrDay(item) {
+  const got = normalizeLight(item.light || SCENE_LIGHT_PRESETS.day);
+  return got.light || normalizeLight(SCENE_LIGHT_PRESETS.day).light;
+}
+
+function scenePatch(item, patch, options = {}) {
+  if (item.locked) {
+    showError("场景已锁定，先解锁再改");
+    return;
+  }
+  Object.assign(item, patch);
+  persistScene(item);
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  scheduleItemsSave();
+  if (options.quiet) return;
+  if (scenePopKind && scenePop && !scenePop.hidden) renderScenePop(item, scenePopKind);
+  else refreshSceneToolbar();
+}
+
+/* ---------- 场景元素（选中单件/整组）操作 ---------- */
+
+function moveSceneElement(item, indices, axis, target) {
+  const first = item.parts[indices[0]];
+  if (!first) return;
+  const delta = target - first[axis];
+  if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) return;
+  const parts = item.parts.map((part, k) =>
+    indices.includes(k) ? { ...part, [axis]: part[axis] + delta } : part,
+  );
+  scenePatch(item, { parts }, { quiet: true });
+}
+
+function resizeSceneElement(item, indices, axis, value) {
+  if (indices.length !== 1) return;
+  const size = Math.max(0, Math.round(value));
+  const parts = item.parts.map((part, k) => (k === indices[0] ? { ...part, [axis]: size } : part));
+  scenePatch(item, { parts }, { quiet: true });
+}
+
+function rotateSceneElement(item, indices, value) {
+  if (indices.length !== 1) return;
+  const rotate = ((Math.round(value) % 360) + 360) % 360;
+  const parts = item.parts.map((part, k) => (k === indices[0] ? { ...part, rotate } : part));
+  scenePatch(item, { parts }, { quiet: true });
+}
+
+function paintSceneElement(item, indices, color) {
+  const parts = item.parts.map((part, k) =>
+    indices.includes(k) && part.op !== "model" ? { ...part, color } : part,
+  );
+  scenePatch(item, { parts });
+}
+
+/* 给程序几何件贴图（画布 images/ 里的相对路径）；tex 空串回纯色 */
+function paintSceneTexture(item, indices, tex) {
+  const parts = item.parts.map((part, k) =>
+    indices.includes(k) && part.op !== "model"
+      ? { ...part, tex: tex || "", texRepeat: part.texRepeat || 100 }
+      : part,
+  );
+  scenePatch(item, { parts });
+}
+
+function duplicateSceneElement(item, indices) {
+  const part = item.parts[indices[0]];
+  if (!part) return;
+  const copy = { ...part, group: newId(), x: part.x + 20, y: part.y + 20 };
+  const got = normalizeSceneParts([...item.parts, copy]);
+  if (got.dropped.length) {
+    showError(got.dropped[0].why);
+    return;
+  }
+  scenePatch(item, { parts: got.parts });
+  setSceneFurnitureSelection(sceneView(item), [item.parts.length - 1]);
+  showToast("已复制这件");
+}
+
+function deleteSceneElement(item, indices) {
+  const parts = item.parts.filter((_, k) => !indices.includes(k));
+  scenePatch(item, { parts });
+  setSceneFurnitureSelection(sceneView(item), []);
+  showToast("已删除");
+}
+
+/* 元素弹层：位置 / 尺寸 / 旋转 / 颜色 */
+function renderElementPop(item, kind) {
+  const indices = sceneSelectedIndices(item);
+  const part = indices.length ? item.parts[indices[0]] : null;
+  const hint = (text) => {
+    const div = document.createElement("div");
+    div.className = "scene-pop-row";
+    div.textContent = text;
+    scenePop.append(div);
+  };
+  if (!part) {
+    hint("先在场景里点一下要编辑的元素");
+    return;
+  }
+  if (kind === "position") {
+    scenePopNumber("X", part.x, 1, (value) => moveSceneElement(item, indices, "x", value));
+    scenePopNumber("Y", part.y, 1, (value) => moveSceneElement(item, indices, "y", value));
+    scenePopNumber("离地", part.z, 1, (value) => moveSceneElement(item, indices, "z", value));
+    hint(indices.length > 1 ? `整组 ${indices.length} 件一起移动 · 单位 cm` : "单位 cm");
+  } else if (kind === "size") {
+    scenePopNumber("宽", part.w || 0, 1, (value) => resizeSceneElement(item, indices, "w", value));
+    scenePopNumber("深", part.d || 0, 1, (value) => resizeSceneElement(item, indices, "d", value));
+    scenePopNumber("高", part.h || 0, 1, (value) => resizeSceneElement(item, indices, "h", value));
+    hint(part.op === "model" ? "模型件填 0 = 按模型自带尺寸" : "单位 cm");
+  } else if (kind === "rotate") {
+    scenePopSlider("方向", part.rotate || 0, 0, 360, 1, (value) => rotateSceneElement(item, indices, value));
+  } else if (kind === "color") {
+    if (indices.some((k) => item.parts[k]?.op === "model")) {
+      hint("模型件带自己的贴图，不支持整体换色");
+      return;
+    }
+    scenePopRow(
+      "颜色",
+      scenePopDots(FURNITURE_COLORS, part.color || "", (value) => paintSceneElement(item, indices, value)),
+    );
+    /* 贴图：从画布上的图片块里挑一张贴上去（相对路径存 scenes 文件，跟画布一起搬） */
+    if (part.tex) {
+      scenePopActions([{ label: "清除贴图", onClick: () => paintSceneTexture(item, indices, "") }]);
+    }
+    const images = (current?.items || []).filter(
+      (one) => (one.type === "image" || one.type === "gen") && one.src,
+    );
+    if (!images.length) {
+      hint("画布上没有图片块，贴不了图");
+      return;
+    }
+    hint("贴图（点一张贴上）");
+    scenePopActions(
+      images.slice(0, 12).map((one) => ({
+        label: `#${one.seq} ${one.type === "gen" ? "生图" : "图片"}`,
+        active: one.src === part.tex,
+        onClick: () => paintSceneTexture(item, indices, one.src),
+      })),
+      { perRow: 3 },
+    );
+  }
+}
+
+function useCurrentSceneCamera(item) {
+  const view = sceneView(item);
+  const camera = normalizeSceneCamera(sceneCameraState(item, view));
+  if (!camera) {
+    showError("场景还没渲染出来，等它显示出来再试");
+    return;
+  }
+  scenePatch(item, { camera });
+  showToast("已记住当前视角");
+}
+
+/* ---------- 场景弹层公共控件 ---------- */
+function scenePopRow(label, ...children) {
+  const div = document.createElement("div");
+  div.className = "scene-pop-row";
+  const name = document.createElement("span");
+  name.textContent = label;
+  div.append(name, ...children);
+  scenePop.append(div);
+  return div;
+}
+
+function scenePopDots(colors, current, onPick) {
+  const wrap = document.createElement("div");
+  wrap.className = "scene-pop-dots";
+  for (const entry of colors) {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = "scene-dot";
+    if (entry.value) dot.style.setProperty("--c", entry.value);
+    else dot.classList.add("is-default");
+    if (entry.title) dot.title = entry.title;
+    if ((current || "") === (entry.value || "")) dot.classList.add("is-active");
+    dot.addEventListener("click", () => onPick(entry.value));
+    wrap.append(dot);
+  }
+  /* 更多色：直接弹全局取色盘（常用色 + SV 方块 + 色相条），点「确定」才生效 */
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "scene-dot is-more";
+  more.title = "更多颜色…";
+  if (current && !colors.some((entry) => (entry.value || "") === (current || ""))) {
+    more.style.setProperty("--c", current);
+    more.classList.add("is-custom", "is-active");
+  }
+  more.addEventListener("click", () => {
+    const rect = more.getBoundingClientRect();
+    openColorPicker({
+      x: rect.left - 150,
+      y: rect.bottom + 6,
+      value: current || "#b98a5e",
+      seed: "#b98a5e",
+      presets: SCENE_MORE_COLORS,
+      withButtons: true,
+      dismissCommits: false,
+      onDone: (hex) => {
+        if (hex) onPick(hex);
+      },
+    });
+  });
+  wrap.append(more);
+  return wrap;
+}
+
+function scenePopActions(entries, options = {}) {
+  const perRow = Math.max(0, Math.floor(Number(options.perRow) || 0));
+  const rows = [];
+  if (perRow > 0) {
+    for (let i = 0; i < entries.length; i += perRow) rows.push(entries.slice(i, i + perRow));
+  } else {
+    rows.push(entries);
+  }
+  let first = null;
+  for (const row of rows) {
+    const wrap = document.createElement("div");
+    wrap.className = "scene-pop-actions";
+    for (const entry of row) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `plain-btn${entry.active ? " is-active" : ""}`;
+      btn.textContent = entry.label;
+      btn.addEventListener("click", entry.onClick);
+      wrap.append(btn);
+    }
+    scenePop.append(wrap);
+    if (!first) first = wrap;
+  }
+  return first;
+}
+
+function scenePopSlider(label, value, min, max, step, onInput) {
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(value);
+  input.addEventListener("input", () => onInput(Number(input.value)));
+  scenePopRow(label, input);
+}
+
+/* 元素弹层里那种数字框：失焦/回车才提交，边打字不重建面板 */
+function scenePopNumber(label, value, step, onCommit) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = String(step);
+  input.value = String(Math.round(value));
+  /* 边输入边生效（和滑杆一致）；空串/半截数字先不理，焦点留在框里 */
+  input.addEventListener("input", () => {
+    const raw = input.value.trim();
+    if (!raw || raw === "-" || raw === "." || raw === "-.") return;
+    const next = Number(raw);
+    if (Number.isFinite(next)) onCommit(next);
+  });
+  input.addEventListener("change", () => {
+    const next = Number(input.value);
+    if (Number.isFinite(next)) onCommit(next);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    }
+  });
+  scenePopRow(label, input);
+}
+
+const ELEMENT_POP_KINDS = new Set(["position", "size", "rotate", "color"]);
+
+function renderScenePop(item, kind) {
+  scenePop.textContent = "";
+  if (ELEMENT_POP_KINDS.has(kind)) {
+    renderElementPop(item, kind);
+    return;
+  }
+  if (kind === "environment") {
+    /* 环境只放环境本身的参数；地板/墙这些构造物在元素工具里改 */
+    scenePopRow("空间底色", scenePopDots(GROUND_COLORS, item.groundColor || "", (value) => scenePatch(item, { groundColor: value })));
+    scenePopActions([
+      {
+        label: "阴影开",
+        active: item.shadow !== false,
+        onClick: () => scenePatch(item, { shadow: true }),
+      },
+      {
+        label: "阴影关",
+        active: item.shadow === false,
+        onClick: () => scenePatch(item, { shadow: false }),
+      },
+    ]);
+  } else if (kind === "light") {
+    scenePopActions([
+      { label: "白天", onClick: () => scenePatch(item, { light: sceneLightOf("day") }) },
+      { label: "傍晚", onClick: () => scenePatch(item, { light: sceneLightOf("warm") }) },
+      { label: "夜灯", onClick: () => scenePatch(item, { light: sceneLightOf("night") }) },
+      { label: "无灯", onClick: () => scenePatch(item, { light: null }) },
+    ]);
+    const light = lightOrDay(item);
+    /* 拖动中只落数据不重建面板，否则滑杆每动一下就被新 DOM 换掉、拖不动 */
+    scenePopSlider("光方向", light.angle, 0, 360, 5, (value) => sceneLightPatch(item, { angle: value }, { quiet: true }));
+    scenePopSlider("太阳高度", light.elev, 5, 85, 1, (value) => sceneLightPatch(item, { elev: value }, { quiet: true }));
+    scenePopSlider("明暗对比", Math.round(light.k * 100), 20, 100, 1, (value) => sceneLightPatch(item, { k: value / 100 }, { quiet: true }));
+    scenePopRow("亮部色", scenePopDots(LIGHT_LIT_COLORS, light.lit, (value) => sceneLightPatch(item, { lit: value })));
+    scenePopRow("暗部色", scenePopDots(LIGHT_DARK_COLORS, light.dark, (value) => sceneLightPatch(item, { dark: value })));
+  } else if (kind === "camera") {
+    scenePopActions([
+      { label: "自动", onClick: () => setSceneCameraPreset(item, "auto") },
+      { label: "正面", onClick: () => setSceneCameraPreset(item, "front") },
+      { label: "左角", onClick: () => setSceneCameraPreset(item, "left") },
+      { label: "右角", onClick: () => setSceneCameraPreset(item, "right") },
+      { label: "俯视", onClick: () => setSceneCameraPreset(item, "top") },
+    ]);
+    scenePopActions([
+      { label: "用当前视角", onClick: () => useCurrentSceneCamera(item) },
+      { label: "重置", onClick: () => scenePatch(item, { camera: null }) },
+    ]);
+    const hint = document.createElement("div");
+    hint.className = "scene-pop-row";
+    hint.textContent = "Ctrl 拖动转视角 · Shift 拖动平移";
+    scenePop.append(hint);
+  } else if (kind === "content") {
+    scenePopActions([
+      { label: "编辑元素", onClick: () => { closeScenePop(); setScenePlacementMode(item, true); } },
+      { label: "模型库添加", onClick: () => { closeScenePop(); void addSceneModelFlow(item); } },
+      { label: "新建模型", onClick: () => { closeScenePop(); void createFurnitureFlow(item); } },
+      { label: "添加地板", onClick: () => { closeScenePop(); addSceneFloor(item); } },
+    ], { perRow: 3 });
+  } else if (kind === "export") {
+    scenePopActions([
+      { label: "导出为 GLB", onClick: () => { closeScenePop(); void exportSceneFlow(item); } },
+      { label: "落图", onClick: () => { closeScenePop(); void dropRegionImage(item.id); } },
+    ]);
+  }
+}
+
+/* ---------- 场景取色盘（更多色） ---------- */
+const SCENE_MORE_COLORS = [
+  "#ffffff", "#f2efe9", "#e8e4dc", "#d9d2c6", "#c9b9a6", "#b7b0a4", "#9a917d", "#6f6a62", "#4a4a48",
+  "#2c2c2c", "#d2b48c", "#b98a5e", "#8a6f55", "#6b5138", "#a0522d", "#8b4513", "#c0703c", "#e0c088",
+  "#e7b8a8", "#d9a7a0", "#b7c4b1", "#8fa58a", "#6e8b73", "#5c7c89", "#8f9bb3", "#b7a8c4", "#d9c27e",
+];
+/* 选中/锁/字段变化后重排工具条：只在选中恰好一个场景块时出现 */
+/* 元素态：工具条换成「选中那件东西」的工具 */
+const ELEMENT_TOOL_BUTTONS = [
+  ["position", "位置", { edit: true }],
+  ["size", "尺寸", { edit: true, single: true }],
+  ["rotate", "旋转", { edit: true, single: true }],
+  ["color", "颜色", { edit: true }],
+  ["copy", "复制", { edit: true, action: true }],
+  ["delete", "删除", { edit: true, action: true }],
+  ["back", "返回场景", {}],
+];
+
+function sceneSelectedIndices(item) {
+  const selection = sceneView(item)?.__sceneSelection;
+  return Array.isArray(selection?.indices)
+    ? selection.indices.filter((index) => Number.isInteger(index) && index >= 0)
+    : [];
+}
+
+function buildSceneToolButtons(item, elementMode, indices) {
+  sceneToolbar.textContent = "";
+  const locked = Boolean(item.locked);
+  const hasSel = indices.length > 0;
+  if (elementMode) {
+    for (const [kind, label, opts = {}] of ELEMENT_TOOL_BUTTONS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "scene-tool-btn";
+      btn.dataset.sceneTool = kind;
+      btn.textContent = label;
+      if (opts.edit) btn.disabled = locked || !hasSel;
+      if (opts.single && indices.length !== 1) btn.disabled = true;
+      sceneToolbar.append(btn);
+    }
+    return;
+  }
+  for (const [kind, label] of SCENE_TOOL_LABELS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "scene-tool-btn";
+    btn.dataset.sceneTool = kind;
+    btn.textContent = label;
+    if (["environment", "light", "content"].includes(kind) && locked) btn.disabled = true;
+    sceneToolbar.append(btn);
+  }
+}
+
+function handleSceneTool(kind) {
+  const item = soloSceneItem();
+  if (!item) return;
+  const elementMode = scenePlacementActive(item);
+  const indices = elementMode ? sceneSelectedIndices(item) : [];
+  if (kind === "back") {
+    closeScenePop();
+    setScenePlacementMode(item, false);
+    refreshSceneToolbar();
+    return;
+  }
+  if (kind === "copy") {
+    if (indices.length) duplicateSceneElement(item, indices);
+    return;
+  }
+  if (kind === "delete") {
+    if (indices.length) deleteSceneElement(item, indices);
+    return;
+  }
+  if (item.locked) {
+    showError("场景已锁定，先解锁再改");
+    return;
+  }
+  if (scenePopKind === kind && !scenePop.hidden) {
+    closeScenePop();
+    return;
+  }
+  openScenePop(item, kind);
+}
+
+/* 场景元素在树里显示的名字：有名用名，没名按类型 */
+function scenePartBaseLabel(part) {
+  if (part.name) return part.name;
+  if (part.op === "model") return String(part.src || "").replace(/\.glb$/i, "") || "模型";
+  if (part.op === "solid") {
+    return { cylinder: "圆柱", sphere: "球体", cone: "圆锥", torus: "圆环", capsule: "胶囊" }[part.shape] || "形体";
+  }
+  if (part.op === "poly") return "棱柱";
+  if (part.op === "roof") return "屋顶";
+  return "方块";
+}
+
+/* 树里点场景的一件：进元素模式并选中它 */
+function enterScenePart(scene, index) {
+  if (scene.locked) {
+    showError("场景已锁定，先解锁再改");
+    return;
+  }
+  if (!scenePlacementActive(scene)) setScenePlacementMode(scene, true);
+  select(scene.id);
+  agentRevealBlock(scene.id);
+  setSceneFurnitureSelection(sceneView(scene), [index]);
+  agentHighlight([scene.id], 1000);
+  renderTree();
+}
+
+let sceneToolbarSignature = "";
+
+function refreshSceneToolbar() {
+  if (!sceneToolbar) installSceneToolbar();
+  if (!sceneToolbar) return;
+  const item = soloSceneItem();
+  sceneToolbar.hidden = !item;
+  if (!item) {
+    if (sceneToolbarSignature) closeScenePop();
+    sceneToolbarSignature = "";
+    return;
+  }
+  const elementMode = scenePlacementActive(item);
+  const indices = elementMode ? sceneSelectedIndices(item) : [];
+  const signature = `${item.id}|${elementMode}|${item.locked ? 1 : 0}|${indices.join(",")}`;
+  if (signature !== sceneToolbarSignature) {
+    sceneToolbarSignature = signature;
+    closeScenePop();
+    buildSceneToolButtons(item, elementMode, indices);
+  }
+}
+
+/* 场景里选中/取消选中元素：工具条跟着换 */
+onSceneFurnitureSelection(() => {
+  refreshSceneToolbar();
+  /* 树里的场景子行也要跟选中高亮走 */
+  if (current) renderTree();
+});
+
 /* 标题栏：当前画布路径；单选面板时跟上 #N 名称（没自定义名就是类型） */
 function refreshTitlebarPath() {
   const el = document.getElementById("titlebar-path");
@@ -2654,6 +3274,7 @@ function updateSelection() {
   if (!ui) return;
   syncTreeSelection();
   refreshTitlebarPath();
+  refreshSceneToolbar();
   refreshConnectors();
   for (const stale of ui.world.querySelectorAll(".canvas-sel-box")) stale.remove();
   ui.endpointLayer.textContent = "";
@@ -5007,8 +5628,14 @@ function itemMenuEntries(item, x, y, depth = 0) {
     entries.push({ label: "设为第几页…", onClick: () => setPageOrderFlow(item) });
   } else if (item.type === "scene") {
     entries.push({
-      label: scenePlacementActive(item) ? "退出家具摆放" : "摆放家具",
+      label: scenePlacementActive(item) ? "退出编辑元素" : "编辑元素",
       onClick: () => setScenePlacementMode(item, !scenePlacementActive(item)),
+    });
+    entries.push({ label: "从模型库添加…", onClick: () => void addSceneModelFlow(item) });
+    entries.push({ label: "新建模型…", onClick: () => void createFurnitureFlow(item) });
+    entries.push({
+      label: "导出为 GLB",
+      onClick: () => void exportSceneFlow(item),
     });
     entries.push({
       label: "重置视角",
@@ -7176,7 +7803,8 @@ async function grabRegionImage(item) {
 async function dropRegionImage(id) {
   if (!current || exporting) return null;
   const item = findItem(id);
-  if (!item || item.type !== "rect") return null;
+  /* 矩形和 3D 场景都能落图：场景是 WebGL 画布，靠屏幕抓取拿到真实渲染帧 */
+  if (!item || (item.type !== "rect" && item.type !== "scene")) return null;
   const el = itemEls.get(id);
   if (!el) return null;
   const box = itemBounds(item, el);
@@ -7191,6 +7819,11 @@ async function dropRegionImage(id) {
     rect.top >= 0 &&
     rect.right <= window.innerWidth &&
     rect.bottom <= window.innerHeight;
+  /* 场景离屏导不出 WebGL 画面：不在视野里就明说，别生成一张黑图 */
+  if (!visible && item.type === "scene") {
+    showToast("场景要先完整露在视野里才能落图");
+    return null;
+  }
 
   exporting = true;
   showToast("正在按屏幕画面生成图片…");
@@ -8590,6 +9223,8 @@ function setScenePlacementMode(item, enabled) {
   if (!card) throw new Error("场景还没显示出来");
   card.classList.toggle("is-placing", enabled);
   if (!enabled) setSceneFurnitureSelection(card.querySelector(".canvas-scene-view"), []);
+  /* 工具条跟着换态：场景 ↔ 元素 */
+  refreshSceneToolbar();
   return { id: item.id, placement: enabled };
 }
 
@@ -8639,8 +9274,13 @@ function attachSceneControls(el, item) {
       const view = card.querySelector(".canvas-scene-view");
       try {
         const hit = scenePick(view, event.clientX, event.clientY);
-        const furniture = hit ? sceneFurnitureGroup(item, hit.index) : null;
-        setSceneFurnitureSelection(view, furniture?.indices || []);
+        if (!hit) {
+          setSceneFurnitureSelection(view, []);
+          return;
+        }
+        const furniture = sceneFurnitureGroup(item, hit.index);
+        /* 地板/墙/窗这类没有附着面的构件也能选中（用元素工具改颜色尺寸），只是不能拖着走 */
+        setSceneFurnitureSelection(view, furniture?.indices || [hit.index]);
         if (!furniture) return;
         const movement = beginSceneFurnitureDrag(view, furniture.indices, furniture.surface, event.clientX, event.clientY);
         if (!movement) return;
@@ -10559,6 +11199,7 @@ async function pickProductModel(item) {
   const entries = models.length
     ? models.map((model) => ({
         label: `${model.name}${model.name === item.model ? " ✓" : ""}`,
+        thumb: modelThumbnail(model.name),
         onClick: () => {
           item.model = model.name;
           scheduleItemsSave();
@@ -10566,7 +11207,367 @@ async function pickProductModel(item) {
         },
       }))
     : [{ label: "模型库还没有 .glb（去设置窗口导入）", disabled: true }];
-  openMenu(r.left + 24, r.top + 24, entries, { label: "3D 模型" });
+  openMenu(r.left + 24, r.top + 24, entries, { label: "3D 模型", searchable: true });
+}
+
+/* ---------- 场景里从模型库加家具 ---------- */
+
+const modelThumbCache = new Map();
+/* 模型库缩略图：同一份只渲一次，失败给空串（菜单里显示占位块） */
+function modelThumbnail(name) {
+  if (!modelThumbCache.has(name)) {
+    modelThumbCache.set(name, renderModelThumbnail(name).catch(() => ""));
+  }
+  return modelThumbCache.get(name);
+}
+
+async function addSceneModelFlow(scene) {
+  const models = await invoke("model_library_list").catch(() => []);
+  const el = itemEls.get(scene.id);
+  const r = el ? el.getBoundingClientRect() : { left: 200, top: 200 };
+  const entries = models.length
+    ? models.map((model) => ({
+        label: model.name,
+        thumb: modelThumbnail(model.name),
+        onClick: () => void addSceneModel(scene, model.name),
+      }))
+    : [{ label: "模型库还没有 .glb（去设置窗口「3D 模型库」导入）", disabled: true }];
+  openMenu(r.left + 24, r.top + 24, entries, { label: "从模型库添加", searchable: true });
+}
+
+/* 删掉地板之后能加回来：一张 6.2×5.2m 的地板 + 地面附着面（没有才补，不重复加） */
+function addSceneFloor(item) {
+  if (item.parts.some((part) => part.name === "地板")) {
+    showError("场景里已经有地板了");
+    return;
+  }
+  let surfaces = item.surfaces;
+  if (!surfaces.some((one) => one.kind === "floor")) {
+    surfaces = sceneSurfacesOf([
+      ...surfaces,
+      { id: "floor", name: "地面", kind: "floor", x: 0, y: 0, z: 2, w: 608, h: 508 },
+    ]);
+  }
+  const got = normalizeSceneParts([
+    ...item.parts,
+    { op: "box", x: 0, y: 0, z: 0, w: 620, d: 520, h: 2, color: "#b98a5e", name: "地板" },
+  ]);
+  if (got.dropped.length) {
+    showError(got.dropped[0].why);
+    return;
+  }
+  scenePatch(item, { parts: got.parts, surfaces });
+  setSceneFurnitureSelection(sceneView(item), [item.parts.length - 1]);
+  showToast("已添加地板");
+}
+
+/* 把模型库里的一份 .glb 放进场景：没有地面就补一块 10m 地面，
+   加完直接进摆放模式并选中这件，用户可以马上拖着摆位置。 */
+async function addSceneModel(scene, name) {
+  try {
+    let floor = scene.surfaces.find((one) => one.kind === "floor");
+    if (!floor) {
+      const list = sceneSurfacesOf([
+        ...scene.surfaces,
+        { id: "ground", name: "地面", kind: "floor", w: 1000, h: 1000 },
+      ]);
+      scene.surfaces = list;
+      floor = list.find((one) => one.kind === "floor");
+    }
+    const part = {
+      op: "model",
+      group: newId(),
+      surface: floor.id,
+      src: name,
+      x: floor.x,
+      y: floor.y,
+      z: floor.z,
+      rotate: 0,
+      w: 0,
+      d: 0,
+      h: 80,
+      name: String(name).replace(/\.glb$/i, ""),
+      color: "",
+    };
+    const got = normalizeSceneParts([...scene.parts, part]);
+    if (got.dropped.length) throw new Error(got.dropped[0].why);
+    scene.parts = got.parts;
+    persistScene(scene);
+    const el = itemEls.get(scene.id);
+    if (el) syncItemElement(el, scene);
+    scheduleItemsSave();
+    /* 直接进入摆放模式并选中新加的这件：拖动就能挪位置 */
+    setScenePlacementMode(scene, true);
+    setSceneFurnitureSelection(sceneView(scene), [scene.parts.length - 1]);
+    showToast(`已加入 ${part.name}，拖动它摆位置`);
+    return { index: scene.parts.length - 1, name: part.name };
+  } catch (error) {
+    showError(error);
+    return null;
+  }
+}
+
+/* ---------- 参数化家具 ---------- */
+
+const FURNITURE_COLORS = [
+  { label: "浅木", value: "#d2b48c" },
+  { label: "原木", value: "#b98a5e" },
+  { label: "深木", value: "#8a6f55" },
+  { label: "白", value: "#ece7de" },
+  { label: "灰", value: "#9aa0a6" },
+  { label: "黑", value: "#3c3f43" },
+];
+
+/* 按参数拼零件：全部以原点为中心、底面 z=0（调用方再平移到放置点）。
+   每件家具的零件共用一个 group，拖动时整体一起走。 */
+function buildFurnitureParts(spec) {
+  const W = spec.w;
+  const D = spec.d;
+  const H = spec.h;
+  const color = spec.color;
+  /* 基础几何体：一块方块，或一个圆柱/球/圆锥 */
+  if (["box", "cylinder", "sphere", "cone", "torus", "capsule"].includes(spec.kind)) {
+    if (spec.kind === "box") {
+      return [{ op: "box", x: 0, y: 0, z: 0, w: W, d: D, h: H, color, name: "方块" }];
+    }
+    const name = { cylinder: "圆柱", sphere: "球体", cone: "圆锥", torus: "圆环", capsule: "胶囊" }[spec.kind];
+    return [{ op: "solid", shape: spec.kind, x: 0, y: 0, z: 0, w: W, d: D, h: H, color, name }];
+  }
+  const parts = [];
+  if (spec.kind === "cabinet") {
+    const legH = spec.leg;
+    const bodyH = Math.max(20, H - legH);
+    parts.push({ op: "box", x: 0, y: 0, z: legH, w: W, d: D, h: bodyH, color, name: "柜体" });
+    if (spec.doors > 0) {
+      const gap = 2;
+      const side = 2;
+      const td = 2;
+      const dw = (W - side * 2 - gap * (spec.doors - 1)) / spec.doors;
+      const dh = Math.max(10, bodyH - 4);
+      for (let i = 0; i < spec.doors; i += 1) {
+        const x = -W / 2 + side + dw / 2 + i * (dw + gap);
+        parts.push({ op: "box", x, y: -D / 2 - td / 2, z: legH + 2, w: dw, d: td, h: dh, color, name: "柜门" });
+        parts.push({
+          op: "box",
+          x,
+          y: -D / 2 - td - 1,
+          z: legH + 2 + dh / 2 - 5,
+          w: 2,
+          d: 2,
+          h: 10,
+          color: "#6b6f74",
+          name: "把手",
+        });
+      }
+    }
+    if (legH > 0) {
+      const lx = W / 2 - 5;
+      const ly = D / 2 - 5;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        parts.push({ op: "box", x: sx * lx, y: sy * ly, z: 0, w: 5, d: 5, h: legH, color: "#6b5138", name: "柜腿" });
+      }
+    }
+    return parts;
+  }
+  /* 桌子：桌面 + 四条腿 */
+  parts.push({ op: "box", x: 0, y: 0, z: H - 4, w: W, d: D, h: 4, color, name: "桌面" });
+  const lx = W / 2 - 5;
+  const ly = D / 2 - 5;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    parts.push({ op: "box", x: sx * lx, y: sy * ly, z: 0, w: 5, d: 5, h: H - 4, color, name: "桌腿" });
+  }
+  return parts;
+}
+
+function openFurnitureDialog() {
+  return new Promise((resolve) => {
+    const mask = document.createElement("div");
+    mask.className = "dialog-mask";
+    mask.innerHTML = `
+      <div class="dialog dialog-furniture" role="dialog" aria-modal="true">
+        <p class="dialog-title">新建模型</p>
+        <button class="dialog-close" type="button" aria-label="关闭">${CLOSE_X_SVG}</button>
+        <div class="furn-row">
+          <span>模板</span>
+          <select data-furn="kind"><option value="cabinet">柜子</option><option value="table">桌子</option><option value="box">方块</option><option value="cylinder">圆柱</option><option value="sphere">球体</option><option value="cone">圆锥</option><option value="torus">圆环</option><option value="capsule">胶囊</option></select>
+        </div>
+        <div class="furn-row">
+          <span>宽</span><input data-furn="w" type="number" value="160" min="40" max="320" step="1" /><em>cm</em>
+        </div>
+        <div class="furn-row">
+          <span>深</span><input data-furn="d" type="number" value="45" min="20" max="120" step="1" /><em>cm</em>
+        </div>
+        <div class="furn-row">
+          <span>高</span><input data-furn="h" type="number" value="80" min="20" max="240" step="1" /><em>cm</em>
+        </div>
+        <div class="furn-row" data-furn-row="cabinet">
+          <span>柜门</span>
+          <select data-furn="doors"><option value="0">无门</option><option value="1">1 扇</option><option value="2" selected>2 扇</option><option value="3">3 扇</option><option value="4">4 扇</option></select>
+        </div>
+        <div class="furn-row" data-furn-row="cabinet">
+          <span>腿高</span>
+          <select data-furn="leg"><option value="0">落地</option><option value="10" selected>10 cm</option><option value="15">15 cm</option></select>
+        </div>
+        <div class="furn-row">
+          <span>颜色</span>
+          <div class="furn-colors">${FURNITURE_COLORS.map(
+            (color, index) =>
+              `<button type="button" class="furn-color${index === 1 ? " is-active" : ""}" data-color="${color.value}" title="${color.label}" style="--c:${color.value}"></button>`,
+          ).join("")}</div>
+        </div>
+        <label class="furn-save"><input type="checkbox" data-furn="save" /> 同时存进模型库（下次直接从库里摆）</label>
+        <div class="furn-actions"><button class="plain-btn furn-ok" type="button">放到场景</button></div>
+      </div>
+    `;
+    const dialog = mask.querySelector(".dialog");
+    const finish = (value) => {
+      mask.remove();
+      resolve(value);
+    };
+    const kindSel = mask.querySelector('[data-furn="kind"]');
+    /* 每类模板一套默认尺寸；切到基础几何体时把柜门/腿高行收起来 */
+    const KIND_PRESETS = {
+      cabinet: { w: 160, d: 45, h: 80, cabinet: true },
+      table: { w: 140, d: 70, h: 75, cabinet: false },
+      box: { w: 100, d: 100, h: 100, cabinet: false },
+      cylinder: { w: 80, d: 80, h: 120, cabinet: false },
+      sphere: { w: 100, d: 100, h: 100, cabinet: false },
+      cone: { w: 100, d: 100, h: 120, cabinet: false },
+      torus: { w: 100, d: 100, h: 30, cabinet: false },
+      capsule: { w: 60, d: 60, h: 120, cabinet: false },
+    };
+    const syncKind = () => {
+      const preset = KIND_PRESETS[kindSel.value] || KIND_PRESETS.cabinet;
+      for (const row of mask.querySelectorAll('[data-furn-row="cabinet"]')) row.hidden = !preset.cabinet;
+      const set = (key, value) => {
+        const input = mask.querySelector(`[data-furn="${key}"]`);
+        if (input) input.value = String(value);
+      };
+      set("w", preset.w);
+      set("d", preset.d);
+      set("h", preset.h);
+    };
+    kindSel.addEventListener("change", syncKind);
+    syncKind();
+    mask.addEventListener("click", (e) => {
+      const dot = e.target.closest?.(".furn-color");
+      if (!dot) return;
+      for (const one of mask.querySelectorAll(".furn-color")) {
+        one.classList.toggle("is-active", one === dot);
+      }
+    });
+    mask.querySelector(".dialog-close").addEventListener("click", () => finish(null));
+    mask.addEventListener("pointerdown", (e) => {
+      if (!dialog.contains(e.target)) finish(null);
+    });
+    mask.querySelector(".furn-ok").addEventListener("click", () => {
+      const read = (key, fallback) => {
+        const input = mask.querySelector(`[data-furn="${key}"]`);
+        const value = Number(input?.value);
+        return Number.isFinite(value) ? value : fallback;
+      };
+      finish({
+        kind: KIND_PRESETS[kindSel.value] ? kindSel.value : "cabinet",
+        w: Math.min(320, Math.max(40, Math.round(read("w", 160)))),
+        d: Math.min(120, Math.max(20, Math.round(read("d", 45)))),
+        h: Math.min(240, Math.max(20, Math.round(read("h", 80)))),
+        doors: Number(mask.querySelector('[data-furn="doors"]').value) || 0,
+        leg: Number(mask.querySelector('[data-furn="leg"]').value) || 0,
+        color: mask.querySelector(".furn-color.is-active")?.dataset.color || "#b98a5e",
+        save: mask.querySelector('[data-furn="save"]').checked,
+      });
+    });
+    document.body.append(mask);
+  });
+}
+
+async function createFurnitureFlow(scene) {
+  const spec = await openFurnitureDialog();
+  if (!spec) return;
+  try {
+    const result = await applyFurniture(scene, spec);
+    if (spec.save) showToast(`已放进场景，并存进模型库：${result.saved}`);
+    else showToast("已放进场景，拖动它摆位置");
+  } catch (error) {
+    showError(error);
+  }
+}
+
+/* 生成 + 摆进场景 +（可选）入库；返回 {start, count, saved}，MCP 也走这条。 */
+async function applyFurniture(scene, spec) {
+  const rel = buildFurnitureParts(spec);
+  let floor = scene.surfaces.find((one) => one.kind === "floor");
+  if (!floor) {
+    const list = sceneSurfacesOf([
+      ...scene.surfaces,
+      { id: "ground", name: "地面", kind: "floor", w: 1000, h: 1000 },
+    ]);
+    scene.surfaces = list;
+    floor = list.find((one) => one.kind === "floor");
+  }
+  const groupId = newId();
+  const placed = rel.map((part) => ({
+    ...part,
+    group: groupId,
+    surface: floor.id,
+    x: part.x + floor.x,
+    y: part.y + floor.y,
+    z: part.z + floor.z,
+  }));
+  const got = normalizeSceneParts([...scene.parts, ...placed]);
+  if (got.dropped.length) throw new Error(got.dropped[0].why);
+  scene.parts = got.parts;
+  persistScene(scene);
+  const el = itemEls.get(scene.id);
+  if (el) syncItemElement(el, scene);
+  scheduleItemsSave();
+  const start = scene.parts.length - rel.length;
+  const indices = rel.map((_, k) => start + k);
+  setScenePlacementMode(scene, true);
+  setSceneFurnitureSelection(sceneView(scene), indices);
+  let saved = "";
+  if (spec.save) {
+    const buffer = await exportPartsGLB(rel);
+    const name = {
+      cabinet: "参数柜",
+      table: "参数桌",
+      box: "方块",
+      cylinder: "圆柱",
+      sphere: "球体",
+      cone: "圆锥",
+      torus: "圆环",
+      capsule: "胶囊",
+    }[spec.kind] || "模型";
+    const file = await store.modelLibrarySave(name, bufferToBase64(buffer));
+    saved = file.name;
+  }
+  return { start, count: rel.length, saved };
+}
+
+/* ---------- 场景导出 GLB ---------- */
+
+function bufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function exportSceneFlow(item) {
+  try {
+    const buffer = await exportSceneGLB(sceneView(item));
+    const base = current?.meta.name || "场景";
+    const suffix = item.seq ? `-#${item.seq}` : "";
+    const name = `${base}${suffix}.glb`;
+    const data = bufferToBase64(buffer);
+    const path = await store.exportSaveFile(name, data);
+    if (path) showToast(`已导出：${path}`);
+  } catch (error) {
+    showError(error);
+  }
 }
 
 /* ---------- 户型块 ---------- */
@@ -13350,6 +14351,73 @@ export const canvasAgent = {
   sceneCameraPreset: agentSceneCameraPreset,
   scenePlaceProduct: agentScenePlaceProduct,
   sceneApplyMaterial: agentSceneApplyMaterial,
+  sceneAddModel: async (sceneId, name) => {
+    const scene = agentRequireItem(sceneId);
+    if (scene.type !== "scene") throw new Error("scene 要传场景块");
+    const result = await addSceneModel(scene, String(name || "").trim());
+    if (!result) throw new Error("模型没加进场景");
+    return result;
+  },
+  sceneCreateFurniture: async (sceneId, spec = {}) => {
+    const scene = agentRequireItem(sceneId);
+    if (scene.type !== "scene") throw new Error("scene 要传场景块");
+    const KIND = {
+      cabinet: { w: 160, d: 45, h: 80, cabinet: true },
+      table: { w: 140, d: 70, h: 75, cabinet: false },
+      box: { w: 100, d: 100, h: 100, cabinet: false },
+      cylinder: { w: 80, d: 80, h: 120, cabinet: false },
+      sphere: { w: 100, d: 100, h: 100, cabinet: false },
+      cone: { w: 100, d: 100, h: 120, cabinet: false },
+      torus: { w: 100, d: 100, h: 30, cabinet: false },
+      capsule: { w: 60, d: 60, h: 120, cabinet: false },
+    };
+    const kind = KIND[spec.kind] ? spec.kind : "cabinet";
+    const preset = KIND[kind];
+    const color = /^#[0-9a-fA-F]{6}$/.test(String(spec.color || "")) ? String(spec.color) : "#b98a5e";
+    const built = {
+      kind,
+      w: Math.min(320, Math.max(40, Math.round(numOr(spec.w, preset.w)))),
+      d: Math.min(120, Math.max(20, Math.round(numOr(spec.d, preset.d)))),
+      h: Math.min(240, Math.max(20, Math.round(numOr(spec.h, preset.h)))),
+      color,
+      doors: preset.cabinet ? Math.min(4, Math.max(0, Math.round(numOr(spec.doors, 2)))) : 0,
+      leg: preset.cabinet ? Math.min(15, Math.max(0, Math.round(numOr(spec.leg, 10)))) : 0,
+      save: spec.save === true,
+    };
+    return applyFurniture(scene, built);
+  },
+  modelGenerate: async (spec = {}) => {
+    const got = normalizeSceneParts(spec.parts || []);
+    if (got.dropped.length) throw new Error(got.dropped[0].why);
+    if (!got.parts.length) throw new Error("parts 是空的：至少给一件几何");
+    if (got.parts.some((part) => part.op === "model")) {
+      throw new Error("parts 里不能放 model 引用件；要用网格请写 mesh");
+    }
+    const buffer = await exportPartsGLB(got.parts);
+    const base = String(spec.name || "模型").trim().slice(0, 60) || "模型";
+    if (spec.out) {
+      const path = await store.exportSaveFile(`${base}.glb`, bufferToBase64(buffer), spec.out);
+      return { name: `${base}.glb`, path: path || "" };
+    }
+    const file = await store.modelLibrarySave(base, bufferToBase64(buffer));
+    let placed = null;
+    if (spec.scene) {
+      const scene = agentRequireItem(spec.scene);
+      if (scene.type !== "scene") throw new Error("scene 要传场景块");
+      placed = await addSceneModel(scene, file.name);
+    }
+    return { name: file.name, placed };
+  },
+  sceneExportGlb: async (id, out) => {
+    const item = agentRequireItem(id);
+    if (item.type !== "scene") throw new Error("id 要传场景块");
+    if (!out) throw new Error("out 要给保存的绝对路径（.glb），MCP 里弹不了文件框");
+    const buffer = await exportSceneGLB(sceneView(item));
+    const base = current?.meta.name || "场景";
+    const name = `${base}${item.seq ? `-#${item.seq}` : ""}.glb`;
+    const path = await store.exportSaveFile(name, bufferToBase64(buffer), out);
+    return { path: path || "", block: item.id };
+  },
   planCalibrate: agentPlanCalibrate,
   planPlaceProduct: agentPlanPlaceProduct,
   planPlaceCamera: agentPlanPlaceCamera,

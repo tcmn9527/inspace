@@ -40,6 +40,18 @@ export const saveCanvasImageAs = (id, itemId) =>
 export const genDegrid = (id, srcs) => invoke("gen_degrid", { id, srcs });
 export const genDeviceGet = () => invoke("gen_device_get");
 export const genDeviceSet = (device) => invoke("gen_device_set", { device });
+/* 通用导出保存：弹保存框（或直接写 target），把前端生成的文件（如场景 GLB）落盘 */
+export const exportSaveFile = (fileName, dataBase64, target) =>
+  invoke("canvas_export_file", {
+    fileName,
+    filterName: "GLB 模型",
+    exts: ["glb"],
+    target: target || null,
+    data: dataBase64,
+  });
+/* 参数化家具导出：把前端生成的 GLB 直接存进模型库，返回 {name,size,modified} */
+export const modelLibrarySave = (name, dataBase64) =>
+  invoke("model_library_save", { name, data: dataBase64 });
 /* 删图：文件当场进系统回收站，引用态的原图不碰。 */
 export const deleteCanvasImage = (id, src, linked) =>
   invoke("canvas_delete_image", { id, src, linked: Boolean(linked) });

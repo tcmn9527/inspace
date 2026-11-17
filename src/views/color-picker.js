@@ -331,6 +331,8 @@ export function createColorPanel({
 /**
  * 独立浮层形态的取色盘：贴在给定坐标上，点外面关掉。
  * 参数同上，另外 onDone 在关闭时落库、Esc 视为取消。
+ * withButtons：底部带「取消 / 确定」，确定才落库（给需要显式确认的场景用）。
+ * dismissCommits：点外面是否算确定，默认 true；配 withButtons 时一般传 false。
  */
 export function openColorPicker({
   x = 0,
@@ -339,6 +341,8 @@ export function openColorPicker({
   seed,
   presets = [],
   allowAlpha = false,
+  withButtons = false,
+  dismissCommits = true,
   onChange,
   onDone,
 } = {}) {
@@ -352,12 +356,31 @@ export function openColorPicker({
     onChange,
   });
   document.body.append(panel.el);
+  if (withButtons) {
+    const actions = document.createElement("div");
+    actions.className = "color-pop-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "plain-btn";
+    cancel.textContent = "取消";
+    cancel.addEventListener("click", () => {
+      panel.cancel();
+      closeColorPicker(false);
+    });
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "plain-btn color-pop-confirm";
+    confirm.textContent = "确定";
+    confirm.addEventListener("click", () => closeColorPicker(true));
+    actions.append(cancel, confirm);
+    panel.el.append(actions);
+  }
   const rect = panel.el.getBoundingClientRect();
   panel.el.style.left = `${clamp(x, 8, window.innerWidth - rect.width - 8)}px`;
   panel.el.style.top = `${clamp(y, 8, window.innerHeight - rect.height - 8)}px`;
 
   const onDocDown = (e) => {
-    if (!e.composedPath().includes(panel.el)) closeColorPicker(true);
+    if (!e.composedPath().includes(panel.el)) closeColorPicker(dismissCommits);
   };
   const onKeyDown = (e) => {
     if (e.key !== "Escape") return;

@@ -948,7 +948,7 @@ scene_camera_preset {id, preset:"front"|"left"|"right"|"top"|"auto"}
 机位按当前内容框算；auto 回到按内容自动框。摆完东西先 scene_screenshot 看一眼，再决定要不要换机位。
 
 ### 家具摆放与附着面
-右键场景 →「摆放家具」后，普通左键拖单件家具；Ctrl 旋转、Shift 整体平移保持不变，Esc 退出摆放。
+右键场景 →「编辑元素」后，普通左键点选/拖动单件家具；Ctrl 旋转、Shift 整体平移保持不变，Esc 退出编辑元素。
 scene_get {id} 读取完整零件、surfaces、真实模型包围盒和屏幕中心；未加载的 GLB 不能绑定或移动。
 scene_surface_set {id,surface:{id:"floor",kind:"floor",x:0,y:0,z:2,w:600,h:500}} 定义地面，x/y 为中心，z 是承载高度。
 墙面 kind:"wall"，x/y 是宽度中点、z 是底边；rotate:0 的宽轴朝 +x、墙面朝 -y，rotate:90 朝 +x；w 是宽度、h 是高度。

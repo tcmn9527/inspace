@@ -834,7 +834,7 @@ const TOOL_DEFS = [
     id: ID, part: { type: "integer", minimum: 0, description: "家具任一零件序号" },
     du: { type: "number" }, dv: { type: "number" },
   }, ["id", "part"]),
-  def("scene_placement_mode", "进入/退出家具摆放模式：普通左键拖家具，Ctrl 旋转、Shift 平移视图不变。右键也可切换，Esc 退出；未绑定的墙体等固定结构不动。", {
+  def("scene_placement_mode", "进入/退出元素编辑模式：进入后普通左键点选/拖动场景里的家具和构件，Ctrl 旋转、Shift 平移视图不变。右键也可切换，Esc 退出；未绑定的墙体等固定结构不动。", {
     id: ID, enabled: { type: "boolean" },
   }, ["id", "enabled"]),
   def("scene_room_shell", "给一块场景铺房间壳：客厅 / 主卧 / 餐厅三种，含地板、背景墙、侧墙、窗、地毯和边柜。单位是厘米（客厅 6.2×5.2m、墙高 2.8m）。会替换场景里现有的 parts，然后按白天光、自动机位重排；摆好壳再用 scene_place_product 把产品卡里的 GLB 家具放进去。", {
@@ -866,6 +866,31 @@ const TOOL_DEFS = [
     repeat: { type: "number", description: "每格多少厘米，默认 100" },
     clear: { type: "boolean", description: "true 就去掉这个面的贴图" },
   }, ["scene"]),
+  def("scene_add_model", "把模型库里的一份 .glb 放进 3D 场景：给场景块 id 和模型文件名（来自模型库）。没地面会自动补一块，放进去就选中、可以直接拖动摆位。返回 {index, name}。", {
+    scene: ID,
+    name: { type: "string", description: "模型库里的文件名，如 SheenChair.glb" },
+  }, ["scene", "name"]),
+  def("scene_create_furniture", "参数化生成一件模型放进 3D 场景：柜子 / 桌子 / 方块 / 圆柱 / 球体 / 圆锥，尺寸单位厘米。save=true 时同时导出 GLB 存进模型库。返回 {start, count, saved}（场景里零件的起点序号/数量/入库文件名）。", {
+    scene: ID,
+    kind: { type: "string", enum: ["cabinet", "table", "box", "cylinder", "sphere", "cone", "torus", "capsule"], description: "柜子/桌子/方块/圆柱/球体/圆锥/圆环/胶囊，默认 cabinet" },
+    w: { type: "number", description: "宽 cm（40–320），默认柜 160 / 桌 140" },
+    d: { type: "number", description: "深 cm（20–120），默认柜 45 / 桌 70" },
+    h: { type: "number", description: "高 cm（20–240），默认柜 80 / 桌 75" },
+    color: { type: "string", description: "颜色值，如 #b98a5e；默认原木色" },
+    doors: { type: "number", description: "柜门扇数 0–4，默认 2（仅柜子）" },
+    leg: { type: "number", description: "柜腿高度 cm 0/10/15，默认 10（仅柜子）" },
+    save: { type: "boolean", description: "true 就同时导出 GLB 存进模型库" },
+  }, ["scene"]),
+  def("model_generate", "用几何配方现建一个 GLB 模型（three.js 构几何、GLTFExporter 导出）。parts 是零件数组：支持 box / poly / roof / solid（圆柱、球、圆锥、圆环、胶囊）和 mesh（任意三角网格：positions 扁平 [x,y,z,...]，y 向上、原点即落点，可带 indices）。不传 out 就存进模型库并返回文件名；给 scene（场景块 id）会顺手摆进场景。足球这种多面体就用 mesh：算好顶点和三角面传进来。返回 {name, placed} 或 {name, path}。", {
+    name: { type: "string", description: "模型名（进模型库的文件名 / 导出默认名）" },
+    parts: { type: "array", items: { type: "object" }, description: "零件数组；mesh 件写 {op:'mesh', positions:[...], indices:[...], color, name}" },
+    scene: { type: "string", description: "可选：生成后直接摆进这个场景块" },
+    out: { type: "string", description: "可选：导出到绝对路径（.glb），给了就不进模型库" },
+  }, ["name", "parts"], 180),
+  def("scene_export_glb", "把 3D 场景块导出成一个 GLB：墙地、家具、程序几何合成一个文件（米制、贴图内嵌），可以交给客户或用外部 3D 软件打开。out 给保存的绝对路径（.glb）。返回 {path, block}。", {
+    id: ID,
+    out: { type: "string", description: "保存到的绝对路径（.glb）" },
+  }, ["id", "out"], 120),
   def("plan_calibrate", "给户型块定标：x1/y1/x2/y2 是图片上两个点的相对位置（0~1，左上角是 0,0），mm 是这两点的真实长度（毫米）。定标后家具脚印、面积和机位才有真实比例。可以先 space_snapshot 看户型图再估点。", {
     id: ID,
     x1: { type: "number", description: "第一点的横向比例 0~1" },
@@ -1125,7 +1150,7 @@ const BLOCK_FIELDS = [
   "seconds", "width", "height",
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
   "cmds", "symbols", "paperColor", "hidden", "light",
-  "parts", "surfaces", "camera", "groundColor",
+  "parts", "surfaces", "camera", "groundColor", "shadow",
   ...GEN_KEYS,
 ];
 
@@ -1540,7 +1565,7 @@ async function dispatch(name, args) {
             "type", "x", "y", "w", "h", "text", "markdown", "name", "path", "mode", "as",
             "fontSize", "align", "vAlign", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
             "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
-            "paperColor", "cmds", "symbols", "light", "parts", "surfaces", "camera", "groundColor",
+            "paperColor", "cmds", "symbols", "light", "parts", "surfaces", "camera", "groundColor", "shadow",
             ...GEN_KEYS,
             "seconds", "width", "height",
             "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
@@ -1627,6 +1652,19 @@ async function dispatch(name, args) {
       return onCanvas(args, () =>
         canvasAgent.sceneApplyMaterial(pick(args, ["scene", "product", "target", "repeat", "clear"])),
       );
+    case "model_generate":
+      return canvasAgent.modelGenerate({
+        name: args.name,
+        parts: args.parts,
+        scene: args.scene || "",
+        out: args.out || "",
+      });
+    case "scene_export_glb":
+      return onCanvas(args, () => canvasAgent.sceneExportGlb(args.id, args.out));
+    case "scene_add_model":
+      return onCanvas(args, () => canvasAgent.sceneAddModel(args.scene, args.name));
+    case "scene_create_furniture":
+      return onCanvas(args, () => canvasAgent.sceneCreateFurniture(args.scene, pick(args, ["kind", "w", "d", "h", "color", "doors", "leg", "save"])));
     case "plan_calibrate":
       return onCanvas(args, () =>
         canvasAgent.planCalibrate(pick(args, ["id", "x1", "y1", "x2", "y2", "mm"])),

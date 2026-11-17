@@ -1285,6 +1285,85 @@ body.is-titlebar-hidden .titlebar {
   font-weight: 400;
 }
 
+/* ---------- 参数化家具弹窗 ---------- */
+.dialog-furniture {
+  width: 340px;
+}
+
+.dialog-furniture .furn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.dialog-furniture .furn-row > span:first-child {
+  flex: 0 0 auto;
+  width: 44px;
+  color: var(--muted);
+}
+
+.dialog-furniture .furn-row input[type="number"],
+.dialog-furniture .furn-row select {
+  width: 110px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.dialog-furniture .furn-row input[type="number"]:focus,
+.dialog-furniture .furn-row select:focus {
+  border-color: var(--accent);
+}
+
+.dialog-furniture .furn-row em {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: normal;
+}
+
+.dialog-furniture .furn-colors {
+  display: flex;
+  gap: 8px;
+}
+
+.dialog-furniture .furn-color {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent);
+  cursor: pointer;
+}
+
+.dialog-furniture .furn-color.is-active {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.dialog-furniture .furn-save {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dialog-furniture .furn-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 .props-path {
   margin-top: 6px;
   color: var(--fg);
@@ -6028,4 +6107,249 @@ textarea.canvas-gen-more-input {
   color: #fff;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
   pointer-events: none;
+}
+
+/* ---------- 3D 场景工具条（选中单个场景块时浮在画布底部） ---------- */
+.scene-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+}
+
+.scene-toolbar[hidden] {
+  display: none;
+}
+
+.scene-tool-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.scene-tool-btn:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.scene-tool-btn.is-open {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.scene-tool-btn.is-disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.scene-tool-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+  background: transparent;
+}
+
+
+.scene-pop {
+  position: absolute;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 280px;
+  max-width: 360px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  z-index: 31;
+}
+
+.scene-pop[hidden] {
+  display: none;
+}
+
+.scene-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.scene-pop-row > span:first-child {
+  flex: 0 0 52px;
+}
+
+.scene-pop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 弹层里的按钮平分整行宽度，别挤成一坨 */
+.scene-pop-actions .plain-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scene-pop-actions .plain-btn.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.scene-pop-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.scene-dot {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent);
+  cursor: pointer;
+}
+
+.scene-dot.is-active {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.scene-dot.is-default {
+  background:
+    linear-gradient(135deg, transparent 46%, var(--muted) 48%, var(--muted) 52%, transparent 54%),
+    var(--surface);
+}
+
+/* 更多色：彩虹渐变的小圆，挑过自定义色时显示那个色 */
+.scene-dot.is-more {
+  background: conic-gradient(#e58a8a, #e8c07a, #a7d08a, #7ab8d9, #9a9ae0, #ce95ce, #e58a8a);
+}
+
+.scene-dot.is-more.is-custom {
+  background: var(--c);
+}
+
+/* 全局取色盘浮层的「取消 / 确定」行（给需要显式确认的入口用） */
+.color-pop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.color-pop-actions .color-pop-confirm {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 模型库菜单：每行左边一张缩略图，认模型不用靠文件名 */
+.ctx-menu button.has-thumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctx-menu button .menu-thumb {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  object-fit: contain;
+}
+
+/* 模型菜单悬停大图：菜单行右边浮一张 232 的预览，不吃鼠标 */
+.menu-thumb-preview {
+  position: fixed;
+  z-index: 60;
+  width: 232px;
+  height: 232px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.menu-thumb-preview[hidden] {
+  display: none;
+}
+
+.menu-thumb-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* 菜单顶部搜索框（模型库这类长列表用） */
+.menu-search {
+  display: block;
+  width: calc(100% - 12px);
+  height: 28px;
+  margin: 4px 6px 6px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.menu-search:focus {
+  border-color: var(--accent);
+}
+
+.menu-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 长菜单的列表区：固定高度、自己滚；滚到底再续下一页 */
+.menu-list {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
+}
+
+.menu-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.menu-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 3px;
+}
+
+.menu-list::-webkit-scrollbar-track {
+  background: transparent;
 }

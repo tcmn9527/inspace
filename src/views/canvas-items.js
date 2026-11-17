@@ -525,6 +525,8 @@ function normalizeBlock(raw) {
       camera: normalizeSceneCamera(raw.camera),
       /* 没挂光就是平光：和画面块同一个约定，坏数据不许把整块判死 */
       light: normalizeLight(raw.light).light || null,
+      /* 阴影默认开；关掉只影响这一块的渲染，不进 GLB 导出 */
+      shadow: raw.shadow !== false,
       groundColor: colorOr(raw.groundColor, ""),
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
       borderWidth: Math.min(
@@ -977,8 +979,8 @@ function sceneRing(label, raw) {
 function normalizeScenePart(raw) {
   if (!raw || typeof raw !== "object") return { why: "不是对象" };
   /* 先认 op 再挑毛病：一件「sphere」报「h 得是正数」，写的人会被带去改 h，改完还是不认 */
-  if (raw.op !== "box" && raw.op !== "poly" && raw.op !== "roof" && raw.op !== "model") {
-    return { why: `op「${String(raw.op).slice(0, 12)}」不认：现在只有 "box"（长方体）、"poly"（底面轮廓 + h 挤成真棱柱）、"roof"（底面轮廓 + h 立成屋顶）和 "model"（模型库里的 GLB）` };
+  if (raw.op !== "box" && raw.op !== "poly" && raw.op !== "roof" && raw.op !== "model" && raw.op !== "solid" && raw.op !== "mesh") {
+    return { why: `op「${String(raw.op).slice(0, 12)}」不认：现在只有 "box"（长方体）、"poly"（底面轮廓 + h 挤成真棱柱）、"roof"（底面轮廓 + h 立成屋顶）、"solid"（圆柱/球/圆锥/圆环/胶囊）、"mesh"（任意三角网格）和 "model"（模型库里的 GLB）` };
   }
   /* 落点：永远指底面那个中心点，h 从这儿往上立起来。轮廓里的点相对它，rotate 绕它转。 */
   const foot = {
@@ -1013,6 +1015,38 @@ function normalizeScenePart(raw) {
       },
     };
   }
+    /* 任意三角网格：positions 是扁平 [x,y,z,...]（three 坐标、y 向上、原点即落点），
+     indices 可省（省了就按顶点顺序三角化）。上下限挡住离谱数据把内存打爆 */
+  if (raw.op === "mesh") {
+    const positions = Array.isArray(raw.positions) ? raw.positions.map(Number) : null;
+    if (!positions || positions.length < 9 || positions.length % 3 !== 0 || positions.length > 90000) {
+      return { why: "mesh 的 positions 要是扁平数组 [x,y,z,...]：至少一个三角形，长度是 3 的倍数、不超过 90000" };
+    }
+    if (!positions.every(Number.isFinite)) return { why: "mesh 的 positions 里有不是数的坐标" };
+    const rawIndices = Array.isArray(raw.indices) ? raw.indices.map((n) => Math.trunc(Number(n))) : null;
+    if (rawIndices) {
+      if (rawIndices.length < 3 || rawIndices.length % 3 !== 0 || rawIndices.length > 180000) {
+        return { why: "mesh 的 indices 至少一个三角形，长度是 3 的倍数、不超过 180000" };
+      }
+      const count = positions.length / 3;
+      if (!rawIndices.every((n) => Number.isInteger(n) && n >= 0 && n < count)) {
+        return { why: "mesh 的 indices 越界：每个下标都要落在顶点范围内" };
+      }
+    }
+    const rotate = Number(raw.rotate);
+    return {
+      part: {
+        op: "mesh",
+        ...foot,
+        positions,
+        indices: rawIndices,
+        rotate: Number.isFinite(rotate) ? ((rotate % 360) + 360) % 360 : 0,
+        color: colorOr(raw.color, ""),
+        name: typeof raw.name === "string" ? raw.name : "",
+      },
+    };
+  }
+
   const h = Number(raw.h);
   if (!(h > 0) || h > SCENE_MAX_SIZE) {
     return { why: `h（立起来多高）得是正数、不超过 ${SCENE_MAX_SIZE}（现在是 ${String(raw.h).slice(0, 12)}）` };
@@ -1039,6 +1073,13 @@ function normalizeScenePart(raw) {
     const got = rect();
     if (got.why) return got;
     return { part: { op: "box", ...foot, w: got.w, d: got.d, ...body } };
+  }
+  /* 基础几何体：圆柱 / 球 / 圆锥（w/d 是底面两个方向的直径，h 是高度） */
+  if (raw.op === "solid") {
+    const got = rect();
+    if (got.why) return got;
+    const shape = ["cylinder", "sphere", "cone", "torus", "capsule"].includes(raw.shape) ? raw.shape : "cylinder";
+    return { part: { op: "solid", ...foot, shape, w: got.w, d: got.d, ...body } };
   }
   if (raw.op === "poly") {
     const got = sceneRing("poly", raw);
@@ -1218,6 +1259,7 @@ export function makeScene(x, y, w = SCENE_DEFAULT_WIDTH, h = SCENE_DEFAULT_HEIGH
     surfaces: [],
     camera: null,
     light: null,
+    shadow: true,
     groundColor: "",
     borderColor: DEFAULT_BORDER,
     borderWidth: CARD_DEFAULT_BORDER_WIDTH,

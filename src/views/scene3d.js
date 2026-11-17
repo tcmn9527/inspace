@@ -287,11 +287,25 @@ function contentBoxWithModels(item, rects) {
   return contentBox(parts, item.light);
 }
 
+const hashFloats = (values) => {
+  let hash = 2166136261;
+  for (const value of values) {
+    hash = Math.imul(hash ^ (Math.round(value * 1000) | 0), 16777619) >>> 0;
+  }
+  return hash;
+};
+
 /* 几何只由「体型 + 那圈点 + 立起来多高」决定：挪位置、转角度、换颜色都不必重挤一次 */
-const geometrySig = (part) =>
-  `${part.op};${part.h};${part.w ?? ""},${part.d ?? ""},${part.ridge ?? ""};${
+const geometrySig = (part) => {
+  if (part.op === "mesh") {
+    const positions = part.positions || [];
+    const indices = part.indices || [];
+    return `mesh;${positions.length};${indices.length};${hashFloats(positions)};${hashFloats(indices)}`;
+  }
+  return `${part.op};${part.shape ?? ""};${part.h};${part.w ?? ""},${part.d ?? ""},${part.ridge ?? ""};${
     part.points ? part.points.map((p) => `${p.x},${p.y}`).join(";") : ""
   }`;
+};
 
 /* 底面轮廓 + h 挤成真棱柱。墙、台基、八角亭身都走这条路，加新体型时渲染器那边不用动。 */
 export function polyGeometry(THREE, part) {
@@ -373,8 +387,55 @@ export function roofGeometry(THREE, part) {
 }
 
 /* 一件东西的几何：box 走共用单位立方体（在 rebuildParts 里），其余都是自己挤一份 */
+/* 基础几何体：圆柱 / 球 / 圆锥 / 圆环 / 胶囊。直接生成真实尺寸，底面中心在原点、y 向上，
+   和 poly/roof 一样是「挤好的真几何」（渲染时 scale 保持 1）。 */
+function solidGeometry(THREE, part) {
+  const w = Math.max(0.1, Number(part.w) || 1);
+  const d = Math.max(0.1, Number(part.d) || 1);
+  const h = Math.max(0.1, Number(part.h) || 1);
+  if (part.shape === "sphere") {
+    return new THREE.SphereGeometry(1, 32, 20)
+      .scale(w / 2, h / 2, d / 2)
+      .translate(0, h / 2, 0);
+  }
+  if (part.shape === "torus") {
+    /* 单位圆环：外径 1（环半径 0.4 + 管半径 0.1）、平躺、底面在 0 */
+    const tube = 0.1;
+    return new THREE.TorusGeometry(0.4, tube, 16, 48)
+      .rotateX(Math.PI / 2)
+      .translate(0, tube, 0)
+      .scale(w, h / (tube * 2), d);
+  }
+  if (part.shape === "capsule") {
+    /* 单位胶囊：半径 0.5、总高 2（中间柱 1 + 两个半球），底面在 0 */
+    return new THREE.CapsuleGeometry(0.5, 1, 8, 20)
+      .translate(0, 1, 0)
+      .scale(w, h / 2, d);
+  }
+  if (part.shape === "cone") {
+    return new THREE.CylinderGeometry(0, 1, 1, 32, 1)
+      .scale(w / 2, h, d / 2)
+      .translate(0, h / 2, 0);
+  }
+  return new THREE.CylinderGeometry(1, 1, 1, 32, 1)
+    .scale(w / 2, h, d / 2)
+    .translate(0, h / 2, 0);
+}
+
+/* 任意三角网格：positions 扁平数组（three 坐标），indices 可省 */
+function meshGeometry(THREE, part) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(part.positions || [], 3));
+  if (part.indices?.length) geometry.setIndex(part.indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 export function partGeometry(THREE, part) {
-  return part.op === "roof" ? roofGeometry(THREE, part) : polyGeometry(THREE, part);
+  if (part.op === "roof") return roofGeometry(THREE, part);
+  if (part.op === "solid") return solidGeometry(THREE, part);
+  if (part.op === "mesh") return meshGeometry(THREE, part);
+  return polyGeometry(THREE, part);
 }
 
 // 先框世界 AABB 再投影会高估旋转墙面上的尺寸，所以直接投影实际几何。
@@ -631,6 +692,13 @@ export function setSceneFurnitureSelection(view, indices = []) {
   }
   selection.indices = furnitureIndices(indices).filter((index) => Number.isInteger(index) && index >= 0);
   updateFurnitureSelection(view, view.__scene);
+  selectionListener?.(view, selection.indices);
+}
+
+/* 场景里选中了哪件东西变了：canvas 那边要切换底部工具条 */
+let selectionListener = null;
+export function onSceneFurnitureSelection(listener) {
+  selectionListener = listener;
 }
 
 export function sceneFurnitureInspect(view) {
@@ -1066,6 +1134,8 @@ function render(view, state, item) {
   camera.lookAt(cam.target[0], cam.target[1], cam.target[2]);
   camera.updateProjectionMatrix();
   applyLight(state, item, box);
+  /* 这一块的阴影开关：关掉后太阳不再投影，地面/家具都回到平光 */
+  state.sun.castShadow = item.shadow !== false;
   /* 地面要拖到雾里为止：远处那条边一旦看得见，整块就变成「一块浮在页面上的方板」。
      雾的近端卡在内容之后，所以东西本身不吃雾，只有地平的尽头化进天空。 */
   const reach = Math.max(box.dx, box.dy);
@@ -1080,8 +1150,96 @@ function render(view, state, item) {
   updateFurnitureSelection(view, state);
 }
 
-export function disposeScene(view) {
-  view?.__sceneSelection?.element.remove();
+/* 把这一块的 3D 内容导成 GLB：只导 root（墙、地、家具、程序几何），
+   不带渲染用的天空/雾/相机；厘米 → 米（×0.01），贴图内嵌在二进制里。 */
+export async function exportSceneGLB(view) {
+  const state = view?.__scene;
+  if (!state?.item) throw new Error("三维场景还没准备好，等它显示出来再导出");
+  for (const mesh of state.meshMap.values()) {
+    if (mesh.__model && !mesh.__loaded) {
+      throw new Error("有些模型还没加载完，等它们显示出来再导出");
+    }
+  }
+  const { GLTFExporter } = await import("/vendor/three/addons/exporters/GLTFExporter.js");
+  const group = new state.THREE.Group();
+  group.name = state.item.title || "3D 场景";
+  for (const child of state.root.children) group.add(child.clone(true));
+  group.scale.setScalar(0.01);
+  const exporter = new GLTFExporter();
+  return exporter.parseAsync(group, { binary: true, onlyVisible: false });
+}
+
+/* 把一组零件（参数化家具）导成 GLB：以原点为中心、底面在 y=0，厘米 → 米。 */
+export async function exportPartsGLB(parts) {
+  const THREE = await loadThree();
+  const group = new THREE.Group();
+  const unit = new THREE.BoxGeometry(1, 1, 1);
+  for (const part of parts) {
+    const baked = part.op !== "box";
+    const mesh = new THREE.Mesh(
+      baked ? partGeometry(THREE, part) : unit,
+      new THREE.MeshStandardMaterial({
+        color: part.color || "#b9a887",
+        roughness: 0.8,
+        metalness: 0,
+      }),
+    );
+    if (baked) {
+      const [wx, wy, wz] = toWorld(part.x, part.y, part.z);
+      mesh.position.set(wx, wy, wz);
+    } else {
+      const [wx, wy, wz] = toWorld(part.x, part.y, part.z + part.h / 2);
+      mesh.position.set(wx, wy, wz);
+      mesh.scale.set(part.w, part.h, part.d);
+    }
+    mesh.rotation.y = ((part.rotate || 0) * Math.PI) / 180;
+    group.add(mesh);
+  }
+  group.scale.setScalar(0.01);
+  const { GLTFExporter } = await import("/vendor/three/addons/exporters/GLTFExporter.js");
+  return new GLTFExporter().parseAsync(group, { binary: true });
+}
+
+let thumbRenderer = null;
+
+/* 模型库缩略图：离屏渲一帧 96×96 透明底 PNG。共享一个 WebGL 上下文，别把配额吃光 */
+export async function renderModelThumbnail(src, size = 256) {
+  const THREE = await loadThree();
+  const { GLTFLoader } = await loadGltf();
+  const entry = modelEntry(THREE, GLTFLoader, src);
+  if (!entry.gltf) {
+    if (entry.promise) await entry.promise.catch(() => {});
+  }
+  const gltf = entry.gltf;
+  if (!gltf) throw new Error(entry.error || "模型没加载出来");
+  const scene = new THREE.Scene();
+  const model = gltf.scene.clone(true);
+  scene.add(model);
+  const box = new THREE.Box3().setFromObject(model);
+  if (box.isEmpty()) throw new Error("模型没有可见几何");
+  const center = box.getCenter(new THREE.Vector3());
+  const extents = box.getSize(new THREE.Vector3());
+  const radius = Math.max(extents.x, extents.y, extents.z) * 0.5 || 1;
+  model.position.sub(center);
+  const camera = new THREE.PerspectiveCamera(35, 1, radius * 0.05, radius * 20);
+  const dist = (radius / Math.sin((35 * Math.PI) / 360)) * 1.05;
+  camera.position.set(dist * 0.75, dist * 0.55, dist * 0.75);
+  camera.lookAt(0, 0, 0);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+  sun.position.set(2, 4, 3);
+  scene.add(sun);
+  if (!thumbRenderer) {
+    thumbRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  }
+  thumbRenderer.setPixelRatio(1);
+  thumbRenderer.setSize(size, size, false);
+  thumbRenderer.setClearColor(0x000000, 0);
+  thumbRenderer.render(scene, camera);
+  return thumbRenderer.domElement.toDataURL("image/png");
+}
+
+export function disposeScene(view) {  view?.__sceneSelection?.element.remove();
   if (view) delete view.__sceneSelection;
   const state = view?.__scene;
   if (!state) return;

@@ -1182,6 +1182,51 @@ pub fn canvas_group_reveal(id: String, state: tauri::State<'_, CanvasState>) -> 
     Ok(())
 }
 
+/* ---------- 通用导出保存 ---------- */
+
+/// 弹保存框，把前端生成的文件（比如场景导出的 GLB）写到用户挑的位置。
+/// target 给了就直接写那个路径（MCP 用）；取消返回 None；成功后返回最终路径。
+#[tauri::command]
+pub async fn canvas_export_file(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    file_name: String,
+    filter_name: String,
+    exts: Vec<String>,
+    target: Option<String>,
+    data: String,
+) -> Result<Option<String>, String> {
+    let bytes = BASE64
+        .decode(data.as_bytes())
+        .map_err(|e| format!("导出数据有误：{e}"))?;
+    if bytes.is_empty() {
+        return Err("导出的内容是空的".to_string());
+    }
+    let path = match target.filter(|one| !one.trim().is_empty()) {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let exts: Vec<&str> = exts.iter().map(String::as_str).filter(|one| !one.is_empty()).collect();
+            let mut builder = app
+                .dialog()
+                .file()
+                .set_title("导出")
+                .set_file_name(file_name)
+                .set_parent(&window);
+            if !exts.is_empty() {
+                builder = builder.add_filter(&filter_name, &exts);
+            }
+            let Some(file_path) = builder.blocking_save_file() else {
+                return Ok(None);
+            };
+            file_path
+                .into_path()
+                .map_err(|e| format!("无法解析保存位置：{e}"))?
+        }
+    };
+    fs::write(&path, &bytes).map_err(|e| format!("写文件失败：{e}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 // ---------- 导入 / 导出（.inspace = 标准 zip） ----------
 /* 包根放一份 inspace.json 清单说明类型和名字；其余条目就是画布/分组目录的内容，
    条目名不带顶层目录，所以解压到哪儿就是哪儿，用户拿普通解压工具也能打开看。 */

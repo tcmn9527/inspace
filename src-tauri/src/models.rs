@@ -3,6 +3,8 @@
 //! 只收贴图内嵌的 .glb：.gltf 那种一堆散文件 + 贴图的格式在离线拷贝、跨机器搬数据时
 //! 很容易少一张图，先不接。模型的加载和摆放由前端 scene3d 负责，这里只管文件的进出和授权。
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -136,6 +138,38 @@ pub fn model_library_url(
         .allow_file(&path)
         .map_err(|e| format!("授权失败：{e}"))?;
     Ok(path.to_string_lossy().to_string())
+}
+
+/// 把前端生成的 GLB（参数化家具导出）直接存进模型库。
+/// name 是想要的文件名（重名自动加序号），data 是 GLB 的 base64。
+#[tauri::command]
+pub fn model_library_save(
+    name: String,
+    data: String,
+    state: tauri::State<'_, ModelState>,
+) -> Result<ModelFile, String> {
+    let bytes = BASE64
+        .decode(data.as_bytes())
+        .map_err(|e| format!("模型数据有误：{e}"))?;
+    if bytes.is_empty() {
+        return Err("模型内容是空的".to_string());
+    }
+    if bytes.len() > 200 * 1024 * 1024 {
+        return Err("模型太大了（超过 200MB）".to_string());
+    }
+    let mut name = name.trim().to_string();
+    if name.is_empty() {
+        name = "家具".to_string();
+    }
+    if !name.to_ascii_lowercase().ends_with(".glb") {
+        name = format!("{name}.glb");
+    }
+    let name = safe_model_name(&name)?;
+    let dir = models_dir(&state.data);
+    fs::create_dir_all(&dir).map_err(|e| format!("无法创建模型库目录：{e}"))?;
+    let target = unique_model_path(&dir, &name);
+    fs::write(&target, &bytes).map_err(|e| format!("写模型失败：{e}"))?;
+    file_of(&target).ok_or_else(|| "模型存进去了但读不出来".to_string())
 }
 
 /// 把一份 GLB 收进模型库。path 不给就开文件框让用户挑。

@@ -91,6 +91,7 @@ function ensureSlot(level) {
 
 export function closeMenu() {
   closeSubmenu();
+  hideThumbPreview();
   const menu = document.getElementById("ctx-menu");
   if (menu) {
     for (const el of menu.querySelectorAll("button.is-open")) el.classList.remove("is-open");
@@ -299,6 +300,30 @@ function fill(container, items, closeAll, level) {
       swatch.style.background = item.swatch;
       button.append(swatch);
     }
+    /* 缩略图：直接给 dataURL，或给一个会解析成 dataURL 的 Promise（慢慢渲出来的） */
+    if (item.thumb) {
+      button.classList.add("has-thumb");
+      const thumb = document.createElement("img");
+      thumb.className = "menu-thumb";
+      thumb.alt = "";
+      const pending = item.thumb;
+      if (typeof pending === "string") {
+        thumb.src = pending;
+      } else if (pending?.then) {
+        pending
+          .then((src) => {
+            if (src && thumb.isConnected) thumb.src = src;
+          })
+          .catch(() => {});
+      }
+      button.append(thumb);
+      button.addEventListener("mouseenter", () => {
+        cancelClose();
+        showThumbPreview(button, item.thumb);
+      });
+    } else {
+      button.addEventListener("mouseenter", hideThumbPreview);
+    }
     button.append(item.label);
 
     const deeper = Boolean(item.colorPicker || item.slider || item.children) && level < 4;
@@ -373,21 +398,120 @@ export function openMenu(x, y, items, options = {}) {
     menu.__hoverGuard = true;
     menu.addEventListener("pointermove", cancelClose);
   }
-  fill(menu, items, closeMenu, 0);
+  if (options.searchable) {
+    /* 长列表（模型库这类）：标题和搜索框固定，列表自己滚动；
+       先渲一页（batch 条），滚到接近底部再续下一页 */
+    menu.textContent = "";
+    if (options.label) {
+      const label = document.createElement("div");
+      label.className = "menu-label";
+      label.textContent = options.label;
+      menu.append(label);
+    }
+    const search = document.createElement("input");
+    search.className = "menu-search";
+    search.type = "text";
+    search.spellcheck = false;
+    search.placeholder = options.searchHint || "搜索…";
+    search.addEventListener("pointerdown", (event) => event.stopPropagation());
+    menu.append(search);
+    const list = document.createElement("div");
+    list.className = "menu-list";
+    menu.append(list);
+    const batch = Math.max(10, Math.floor(Number(options.batch) || 50));
+    let loadMore = () => {};
+    const setSource = (source) => {
+      list.textContent = "";
+      if (!source.length) {
+        const empty = document.createElement("div");
+        empty.className = "menu-empty";
+        empty.textContent = options.emptyHint || "没有匹配的模型";
+        list.append(empty);
+        loadMore = () => {};
+        return;
+      }
+      let rendered = 0;
+      const more = () => {
+        const slice = source.slice(rendered, rendered + batch);
+        if (!slice.length) return;
+        rendered += slice.length;
+        const temp = document.createElement("div");
+        fill(temp, slice, closeMenu, 0);
+        while (temp.firstChild) list.append(temp.firstChild);
+      };
+      more();
+      loadMore = more;
+    };
+    setSource(items);
+    list.addEventListener(
+      "scroll",
+      () => {
+        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) {
+          hideThumbPreview();
+          loadMore();
+        }
+      },
+      { passive: true },
+    );
+    search.addEventListener("input", () => {
+      hideThumbPreview();
+      const needle = search.value.trim().toLowerCase();
+      setSource(
+        needle
+          ? items.filter((item) => typeof item?.label === "string" && item.label.toLowerCase().includes(needle))
+          : items,
+      );
+    });
+  } else {
+    fill(menu, items, closeMenu, 0);
+    if (options.label) {
+      const label = document.createElement("div");
+      label.className = "menu-label";
+      label.textContent = options.label;
+      menu.prepend(label);
+    }
+  }
   /* 这一份菜单是谁开的：给 isMenuOpen(kind) 认门用 */
   if (options.kind) menu.dataset.kind = options.kind;
   else delete menu.dataset.kind;
-  if (options.label) {
-    const label = document.createElement("div");
-    label.className = "menu-label";
-    label.textContent = options.label;
-    menu.prepend(label);
-  }
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
   menu.style.right = "auto";
+}
+
+/* 模型缩略图的悬停大图：跟着带 thumb 的行走，不吃鼠标 */
+let thumbPreview = null;
+
+function showThumbPreview(button, thumb) {
+  if (!thumbPreview) {
+    thumbPreview = document.createElement("div");
+    thumbPreview.className = "menu-thumb-preview";
+    thumbPreview.innerHTML = '<img alt="" />';
+    document.body.append(thumbPreview);
+  }
+  const img = thumbPreview.querySelector("img");
+  img.removeAttribute("src");
+  if (typeof thumb === "string") {
+    img.src = thumb;
+  } else if (thumb?.then) {
+    thumb
+      .then((src) => {
+        if (src && thumbPreview) img.src = src;
+      })
+      .catch(() => {});
+  }
+  thumbPreview.hidden = false;
+  const rect = button.getBoundingClientRect();
+  const width = 232;
+  const left = rect.right + 8 + width > window.innerWidth - 8 ? rect.left - width - 8 : rect.right + 8;
+  thumbPreview.style.left = `${Math.max(8, left)}px`;
+  thumbPreview.style.top = `${Math.max(8, Math.min(rect.top, window.innerHeight - width - 8))}px`;
+}
+
+function hideThumbPreview() {
+  if (thumbPreview) thumbPreview.hidden = true;
 }
 
 /* 点菜单外部、按 Esc 都收起。用 composedPath 而不是 contains(e.target)：菜单项点击时

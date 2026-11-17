@@ -104,7 +104,8 @@ export function tidySelected() {
 
 /* 这一拖要带上的块：单选就它自己，多选把集合里每个都带上，各记各的起点。
    直线/箭头另记 x2/y2，不然框动了线不动。
-   拖的是容器（编成分组的矩形）时，框里那些块跟着一起走。 */function moveGroup() {
+   拖的是容器（编成分组的矩形）时，框里那些块跟着一起走。 */
+export function moveGroup() {
   const group = [];
   const seen = new Set();
   const push = (id) => {

@@ -1,5 +1,6 @@
 /* 从 canvas.js 拆出：agent-layer */
 
+import { ratio } from "../canvas-items.js";
 import { MAX_SCALE, MIN_SCALE, STORAGE_KEY, active, applyCamera, batching, canvases, clamp, commitEditing, current, edgeLabelEditor, editingId, findItem, flushBlockContents, flushCamera, flushItems, genFeedOf, genRunOf, insertPoint, itemBounds, itemEls, loadList, renameTreeGroup, renderAll, replaceSelection, scenePlacementActive, scheduleCameraSave, selectedIds, setCurrent, showEmpty, store, switchTo, treeCollapsed, treeData, treeGroupList, ui } from "../canvas.js";
 
 /* ---------- MCP / agent 动作层 ----------

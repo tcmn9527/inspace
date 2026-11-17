@@ -1,5 +1,6 @@
 /* 从 canvas.js 拆出：gen-agent */
 
+import { ratio } from "../canvas-items.js";
 import { GEN_CFG_MAX, GEN_MODES, GEN_STEPS_MAX, GEN_TEXT_MAX, agentHighlight, agentRequireItem, agentRequireSpace, agentRevealBlock, agentSummary, clamp, closeFileEdit, commitEditing, current, dropVideoRun, editingId, filePreviewCache, findItem, genBusyId, genEngine, genInputItems, genInputPng, genModeFor, genRunMasks, genRunOf, isFileEditable, itemEls, numOr, openImageExternally, patchVideoRun, persistGen, persistNote, placeGenImage, previewKey, refreshFileBlock, refreshVideoPanel, renderNoteBody, revealTarget, runOrStopGen, scheduleItemsSave, showError, snapGenSize, stopGen, stopVideo, store, syncItemElement, videoBusyId, videoRunOf } from "../canvas.js";
 
 /* ---------- 生图面板（agent） ----------

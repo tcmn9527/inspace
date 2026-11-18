@@ -298,6 +298,20 @@ export function normalizeBlock(raw) {
       /* 阴影默认开；关掉只影响这一块的渲染，不进 GLB 导出 */
       shadow: raw.shadow !== false,
       groundColor: colorOr(raw.groundColor, ""),
+      /* 地面辅助网格：开着时按镜头距离自动细分（主格 + 细线），不进 GLB */
+      grid: raw.grid === true || ["small", "medium", "large"].includes(raw.grid),
+      /* 正交投影：户型/产品那种无透视的轴测视角 */
+      ortho: raw.ortho === true,
+      /* 存下来的机位（最多 3 个）：点一下切过去 */
+      cameras: (Array.isArray(raw.cameras) ? raw.cameras : [])
+        .slice(0, 3)
+        .map((one) => {
+          const cam = normalizeSceneCamera(one?.camera);
+          return cam
+            ? { name: String(one?.name || "").slice(0, 24) || "机位", camera: cam, ortho: one?.ortho === true }
+            : null;
+        })
+        .filter(Boolean),
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
       borderWidth: Math.min(
         BORDER_MAX_WIDTH,
@@ -482,8 +496,18 @@ export function toPersisted(item) {
     return rest;
   }
   if (item.type === "scene") {
-    /* 同理：一件东西的底面就有一圈坐标点，那份东西列表只认 scenes/<块id>.json */
-    const { parts, ...rest } = item;
+    /* 同理：一件东西的底面就有一圈坐标点，那份东西列表只认 scenes/<块id>.json。
+       「编辑」时场景临时铺满画布，盘上仍记用户原来摆的位置尺寸 */
+    const { parts, __editRestore, ...rest } = item;
+    if (__editRestore) {
+      Object.assign(rest, {
+        x: __editRestore.x,
+        y: __editRestore.y,
+        w: __editRestore.w,
+        h: __editRestore.h,
+        z: __editRestore.z,
+      });
+    }
     return rest;
   }
   if (item.type === "gen") {

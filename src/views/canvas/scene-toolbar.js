@@ -1,5 +1,6 @@
 /* 从 canvas.js 拆出：scene-toolbar */
 
+import { toPersisted } from "../canvas-items.js";
 import { FURNITURE_COLORS, SCENE_LIGHT_PRESETS, active, addSceneFloor, addSceneModelFlow, agentHighlight, agentRevealBlock, boundsOfItem, closeColorPicker, connectorGeometry, createFurnitureFlow, current, dropRegionImage, exportSceneFlow, findItem, itemBounds, itemEls, newId, normalizeLight, normalizeSceneCamera, normalizeSceneParts, onSceneFurnitureSelection, openColorPicker, panelTreeLabel, persistScene, refreshConnectors, refreshMinimap, renderTree, revealSelectionInTree, sceneCameraState, sceneLightOf, scenePlacementActive, sceneView, scheduleItemsSave, scheduleMeasurements, select, selectedIds, setSceneCameraPreset, setSceneFurnitureSelection, setScenePlacementMode, showError, showToast, syncItemElement, tool, treeUi, ui, updatePorts, worldToStage } from "../canvas.js";
 
 /* ---------- 3D 场景工具条 ----------
@@ -11,6 +12,7 @@ export const SCENE_TOOL_LABELS = [
   ["light", "灯光"],
   ["camera", "机位"],
   ["content", "内容"],
+  ["edit", "编辑"],
   ["export", "输出"],
 ];
 export const GROUND_COLORS = [
@@ -32,6 +34,8 @@ export const LIGHT_DARK_COLORS = [
 ];
 export let sceneToolbar = null;
 export let scenePop = null;
+/* 沉浸式编辑时，场景级工具（环境/灯光/机位/内容/输出）挪到画布左上角 */
+export let sceneEditTools = null;
 export let scenePopKind = "";
 
 export function soloSceneItem() {
@@ -49,7 +53,24 @@ export function installSceneToolbar() {
   scenePop = document.createElement("div");
   scenePop.className = "scene-pop";
   scenePop.hidden = true;
-  main.append(sceneToolbar, scenePop);
+  sceneEditTools = document.createElement("div");
+  sceneEditTools.className = "scene-edit-tools";
+  sceneEditTools.hidden = true;
+  for (const [kind, label] of SCENE_TOOL_LABELS) {
+    if (kind === "edit") continue;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "scene-tool-btn";
+    btn.dataset.sceneTool = kind;
+    btn.textContent = label;
+    sceneEditTools.append(btn);
+  }
+  main.append(sceneToolbar, scenePop, sceneEditTools);
+  sceneEditTools.addEventListener("click", (event) => {
+    const btn = event.target.closest?.("[data-scene-tool]");
+    if (!btn || btn.disabled) return;
+    handleSceneTool(btn.dataset.sceneTool);
+  });
   sceneToolbar.addEventListener("click", (event) => {
     const btn = event.target.closest?.("[data-scene-tool]");
     if (!btn || btn.disabled) return;
@@ -75,6 +96,9 @@ export function closeScenePop() {
   for (const btn of sceneToolbar?.querySelectorAll(".scene-tool-btn") || []) {
     btn.classList.remove("is-open");
   }
+  for (const btn of sceneEditTools?.querySelectorAll(".scene-tool-btn") || []) {
+    btn.classList.remove("is-open");
+  }
 }
 
 export function openScenePop(item, kind) {
@@ -82,6 +106,21 @@ export function openScenePop(item, kind) {
   scenePop.hidden = false;
   for (const btn of sceneToolbar.querySelectorAll(".scene-tool-btn")) {
     btn.classList.toggle("is-open", btn.dataset.sceneTool === kind);
+  }
+  for (const btn of sceneEditTools?.querySelectorAll(".scene-tool-btn") || []) {
+    btn.classList.toggle("is-open", btn.dataset.sceneTool === kind);
+  }
+  /* 沉浸式编辑：弹层跟着左上角的工具组走，不再从底部弹 */
+  if (sceneEditTools && !sceneEditTools.hidden) {
+    scenePop.style.left = "6px";
+    scenePop.style.top = "84px";
+    scenePop.style.bottom = "auto";
+    scenePop.style.transform = "none";
+  } else {
+    scenePop.style.left = "";
+    scenePop.style.top = "";
+    scenePop.style.bottom = "";
+    scenePop.style.transform = "";
   }
   renderScenePop(item, kind);
 }
@@ -316,6 +355,15 @@ export function scenePopActions(entries, options = {}) {
       btn.type = "button";
       btn.className = `plain-btn${entry.active ? " is-active" : ""}`;
       btn.textContent = entry.label;
+      if (entry.disabled) btn.disabled = true;
+      if (entry.title) btn.title = entry.title;
+      if (entry.action) btn.dataset.sceneAction = entry.action;
+      if (entry.onContextMenu) {
+        btn.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          entry.onContextMenu();
+        });
+      }
       btn.addEventListener("click", entry.onClick);
       wrap.append(btn);
     }
@@ -385,6 +433,10 @@ export function renderScenePop(item, kind) {
         onClick: () => scenePatch(item, { shadow: false }),
       },
     ]);
+    scenePopActions([
+      { label: "网格开", active: Boolean(item.grid), onClick: () => scenePatch(item, { grid: true }) },
+      { label: "网格关", active: !item.grid, onClick: () => scenePatch(item, { grid: false }) },
+    ]);
   } else if (kind === "light") {
     scenePopActions([
       { label: "白天", onClick: () => scenePatch(item, { light: sceneLightOf("day") }) },
@@ -411,16 +463,67 @@ export function renderScenePop(item, kind) {
       { label: "用当前视角", onClick: () => useCurrentSceneCamera(item) },
       { label: "重置", onClick: () => scenePatch(item, { camera: null }) },
     ]);
+    /* 投影方式：正交是户型/产品那种无透视的轴测视角 */
+    scenePopActions([
+      { label: "透视", active: !item.ortho, onClick: () => scenePatch(item, { ortho: false }) },
+      { label: "正交", active: Boolean(item.ortho), onClick: () => scenePatch(item, { ortho: true }) },
+    ]);
+    /* 焦距视野：视场角越小越像长焦，越大越广角 */
+    const shot = sceneCameraState(item, sceneView(item));
+    scenePopSlider("焦距视野", Math.round(shot.fov), 20, 90, 1, (value) => {
+      const base = sceneCameraState(item, sceneView(item));
+      scenePatch(item, { camera: { ...base, fov: value } }, { quiet: true });
+    });
+    const saved = item.cameras || [];
+    scenePopActions([
+      {
+        label: "存当前为机位",
+        action: "save-camera",
+        disabled: saved.length >= 3,
+        title: "最多存三个，右键机位按钮可删除",
+        onClick: () => {
+          const base = sceneCameraState(item, sceneView(item));
+          const seq = saved.reduce((n, one) => {
+            const hit = String(one.name).match(/(\d+)$/);
+            return hit ? Math.max(n, Number(hit[1])) : n;
+          }, 0) + 1;
+          const list = saved.slice();
+          list.push({ name: `机位${seq}`, camera: base, ortho: Boolean(item.ortho) });
+          scenePatch(item, { cameras: list });
+        },
+      },
+      {
+        label: "删全部机位",
+        action: "clear-cameras",
+        disabled: !saved.length,
+        onClick: () => scenePatch(item, { cameras: [] }),
+      },
+    ]);
+    if (saved.length) {
+      scenePopActions(
+        saved.map((one) => ({
+          label: one.name,
+          action: "camera-view",
+          title: "点击切过去，右键删除",
+          onClick: () => scenePatch(item, { camera: one.camera, ortho: Boolean(one.ortho) }),
+          onContextMenu: () => scenePatch(item, { cameras: (item.cameras || []).filter((c) => c !== one) }),
+        })),
+        { perRow: 3 },
+      );
+    }
     const hint = document.createElement("div");
     hint.className = "scene-pop-row";
     hint.textContent = "Ctrl 拖动转视角 · Shift 拖动平移";
     scenePop.append(hint);
   } else if (kind === "content") {
     scenePopActions([
-      { label: "编辑元素", onClick: () => { closeScenePop(); setScenePlacementMode(item, true); } },
       { label: "模型库添加", onClick: () => { closeScenePop(); void addSceneModelFlow(item); } },
       { label: "新建模型", onClick: () => { closeScenePop(); void createFurnitureFlow(item); } },
-      { label: "添加地板", onClick: () => { closeScenePop(); addSceneFloor(item); } },
+      {
+        label: "添加地板",
+        disabled: item.parts.some((part) => part.name === "地板"),
+        onClick: () => { closeScenePop(); addSceneFloor(item); },
+      },
     ], { perRow: 3 });
   } else if (kind === "export") {
     scenePopActions([
@@ -445,7 +548,7 @@ export const ELEMENT_TOOL_BUTTONS = [
   ["color", "颜色", { edit: true }],
   ["copy", "复制", { edit: true, action: true }],
   ["delete", "删除", { edit: true, action: true }],
-  ["back", "返回场景", {}],
+  ["exit", "退出编辑", { keep: true }],
 ];
 
 export function sceneSelectedIndices(item) {
@@ -478,7 +581,7 @@ export function buildSceneToolButtons(item, elementMode, indices) {
     btn.className = "scene-tool-btn";
     btn.dataset.sceneTool = kind;
     btn.textContent = label;
-    if (["environment", "light", "content"].includes(kind) && locked) btn.disabled = true;
+    if (["environment", "light", "content", "edit"].includes(kind) && locked) btn.disabled = true;
     sceneToolbar.append(btn);
   }
 }
@@ -488,12 +591,6 @@ export function handleSceneTool(kind) {
   if (!item) return;
   const elementMode = scenePlacementActive(item);
   const indices = elementMode ? sceneSelectedIndices(item) : [];
-  if (kind === "back") {
-    closeScenePop();
-    setScenePlacementMode(item, false);
-    refreshSceneToolbar();
-    return;
-  }
   if (kind === "copy") {
     if (indices.length) duplicateSceneElement(item, indices);
     return;
@@ -506,11 +603,106 @@ export function handleSceneTool(kind) {
     showError("场景已锁定，先解锁再改");
     return;
   }
+  if (kind === "edit") {
+    closeScenePop();
+    enterSceneEdit(item);
+    return;
+  }
+  if (kind === "exit") {
+    exitSceneEdit(item);
+    return;
+  }
   if (scenePopKind === kind && !scenePop.hidden) {
     closeScenePop();
     return;
   }
   openScenePop(item, kind);
+}
+
+/* 「编辑」= 把这块场景临时铺满画布，同时进元素态；退出时位置尺寸原样还回去。
+   最大化只改内存里的坐标，保存走 toPersisted 时写回原值，盘上永远是用户摆的位置。 */
+export function enterSceneEdit(item) {
+  if (!item || item.type !== "scene") return;
+  if (item.locked) {
+    showError("场景已锁定，先解锁再改");
+    return;
+  }
+  if (!sceneView(item)) {
+    showError("场景还没显示出来，稍后再试");
+    return;
+  }
+  if (!item.__editRestore) {
+    const minimap = document.getElementById("canvas-minimap");
+    item.__editRestore = {
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      z: item.z,
+      radius: item.radius,
+      borderWidth: item.borderWidth,
+      minimapHidden: minimap ? minimap.hidden : null,
+    };
+    /* 沉浸式：左侧树留着，只收掉右下角鸟瞰窗，场景块无边框圆角铺满画布 */
+    if (minimap) minimap.hidden = true;
+    const rect = ui.stage.getBoundingClientRect();
+    const scale = current.camera.scale || 1;
+    let maxZ = 0;
+    for (const other of current.items) {
+      if (Number.isFinite(other.z)) maxZ = Math.max(maxZ, other.z);
+    }
+    item.x = -current.camera.x / scale;
+    item.y = -current.camera.y / scale;
+    item.w = Math.max(320, rect.width / scale);
+    item.h = Math.max(240, rect.height / scale);
+    item.z = maxZ + 1;
+    item.radius = 0;
+    item.borderWidth = 0;
+    const el = itemEls.get(item.id);
+    if (el) syncItemElement(el, item);
+    updateSelection();
+  }
+  setScenePlacementMode(item, true);
+}
+
+/* 沉浸式编辑中窗口变了：场景块跟着铺满，不然会露出一条画布背景 */
+window.addEventListener("resize", () => {
+  if (!current || !ui || !ui.stage) return;
+  const item = current.items.find((one) => one.type === "scene" && one.__editRestore);
+  if (!item) return;
+  const rect = ui.stage.getBoundingClientRect();
+  const scale = current.camera.scale || 1;
+  item.x = -current.camera.x / scale;
+  item.y = -current.camera.y / scale;
+  item.w = Math.max(320, rect.width / scale);
+  item.h = Math.max(240, rect.height / scale);
+  const el = itemEls.get(item.id);
+  if (el) syncItemElement(el, item);
+  updateSelection();
+});
+
+export function exitSceneEdit(item) {
+  if (!item) return;
+  const restore = item.__editRestore;
+  if (restore) {
+    const minimap = document.getElementById("canvas-minimap");
+    if (minimap && restore.minimapHidden !== null && restore.minimapHidden !== undefined) {
+      minimap.hidden = restore.minimapHidden;
+    }
+    item.x = restore.x;
+    item.y = restore.y;
+    item.w = restore.w;
+    item.h = restore.h;
+    item.z = restore.z;
+    item.radius = restore.radius;
+    item.borderWidth = restore.borderWidth;
+    delete item.__editRestore;
+    const el = itemEls.get(item.id);
+    if (el) syncItemElement(el, item);
+    updateSelection();
+    scheduleItemsSave();
+  }
+  if (scenePlacementActive(item)) setScenePlacementMode(item, false);
 }
 
 /* 场景元素在树里显示的名字：有名用名，没名按类型 */
@@ -549,6 +741,8 @@ export function refreshSceneToolbar() {
   if (!item) {
     if (sceneToolbarSignature) closeScenePop();
     sceneToolbarSignature = "";
+    /* 没有场景在选：编辑态左上角的场景工具组也要收掉，别残留在别的画布上 */
+    if (sceneEditTools) sceneEditTools.hidden = true;
     return;
   }
   const elementMode = scenePlacementActive(item);
@@ -558,6 +752,13 @@ export function refreshSceneToolbar() {
     sceneToolbarSignature = signature;
     closeScenePop();
     buildSceneToolButtons(item, elementMode, indices);
+  }
+  if (sceneEditTools) {
+    sceneEditTools.hidden = !elementMode;
+    for (const btn of sceneEditTools.querySelectorAll(".scene-tool-btn")) {
+      btn.disabled = item.locked && ["environment", "light", "content"].includes(btn.dataset.sceneTool);
+      btn.classList.toggle("is-open", Boolean(scenePop) && !scenePop.hidden && btn.dataset.sceneTool === scenePopKind);
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：keys-save */
 
-import { active, activeBodySelectionText, blurMinimapFocus, cameraTimer, cancelPlanCalibration, clientToWorld, copyBodySelectionText, copyItems, current, deleteItems, errorTimer, findItem, insertPaths, isMinimapFocused, itemsTimer, modalOpen, nudgeSelected, paintingTarget, pasteCopiedBlocks, pictureStepMove, planCalibration, refreshMinimap, renderTree, resetZoom, scenePlacementActive, select, selectAll, selectedIds, setCameraTimer, setErrorTimer, setItemsTimer, setLockedMany, setMeasureHeld, setPictureEditing, setScenePlacementMode, setTool, store, toPersisted, tool, ui } from "../canvas.js";
+import { active, activeBodySelectionText, blurMinimapFocus, cameraTimer, cancelPlanCalibration, clientToWorld, copyBodySelectionText, copyItems, current, deleteItems, errorTimer, exitSceneEdit, findItem, insertPaths, isMinimapFocused, itemsTimer, modalOpen, nudgeSelected, paintingTarget, pasteCopiedBlocks, pictureStepMove, planCalibration, refreshMinimap, renderTree, resetZoom, scenePlacementActive, select, selectAll, selectedIds, setCameraTimer, setErrorTimer, setItemsTimer, setLockedMany, setMeasureHeld, setPictureEditing, setScenePlacementMode, setTool, store, toPersisted, tool, ui } from "../canvas.js";
 
 /* ---------- 从资源管理器拖入 ---------- */
 
@@ -152,7 +152,8 @@ export function onKeyDown(e) {
     const placing = current.items.find((item) => item.type === "scene" && scenePlacementActive(item));
     if (placing) {
       e.preventDefault();
-      setScenePlacementMode(placing, false);
+      /* 编辑态按 Esc：和「退出编辑」同一套，把铺满前的尺寸还回去 */
+      exitSceneEdit(placing);
       return;
     }
     /* 鸟瞰窗的选中态最轻，Esc 先退它，再退工具/块选中 */

@@ -1,7 +1,8 @@
 /* 从 canvas.js 拆出：inspace */
 
+import { agentRenameSpace } from "./agent-layer.js";
 import { setTreeCollapsed } from "./tree.js";
-import { agentRenameSpace, commitEditing, current, edgeLabelEditor, editingId, flushBlockContents, flushCamera, flushItems, loadList, newId, renderTree, select, setCurrent, setTreeRenaming, showError, store, switchTo, treeCollapsed, treeRenaming, treeUi } from "../canvas.js";
+import { commitEditing, current, edgeLabelEditor, editingId, flushBlockContents, flushCamera, flushItems, loadList, newId, renderTree, select, setCurrent, setTreeRenaming, showError, store, switchTo, treeCollapsed, treeRenaming, treeUi } from "../canvas.js";
 
 /* ---------- .inspace 容器导入导出 ----------
    导出成标准 zip：画布包解压是一个画布目录，分组件包解压是一个子分组。

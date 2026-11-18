@@ -1,5 +1,6 @@
 /* 从 canvas.js 拆出：containers */
 
+import { moveGroup } from "./layout.js";
 import { current, findItem, itemBounds, itemEls, scheduleItemsSave, showToast, syncItemElement, ui, updateSelection, worldToStage } from "../canvas.js";
 
 /* ---------- 分组容器 ----------

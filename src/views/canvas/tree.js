@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：tree */
 
-import { LOCK_BADGE_SVG, active, agentDeleteSpace, agentHighlight, agentRevealBlock, commitEditing, confirmDialog, current, edgeLabelEditor, editingId, enterScenePart, exportTreeSpace, findItem, flushBlockContents, flushCamera, flushItems, genInputItems, genModeFor, importIntoGroup, insideBox, isContainer, itemBounds, itemEls, itemMenuEntries, loadList, openMenu, ownedByContainer, promptDialog, scenePartBaseLabel, sceneView, scheduleCulling, scheduleItemsSave, select, selectedIds, setLockedMany, showError, startTreeRename, store, switchTo, treeRenaming } from "../canvas.js";
+import { LOCK_BADGE_SVG, active, agentDeleteSpace, agentHighlight, agentRevealBlock, commitEditing, confirmDialog, current, edgeLabelEditor, editingId, enterScenePart, exitSceneEdit, exportTreeSpace, findItem, flushBlockContents, flushCamera, flushItems, genInputItems, genModeFor, importIntoGroup, insideBox, isContainer, itemBounds, itemEls, itemMenuEntries, loadList, openMenu, ownedByContainer, promptDialog, scenePartBaseLabel, sceneView, scheduleCulling, scheduleItemsSave, select, selectedIds, setLockedMany, setSceneFurnitureSelection, setScenePlacementMode, showError, startTreeRename, store, switchTo, treeRenaming } from "../canvas.js";
 
 /* ---------- 左侧画布树 ---------- */
 
@@ -544,7 +544,9 @@ export function renderPanelTree(body) {
     row.dataset.kind = "panel";
     row.dataset.id = item.id;
     row.style.paddingLeft = `${6 + depth * 14 + (isCont || isScene ? 0 : 17)}px`;
-    if (selectedIds.has(item.id)) row.classList.add("is-selected");
+    /* 场景里选中了某个元素时，焦点在元素上，面板行不再亮 */
+    const sceneParts = isScene ? sceneView(item)?.__sceneSelection?.indices || [] : [];
+    if (selectedIds.has(item.id) && !sceneParts.length) row.classList.add("is-selected");
     const expanded = !treePanelCollapsed.has(item.id);
     if (isCont || isScene) {
       const chevron = document.createElement("span");
@@ -578,6 +580,8 @@ export function renderPanelTree(body) {
     }
     row.addEventListener("click", () => {
       select(item.id);
+      /* 从元素切回面板：工具条也跟着回到场景态，编辑时的最大化一并还原 */
+      if (isScene && sceneView(item)) exitSceneEdit(item);
       agentRevealBlock(item.id);
       /* 从面板树点选：给画布上那块打一圈 1 秒的光带，锁定块没有常规选中标记，
          靠这一下知道点的是谁；直接在画布上选不走这里，就没有这效果 */

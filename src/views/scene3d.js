@@ -558,7 +558,7 @@ function sceneRay(view, state, clientX, clientY) {
   if (!(rect.width > 0 && rect.height > 0)) return null;
   updateSceneMatrices(state);
   const raycaster = new state.THREE.Raycaster();
-  raycaster.setFromCamera(new state.THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, 1 - ((clientY - rect.top) / rect.height) * 2), state.camera);
+  raycaster.setFromCamera(new state.THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, 1 - ((clientY - rect.top) / rect.height) * 2), state.renderCamera || state.camera);
   return raycaster;
 }
 
@@ -623,7 +623,8 @@ export function sceneFurnitureDragDelta(view, drag, clientX, clientY) {
 /* 裁掉近/远平面外的盒边再投影，避免背后的角点透视翻转把选框撑满视口。 */
 function projectedBox(state, box) {
   if (box.isEmpty()) return null;
-  const { THREE, camera } = state;
+  const THREE = state.THREE;
+  const camera = state.renderCamera || state.camera;
   const corners = [];
   for (let k = 0; k < 8; k += 1) {
     corners.push(new THREE.Vector3(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).applyMatrix4(camera.matrixWorldInverse));
@@ -714,9 +715,10 @@ export function sceneFurnitureInspect(view) {
     if (box.isEmpty()) return result;
     result.loaded = true;
     result.bounds = sceneBounds(box);
-    const center = box.getCenter(new state.THREE.Vector3()).applyMatrix4(state.camera.matrixWorldInverse);
-    const inDepth = center.z <= -state.camera.near && center.z >= -state.camera.far;
-    center.applyMatrix4(state.camera.projectionMatrix);
+    const shot = state.renderCamera || state.camera;
+    const center = box.getCenter(new state.THREE.Vector3()).applyMatrix4(shot.matrixWorldInverse);
+    const inDepth = center.z <= -shot.near && center.z >= -shot.far;
+    center.applyMatrix4(shot.projectionMatrix);
     if (Number.isFinite(center.x) && Number.isFinite(center.y) && Number.isFinite(center.z)) {
       result.screen = {
         x: rect.left + ((center.x + 1) / 2) * rect.width,
@@ -783,6 +785,10 @@ function build(view, item, THREE) {
     root,
     unitBox,
     meshMap: new Map(),
+    grid: null,
+    gridKey: "",
+    orthoCamera: null,
+    renderCamera: null,
     /* 模型件加载后的真实包围盒（场景坐标），相机框和影子盒子按它算 */
     modelRects: new Map(),
     env: null,
@@ -1118,6 +1124,73 @@ export function syncScene(view, item) {
   }
 }
 
+/* 地面辅助网格：主格 + 每主格 10 分细线，主格大小随镜头远近自动换档；
+   只挂在渲染场景上、不进 root，导出 GLB 不会带上，雾会让远处自然淡出。 */
+function groundGridCell(cam, item) {
+  const visible = 2 * cam.dist * Math.tan((cam.fov * Math.PI) / 360);
+  const raw = (64 * visible) / Math.max(1, item.h || 480);
+  const pow = Math.pow(10, Math.floor(Math.log10(Math.max(1e-3, raw))));
+  const norm = raw / pow;
+  const step = norm < 1.5 ? 1 : norm < 3.5 ? 2 : norm < 7.5 ? 5 : 10;
+  return step * pow;
+}
+
+function disposeGroundGrid(state) {
+  if (!state.grid) return;
+  state.scene.remove(state.grid);
+  state.grid.traverse?.((node) => {
+    node.geometry?.dispose?.();
+    node.material?.dispose?.();
+  });
+  state.grid = null;
+}
+
+function syncGroundGrid(state, item, box, cam) {
+  const THREE = state.THREE;
+  if (!item.grid) {
+    if (state.grid) state.grid.visible = false;
+    return;
+  }
+  const floor = (item.parts || []).find((part) => part.name === "地板");
+  const cell = groundGridCell(cam, item);
+  const span = floor
+    ? Math.max(Number(floor.w) || 0, Number(floor.d) || 0)
+    : Math.max(box.dx, box.dy, 1200);
+  const size = Math.max(cell * 10, Math.ceil((span * 1.25) / cell) * cell);
+  const majorDiv = Math.max(2, Math.round(size / cell));
+  const minorDiv = Math.round(size / (cell / 10));
+  const top = floor ? Number(floor.z || 0) + Number(floor.h || 0) + 0.4 : 0.4;
+  const cx = floor ? Number(floor.x) || 0 : 0;
+  const cz = floor ? -(Number(floor.y) || 0) : 0;
+  const base = new THREE.Color(floor?.color || item.groundColor || "#9a917d");
+  const lum = 0.299 * base.r + 0.587 * base.g + 0.114 * base.b;
+  const lightFloor = lum > 0.45;
+  const majorColor = lightFloor ? 0x2f2f2f : 0xc8c8c8;
+  const minorColor = lightFloor ? 0x555555 : 0x9a9a9a;
+  const key = `${size}|${majorDiv}|${minorDiv}|${majorColor}|${minorColor}`;
+  if (state.gridKey !== key) {
+    disposeGroundGrid(state);
+    const group = new THREE.Group();
+    if (minorDiv <= 400) {
+      const minor = new THREE.GridHelper(size, minorDiv, minorColor, minorColor);
+      minor.material.transparent = true;
+      minor.material.opacity = 0.14;
+      minor.material.depthWrite = false;
+      group.add(minor);
+    }
+    const major = new THREE.GridHelper(size, majorDiv, majorColor, majorColor);
+    major.material.transparent = true;
+    major.material.opacity = 0.4;
+    major.material.depthWrite = false;
+    group.add(major);
+    state.scene.add(group);
+    state.grid = group;
+    state.gridKey = key;
+  }
+  state.grid.visible = true;
+  state.grid.position.set(cx, top, cz);
+}
+
 function render(view, state, item) {
   const { renderer, camera, ground } = state;
   state.item = item;
@@ -1141,12 +1214,32 @@ function render(view, state, item) {
   const reach = Math.max(box.dx, box.dy);
   ground.scale.set(reach * 10, reach * 10, 1);
   ground.material.color.set(item.groundColor || "#9a917d");
+  syncGroundGrid(state, item, box, cam);
   /* 雾的近端卡在内容之后一点点：东西本身不许被洗白，只有远处那片空地化进天光 */
   state.scene.fog.near = cam.dist * 1.15;
   state.scene.fog.far = cam.dist * 2.2;
   renderer.setPixelRatio(dpr() * cameraScale);
   renderer.setSize(item.w, item.h, false);
-  renderer.render(state.scene, camera);
+  /* 正交：同一条视线、同一个距离，只把投影换成无透视的轴测 */
+  let activeCamera = camera;
+  if (item.ortho) {
+    if (!state.orthoCamera) state.orthoCamera = new state.THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10000);
+    const oc = state.orthoCamera;
+    const halfH = cam.dist * Math.tan((cam.fov * Math.PI) / 360);
+    const halfW = halfH * cam.aspect;
+    oc.left = -halfW;
+    oc.right = halfW;
+    oc.top = halfH;
+    oc.bottom = -halfH;
+    oc.near = cam.near;
+    oc.far = cam.far;
+    oc.position.set(...cam.eye);
+    oc.lookAt(...cam.target);
+    oc.updateProjectionMatrix();
+    activeCamera = oc;
+  }
+  state.renderCamera = activeCamera;
+  renderer.render(state.scene, activeCamera);
   updateFurnitureSelection(view, state);
 }
 
@@ -1239,7 +1332,9 @@ export async function renderModelThumbnail(src, size = 256) {
   return thumbRenderer.domElement.toDataURL("image/png");
 }
 
-export function disposeScene(view) {  view?.__sceneSelection?.element.remove();
+export function disposeScene(view) {
+  if (view?.__scene) disposeGroundGrid(view.__scene);
+  view?.__sceneSelection?.element.remove();
   if (view) delete view.__sceneSelection;
   const state = view?.__scene;
   if (!state) return;

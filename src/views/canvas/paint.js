@@ -1,7 +1,8 @@
 /* 从 canvas.js 拆出：paint */
 
 import { setExporting } from "./export.js";
-import { GEN_PLACE_GAP, PRESETS, agentSummary, commitEditing, current, edgeLabelEditor, editingId, exporter, exporting, findItem, imageCache, itemBounds, itemEls, makeImage, onPicturePointerDown, pictureStepMove, placeBlock, scheduleItemsSave, select, selectedIds, showError, showToast, store, syncItemElement, tool } from "../canvas.js";
+import { GEN_PLACE_GAP } from "./media-panels.js";
+import { PRESETS, agentSummary, commitEditing, current, edgeLabelEditor, editingId, exporter, exporting, findItem, imageCache, itemBounds, itemEls, makeImage, onPicturePointerDown, pictureStepMove, placeBlock, scheduleItemsSave, select, selectedIds, showError, showToast, store, syncItemElement, tool } from "../canvas.js";
 
 /* ---------- 画面块：右键菜单控件与手绘 ----------
    笔的状态长在块自己身上，不占画布工具栏那套一次性工具态：

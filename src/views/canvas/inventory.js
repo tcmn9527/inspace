@@ -1,5 +1,6 @@
 /* 从 canvas.js 拆出：inventory */
 
+import { exitSceneEdit } from "./scene-toolbar.js";
 import { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, active, baseName, beginSceneFurnitureDrag, choiceDialog, copyIntoCanvas, current, dropTool, ebookKey, ebookTocCache, fileBlockSize, findItem, imageCache, insertPoint, itemEls, makeAudio, makeEbook, makeFile, makeNote, makeProduct, makeVideo, normalizeSceneCamera, persistScene, placeBlock, refreshQuoteCard, refreshSceneToolbar, revealItem, sceneCameraState, sceneFurnitureDragDelta, scenePick, scheduleItemsSave, select, setSceneFurnitureSelection, showError, showToast, srcInUse, store, syncItemElement } from "../canvas.js";
 
 /* ---------- 产品 / 材料卡与清单 ---------- */
@@ -180,6 +181,38 @@ export function attachSceneControls(el, item) {
         const hit = scenePick(view, event.clientX, event.clientY);
         if (!hit) {
           setSceneFurnitureSelection(view, []);
+          /* 编辑态在背景上按左键：拖动=直接转视角（不用再按 Ctrl），轻点不拖=退出编辑 */
+          const startX = event.clientX;
+          const startY = event.clientY;
+          const base = sceneCameraState(item, view);
+          let orbiting = false;
+          card.classList.add("is-orbiting");
+          const move = (e) => {
+            if (e.pointerId !== event.pointerId) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            if (!orbiting && Math.hypot(dx, dy) < 3) return;
+            orbiting = true;
+            item.camera = normalizeSceneCamera({
+              ...base,
+              azim: base.azim - dx * 0.35,
+              elev: base.elev + dy * 0.25,
+            });
+            renderSoon();
+          };
+          const up = () => {
+            card.classList.remove("is-orbiting");
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
+            window.removeEventListener("blur", up);
+            /* 轻点背景也留在编辑态：退出只走「退出编辑」按钮或 Esc */
+            if (orbiting) scheduleItemsSave();
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up);
+          window.addEventListener("pointercancel", up);
+          window.addEventListener("blur", up);
           return;
         }
         const furniture = sceneFurnitureGroup(item, hit.index);

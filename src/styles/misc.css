@@ -492,6 +492,30 @@
   display: none;
 }
 
+/* 沉浸式编辑时的场景工具组：紧贴画布左上角，无圆角 */
+.scene-edit-tools {
+  position: absolute;
+  left: 0;
+  top: 38px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  z-index: 30;
+}
+
+.scene-edit-tools .scene-tool-btn {
+  border-radius: 0;
+}
+
+.scene-edit-tools[hidden] {
+  display: none;
+}
+
 .scene-tool-btn {
   height: 30px;
   padding: 0 12px;

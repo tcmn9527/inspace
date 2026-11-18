@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：tree */
 
-import { LOCK_BADGE_SVG, active, agentDeleteSpace, agentHighlight, agentRevealBlock, commitEditing, confirmDialog, current, edgeLabelEditor, editingId, enterScenePart, exportTreeSpace, findItem, flushBlockContents, flushCamera, flushItems, genInputItems, genModeFor, importIntoGroup, isContainer, itemBounds, itemEls, itemMenuEntries, loadList, openMenu, ownedByContainer, promptDialog, scenePartBaseLabel, sceneView, scheduleCulling, scheduleItemsSave, select, selectedIds, setLockedMany, showError, startTreeRename, store, switchTo, treeRenaming } from "../canvas.js";
+import { LOCK_BADGE_SVG, active, agentDeleteSpace, agentHighlight, agentRevealBlock, commitEditing, confirmDialog, current, edgeLabelEditor, editingId, enterScenePart, exportTreeSpace, findItem, flushBlockContents, flushCamera, flushItems, genInputItems, genModeFor, importIntoGroup, insideBox, isContainer, itemBounds, itemEls, itemMenuEntries, loadList, openMenu, ownedByContainer, promptDialog, scenePartBaseLabel, sceneView, scheduleCulling, scheduleItemsSave, select, selectedIds, setLockedMany, showError, startTreeRename, store, switchTo, treeRenaming } from "../canvas.js";
 
 /* ---------- 左侧画布树 ---------- */
 
@@ -27,6 +27,9 @@ export let treePanelCollapsed = new Set();
 export let treeSections = { canvas: true, panels: true };
 export let treeOrder = {};
 export let treeWidth = 220;
+/* 画布区固定高度（px）；null = 按内容自适应、最多占一半。拖分隔条后才有值 */
+export let treeSplit = null;
+export function setTreeSplit(value) { treeSplit = value; }
 
 export function treeSavePrefs() {
   localStorage.setItem(TREE_KEY, JSON.stringify({
@@ -36,6 +39,7 @@ export function treeSavePrefs() {
     panelCollapsed: [...treePanelCollapsed],
     sections: treeSections,
     order: treeOrder,
+    split: treeSplit,
   }));
 }
 
@@ -61,6 +65,9 @@ export function initSpaceTree() {
       canvas: prefs.sections.canvas !== false,
       panels: prefs.sections.panels !== false,
     };
+  }
+  if (Number.isFinite(Number(prefs.split)) && Number(prefs.split) > 0) {
+    treeSplit = Math.round(Number(prefs.split));
   }
   treeSetHidden(Boolean(prefs.hidden));
 
@@ -210,8 +217,16 @@ export function renderTree() {
   if (treeRenaming) return;
   const body = treeUi.body;
   body.textContent = "";
+  /* 画布区和面板区各占一块、各自滚动；中间的分隔条可以上下拖，调两边的高度 */
+  const canvasPart = document.createElement("div");
+  canvasPart.className = "space-tree-part";
+  canvasPart.dataset.part = "canvas";
+  if (treeSplit) {
+    canvasPart.style.height = `${treeSplit}px`;
+    canvasPart.classList.add("is-fixed");
+  }
+  canvasPart.append(treeSectionHeader("canvas"));
   let shown = 0;
-  body.append(treeSectionHeader("canvas"));
 
   const renderRow = (node, depth) => {
     const isGroup = node.type === "group";
@@ -251,7 +266,7 @@ export function renderTree() {
       if (isGroup) openTreeGroupMenu(node, event.clientX, event.clientY);
       else openTreeCanvasMenu(node, event.clientX, event.clientY);
     });
-    body.append(row);
+    canvasPart.append(row);
     shown += 1;
     if (isGroup && expanded) {
       for (const kid of orderedChildren(node.children || [], node.id)) renderRow(kid, depth + 1);
@@ -263,11 +278,50 @@ export function renderTree() {
       const hint = document.createElement("p");
       hint.className = "space-tree-hint";
       hint.textContent = "还没有画布，点「画布」行的 + 新建";
-      body.append(hint);
+      canvasPart.append(hint);
     }
   }
-  body.append(treeSectionHeader("panels"));
-  if (treeSections.panels) renderPanelTree(body);
+  body.append(canvasPart);
+
+  const splitter = document.createElement("div");
+  splitter.className = "space-tree-splitter";
+  splitter.title = "拖动调节上下高度";
+  splitter.addEventListener("pointerdown", startTreeSplit);
+  body.append(splitter);
+
+  const panelsPart = document.createElement("div");
+  panelsPart.className = "space-tree-part";
+  panelsPart.dataset.part = "panels";
+  panelsPart.append(treeSectionHeader("panels"));
+  if (treeSections.panels) renderPanelTree(panelsPart);
+  body.append(panelsPart);
+}
+
+/* 拖分隔条：画布区变成固定高度，面板区吃掉剩下的空间；松手存偏好 */
+function startTreeSplit(event) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const body = treeUi?.body;
+  const canvasPart = body?.querySelector('.space-tree-part[data-part="canvas"]');
+  if (!body || !canvasPart) return;
+  const startY = event.clientY;
+  const startH = canvasPart.getBoundingClientRect().height;
+  const max = Math.max(88, body.getBoundingClientRect().height - 96);
+  treeUi.aside.classList.add("is-splitting");
+  const move = (e) => {
+    const h = Math.round(Math.min(max, Math.max(52, startH + e.clientY - startY)));
+    canvasPart.style.height = `${h}px`;
+    canvasPart.classList.add("is-fixed");
+    treeSplit = h;
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    treeUi?.aside.classList.remove("is-splitting");
+    if (treeSplit) treeSavePrefs();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
 }
 
 /* 分类标题跟着自己的列表走：吸顶在滚动区里，折叠按钮和新建/计数都在这一行 */
@@ -316,11 +370,6 @@ export function treeSectionHeader(kind) {
       openMenu(rect.left, rect.bottom + 4, treeRootEntries(), { label: "新建" });
     });
     row.append(add);
-  } else {
-    const count = document.createElement("span");
-    count.className = "space-tree-count";
-    count.textContent = current?.items?.length ? String(current.items.length) : "";
-    row.append(count);
   }
   return row;
 }
@@ -412,14 +461,7 @@ export function treeContainerKids(container) {
     }
     const childEl = itemEls.get(item.id);
     if (!childEl) continue;
-    const b = itemBounds(item, childEl);
-    if (
-      b.x >= box.x - 1 &&
-      b.y >= box.y - 1 &&
-      b.x + b.w <= box.x + box.w + 1 &&
-      b.y + b.h <= box.y + box.h + 1 &&
-      ownedByContainer(item, container, box)
-    ) out.push(item);
+    if (insideBox(item, box) && ownedByContainer(item, container, box)) out.push(item);
   }
   return out;
 }

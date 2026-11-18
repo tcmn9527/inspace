@@ -250,6 +250,19 @@ export async function openCompareFor(pair) {
   }
 }
 
+/* 容器的「锁定全部 / 全部解锁」：容器连同成员一起算，
+   还有没锁的就全锁，全锁了就全解 */
+function lockMembersEntry(item) {
+  if (!isContainer(item)) return null;
+  const members = [item, ...ownedMembers(item, new Set(), true)];
+  if (members.length < 2) return null;
+  const anyUnlocked = members.some((member) => !member.locked);
+  return {
+    label: anyUnlocked ? "锁定全部" : "全部解锁",
+    onClick: () => setLockedMany(members.map((member) => member.id), anyUnlocked),
+  };
+}
+
 /* 一块的右键菜单内容。单独拆出来是为了「选择下层」：
    鼠标停在某一层上时，直接把这一层的菜单当子菜单挂出去。 */
 export function itemMenuEntries(item, x, y, depth = 0) {
@@ -257,6 +270,8 @@ export function itemMenuEntries(item, x, y, depth = 0) {
   if (item.locked) {
     const entries = [];
     entries.push({ label: "解锁", onClick: () => setLocked(item, false) });
+    const lockAll = lockMembersEntry(item);
+    if (lockAll) entries.push(lockAll);
     const below = selectBelowEntry(item, x, y, depth);
     if (below) entries.push(below);
     if (PROP_KIND[item.type]) entries.push({ label: "属性", onClick: () => openItemProps(item) });
@@ -530,6 +545,8 @@ export function itemMenuEntries(item, x, y, depth = 0) {
   /* 锁定贴着删除放，都在分隔线下面 */
   if (item.type !== "connector") {
     entries.push({ label: "锁定", onClick: () => setLocked(item, true) });
+    const lockAll = lockMembersEntry(item);
+    if (lockAll) entries.push(lockAll);
   }
   entries.push({ label: "删除", danger: true, onClick: () => deleteItems([item.id]) });
   return entries;

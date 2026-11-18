@@ -117,10 +117,24 @@ export function onStagePointerDown(e) {
     startDraw(e);
     return;
   }
-  /* 锁住的块拖不动它自己（能点选、能右键），但按住它拖应该挪视野：
-     锁的是块，不是画布。这样铺满画面的锁定面板就成了可抓的一整张底。
+  /* 锁住的块拖不动它自己（能点选、能右键）。按住它拖分两种：
+     - 它在一个没锁的容器里：拖的是整个容器，容器和里面的块一起走；
+     - 否则挪视野：锁的是块，不是画布，铺满画面的锁定面板就成了可抓的一整张底。
      点一下（没拖动）仍然只是选中，不产生位移。 */
   if (item.locked) {
+    const owner = item.containerId ? findItem(item.containerId) : null;
+    if (owner && isContainer(owner) && !owner.locked) {
+      if (!selectedIds.has(owner.id)) select(owner.id);
+      setDrag({
+        kind: "move",
+        id: owner.id,
+        group: moveGroup(),
+        start: clientToWorld(e.clientX, e.clientY),
+        moved: false,
+      });
+      ui.stage.classList.add("is-moving");
+      return;
+    }
     setDrag({
       kind: "pan",
       startClient: { x: e.clientX, y: e.clientY },

@@ -47,6 +47,8 @@ export function containerBoxOf(container) {
   return itemBounds(container, el);
 }
 
+/* 归属只看左上角落在容器框内：块大出容器一半也照样算它的人，
+   整块完全装下已经不再是必要条件 */
 export function insideBox(item, box) {
   const el = itemEls.get(item.id);
   if (!el) return false;
@@ -54,8 +56,8 @@ export function insideBox(item, box) {
   return (
     b.x >= box.x - 1 &&
     b.y >= box.y - 1 &&
-    b.x + b.w <= box.x + box.w + 1 &&
-    b.y + b.h <= box.y + box.h + 1
+    b.x <= box.x + box.w + 1 &&
+    b.y <= box.y + box.h + 1
   );
 }
 
@@ -129,8 +131,9 @@ export function ownedMembers(container, exclude = new Set(), includeLocked = fal
 
 /* 拖容器时跟走的成员：框里的块、且它认这个容器；认了别的容器、而那个容器
    不在这个框里的就不跟——重叠的两个容器各带走各的子块，互不串门。 */
+/* 跟着容器走的是全部成员，锁定的也算：容器的坐标一挪，框里的东西一起挪 */
 export function moveMembers(container, exclude = new Set()) {
-  return ownedMembers(container, exclude, false);
+  return ownedMembers(container, exclude, true);
 }
 
 /* 右键「编为容器 / 取消容器」 */

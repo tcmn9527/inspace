@@ -85,17 +85,9 @@
   color: var(--muted);
 }
 
-.space-tree-count {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--muted);
-}
-
 /* 面板区和画布区之间一条分隔线，跟着内容滚 */
 .space-tree-section[data-section="panels"] {
-  margin-top: 6px;
-  padding-top: 9px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 32%, transparent);
+  padding-top: 6px;
 }
 
 /* 锁定记号：名字后面一枚小锁，未锁定不占位 */
@@ -136,6 +128,14 @@
 .space-tree-body {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 画布区和面板区各自滚动；中间的分隔条可拖动调高矮 */
+.space-tree-part {
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 2px 0 10px;
@@ -143,17 +143,52 @@
   scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
 }
 
-.space-tree-body::-webkit-scrollbar {
+.space-tree-part[data-part="canvas"] {
+  flex: 0 1 auto;
+  max-height: 46%;
+}
+
+.space-tree-part[data-part="canvas"].is-fixed {
+  flex: 0 0 auto;
+  max-height: none;
+}
+
+.space-tree-part[data-part="panels"] {
+  flex: 1 1 0;
+}
+
+.space-tree-part::-webkit-scrollbar {
   width: 6px;
 }
 
-.space-tree-body::-webkit-scrollbar-track {
+.space-tree-part::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.space-tree-body::-webkit-scrollbar-thumb {
+.space-tree-part::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--fg) 22%, transparent);
   border-radius: 3px;
+}
+
+.space-tree-splitter {
+  flex: 0 0 9px;
+  position: relative;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.space-tree-splitter::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 32%, transparent);
+}
+
+.space-tree-splitter:hover::after,
+.space-tree.is-splitting .space-tree-splitter::after {
+  border-top-color: color-mix(in srgb, var(--fg) 45%, transparent);
 }
 
 

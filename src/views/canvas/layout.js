@@ -108,11 +108,12 @@ export function tidySelected() {
 export function moveGroup() {
   const group = [];
   const seen = new Set();
-  const push = (id) => {
+  const push = (id, asMember = false) => {
     if (seen.has(id)) return;
     const item = findItem(id);
     const el = itemEls.get(id);
-    if (!item || !el || item.locked) return;
+    /* 锁只拦「直接拖它」；容器搬家时框里的锁定块照样跟着走 */
+    if (!item || !el || (item.locked && !asMember)) return;
     seen.add(id);
     group.push({ item, el, origin: { x: item.x, y: item.y, x2: item.x2, y2: item.y2 } });
   };
@@ -120,7 +121,7 @@ export function moveGroup() {
   for (const id of selectedIds) {
     const container = findItem(id);
     if (!container || !isContainer(container)) continue;
-    for (const child of moveMembers(container, seen)) push(child.id);
+    for (const child of moveMembers(container, seen)) push(child.id, true);
   }
   return group;
 }

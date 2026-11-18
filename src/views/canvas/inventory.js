@@ -1,7 +1,8 @@
 /* 从 canvas.js 拆出：inventory */
 
+import { AUDIO_DEFAULT_HEIGHT } from "../canvas-items.js";
 import { exitSceneEdit } from "./scene-toolbar.js";
-import { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, active, baseName, beginSceneFurnitureDrag, choiceDialog, copyIntoCanvas, current, dropTool, ebookKey, ebookTocCache, fileBlockSize, findItem, imageCache, insertPoint, itemEls, makeAudio, makeEbook, makeFile, makeNote, makeProduct, makeVideo, normalizeSceneCamera, persistScene, placeBlock, refreshQuoteCard, refreshSceneToolbar, revealItem, sceneCameraState, sceneFurnitureDragDelta, scenePick, scheduleItemsSave, select, setSceneFurnitureSelection, showError, showToast, srcInUse, store, syncItemElement } from "../canvas.js";
+import { AUDIO_DEFAULT_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, active, baseName, beginSceneFurnitureDrag, choiceDialog, copyIntoCanvas, current, dropTool, ebookKey, ebookTocCache, fileBlockSize, findItem, imageCache, insertPoint, itemEls, makeAudio, makeEbook, makeFile, makeNote, makeProduct, makeVideo, normalizeSceneCamera, persistScene, placeBlock, refreshQuoteCard, refreshSceneToolbar, revealItem, sceneCameraState, sceneFurnitureDragDelta, scenePick, scheduleItemsSave, select, setSceneFurnitureSelection, showError, showToast, srcInUse, store, syncItemElement } from "../canvas.js";
 
 /* ---------- 产品 / 材料卡与清单 ---------- */
 

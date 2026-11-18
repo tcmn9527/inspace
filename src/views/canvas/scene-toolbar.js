@@ -1,7 +1,8 @@
 /* 从 canvas.js 拆出：scene-toolbar */
 
 import { toPersisted } from "../canvas-items.js";
-import { FURNITURE_COLORS, SCENE_LIGHT_PRESETS, active, addSceneFloor, addSceneModelFlow, agentHighlight, agentRevealBlock, boundsOfItem, closeColorPicker, connectorGeometry, createFurnitureFlow, current, dropRegionImage, exportSceneFlow, findItem, itemBounds, itemEls, newId, normalizeLight, normalizeSceneCamera, normalizeSceneParts, onSceneFurnitureSelection, openColorPicker, panelTreeLabel, persistScene, refreshConnectors, refreshMinimap, renderTree, revealSelectionInTree, sceneCameraState, sceneLightOf, scenePlacementActive, sceneView, scheduleItemsSave, scheduleMeasurements, select, selectedIds, setSceneCameraPreset, setSceneFurnitureSelection, setScenePlacementMode, showError, showToast, syncItemElement, tool, treeUi, ui, updatePorts, worldToStage } from "../canvas.js";
+import { FURNITURE_COLORS } from "./scene-tools.js";
+import { SCENE_LIGHT_PRESETS, active, addSceneFloor, addSceneModelFlow, agentHighlight, agentRevealBlock, boundsOfItem, closeColorPicker, connectorGeometry, createFurnitureFlow, current, dropRegionImage, exportSceneFlow, findItem, itemBounds, itemEls, newId, normalizeLight, normalizeSceneCamera, normalizeSceneParts, onSceneFurnitureSelection, openColorPicker, panelTreeLabel, persistScene, refreshConnectors, refreshMinimap, renderTree, revealSelectionInTree, sceneCameraState, sceneLightOf, scenePlacementActive, sceneView, scheduleItemsSave, scheduleMeasurements, select, selectedIds, setSceneCameraPreset, setSceneFurnitureSelection, setScenePlacementMode, showError, showToast, syncItemElement, tool, treeUi, ui, updatePorts, worldToStage } from "../canvas.js";
 
 /* ---------- 3D 场景工具条 ----------
    选中恰好一个场景块时，画布底部浮一条：环境 / 灯光 / 机位 / 内容 / 输出。
@@ -796,9 +797,14 @@ export function syncTreeSelection() {
   const body = treeUi?.body;
   if (!body) return;
   revealSelectionInTree();
-  for (const row of body.querySelectorAll('.space-tree-row[data-kind="panel"]')) {
-    row.classList.toggle("is-selected", selectedIds.has(row.dataset.id));
+  let first = null;
+  for (const row of body.querySelectorAll(".space-tree-row[data-id]")) {
+    const on = selectedIds.has(row.dataset.id);
+    row.classList.toggle("is-selected", on);
+    if (on && !first) first = row;
   }
+  /* 选中的行滚出树可视区时把树带过去，不然亮在滚动条下面看不见 */
+  if (first) first.scrollIntoView({ block: "nearest" });
 }
 
 /* 只选了一个时才有的「那一个」；多选时返回 null，缩放和端口这些单块操作照旧不出现 */

@@ -2,7 +2,7 @@
 
 import { BORDER_DEFAULT_WIDTH, CARD_DEFAULT_BORDER_WIDTH, CARD_DEFAULT_RADIUS, IMAGE_MAX_SIDE, PICTURE_ERASER_TOLERANCE, TEXT_DEFAULT_RADIUS, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, VIDEO_MAX_SIDE, VIDEO_MIN_WIDTH, VIDEO_ROW_HEIGHT } from "./constants.js";
 import { linePoints } from "./dom-connectors.js";
-import { LIGHT_DEFAULTS, clipAttr, litPaint, maskAttr, symbolView, tintKey } from "./picture.js";
+import { LIGHT_DEFAULTS, clipAttr, litPaint, maskAttr, pictureTopLayers, symbolView, tintKey } from "./picture.js";
 import { SVG_NS, ratio } from "./util.js";
 import { syncGen } from "../genpanel.js";
 import { syncScene } from "../scene3d.js";

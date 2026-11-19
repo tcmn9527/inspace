@@ -1919,3 +1919,39 @@
   opacity: 0.3;
   cursor: default;
 }
+
+/* Markdown 文件卡右上角的编辑/浏览开关：图标按钮，不放文字 */
+.canvas-file-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.canvas-file-toggle:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.canvas-file-toggle svg {
+  display: block;
+}
+
+/* 浏览态的 Markdown 正文：用笔记卡那套 md-body 排版 */
+.canvas-file-markdown {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.canvas-file-preview.is-markdown {
+  cursor: auto;
+}

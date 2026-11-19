@@ -56,3 +56,6 @@ tools/sdcpp-cache/
 
 # 提示词润色用的 llama.cpp 现成运行时（约 25MB），从 releases 下载解压到这里，不入库
 tools/llamacpp/
+
+# 本地模型探针是开发工具（硬编码本机路径），不进版本库
+src-tauri/src/bin/

@@ -297,7 +297,7 @@ export function absolutePathOf(item, canvasDir) {
   const rel = pointer || contentRelOf(item);
   if (!rel || item.linked) return rel;
   if (!canvasDir) return rel;
-  return `${canvasDir.replace(/[\\/]$/, "")}\\${rel.replace(/[\\/]/g, "\\")}`;
+  return `${canvasDir.replace(/[\\/]$/, "").replace(/[\\/]/g, "\\")}\\${rel.replace(/[\\/]/g, "\\")}`;
 }
 
 /* 丢文件是所有块共用的一种状态，所以只长一张卡：图标和一句话一行，下面一行文件的绝对路径。

@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：note */
 
-import { NOTE_EDITOR_GUARDS, active, addItemElement, choiceDialog, commitEditing, confirmDialog, createMarkdownEditor, current, edgeLabelEditor, editingId, filePreviewCache, findItem, itemEls, modalOpen, noteAskId, noteEditor, noteImageCache, noteWriteBack, persistNote, previewKey, removeItemFromDom, renderAll, renderMarkdown, scheduleItemsSave, select, setEditingId, setModalOpen, setNoteAskId, setNoteEditor, setNoteWriteBack, showError, store, updateSelection } from "../canvas.js";
+import { NOTE_EDITOR_GUARDS, active, addItemElement, bytesToBase64, choiceDialog, commitEditing, confirmDialog, createMarkdownEditor, current, edgeLabelEditor, editingId, filePreviewCache, findItem, itemEls, modalOpen, noteAskId, noteEditor, noteImageCache, noteWriteBack, persistNote, previewKey, removeItemFromDom, renderAll, renderMarkdown, scheduleItemsSave, select, setEditingId, setModalOpen, setNoteAskId, setNoteEditor, setNoteWriteBack, setFileToggleMode, showError, store, updateSelection } from "../canvas.js";
 
 /* ---------- 笔记块 ---------- */
 
@@ -195,61 +195,69 @@ export function convertNoteToCopy(item) {
    覆盖的是用户自己磁盘上的文件，所以写盘前比一次改动基线：编辑期间被外部改过就问一句再动。 */
 export let fileEditor = null; // { itemId, canvasId, item, el, box, preview, textarea, body, saving, closing, refreshed }
 export let fileAskId = null;
+/* 正在打开编辑框的块：读正文是异步的，连点两下会同时进来两次，
+   第二次得挡掉，否则会往同一张卡里挂两个编辑容器 */
+let fileOpening = null;
 
 export function isFileEditable(item) {
   return item?.type === "file" && Boolean(item.text) && Boolean(item.src);
 }
 
 export async function startFileEdit(id) {
-  if (!current || fileAskId === id) return;
-  if (fileEditor && fileEditor.itemId !== id) {
-    /* 一次只开一个编辑框：上一个没存下来就哪儿也不去 */
-    if (!(await closeFileEdit())) return;
-  }
-  if (fileEditor?.itemId === id) {
-    if (fileEditor.closing) return;
-    fileEditor.textarea.focus({ preventScroll: true });
-    return;
-  }
-  const item = findItem(id);
-  if (!isFileEditable(item)) return;
-
-  const canvasId = current.meta.id;
-  /* 引用态才有「改哪一份」这一问：拷贝态那份副本就是唯一的一份，问它是假问题 */
-  if (item.linked) {
-    fileAskId = id;
-    setModalOpen(true);
-    let mode = null;
-    try {
-      mode = await choiceDialog({
-        title: "请确认编辑对象",
-        message: `「${item.name}」引用的是 ${item.src}。这次编辑要改哪一份？`,
-        note: "改源文件会把整份正文写回那个文件；复制进画布则先把副本收进画布，原文件不动，之后随便改。",
-        options: [
-          { value: "write", label: "修改源文件", hint: "直接写回那份文本" },
-          { value: "copy", label: "复制进画布", hint: "原文件不动，编辑画布里的副本" },
-        ],
-      });
-    } finally {
-      setModalOpen(false);
-      fileAskId = null;
-    }
-    /* 弹层期间可能切了画布 / 关了页面，块早就不存在了 */
-    if (!current || current.meta.id !== canvasId || !findItem(id)) return;
-    if (!mode) return;
-    if (mode === "copy" && !(await copyFileBlockIntoCanvas(findItem(id)))) return;
-  }
-
-  let body;
+  if (!current || fileAskId === id || fileOpening === id) return;
+  fileOpening = id;
   try {
-    body = await store.readFileBody(current.meta.id, id);
-  } catch (error) {
-    showError(error);
-    return;
+    if (fileEditor && fileEditor.itemId !== id) {
+      /* 一次只开一个编辑框：上一个没存下来就哪儿也不去 */
+      if (!(await closeFileEdit())) return;
+    }
+    if (fileEditor?.itemId === id) {
+      if (fileEditor.closing) return;
+      fileEditor.textarea.focus({ preventScroll: true });
+      return;
+    }
+    const item = findItem(id);
+    if (!isFileEditable(item)) return;
+
+    const canvasId = current.meta.id;
+    /* 引用态才有「改哪一份」这一问：拷贝态那份副本就是唯一的一份，问它是假问题 */
+    if (item.linked) {
+      fileAskId = id;
+      setModalOpen(true);
+      let mode = null;
+      try {
+        mode = await choiceDialog({
+          title: "请确认编辑对象",
+          message: `「${item.name}」引用的是 ${item.src}。这次编辑要改哪一份？`,
+          note: "改源文件会把整份正文写回那个文件；复制进画布则先把副本收进画布，原文件不动，之后随便改。",
+          options: [
+            { value: "write", label: "修改源文件", hint: "直接写回那份文本" },
+            { value: "copy", label: "复制进画布", hint: "原文件不动，编辑画布里的副本" },
+          ],
+        });
+      } finally {
+        setModalOpen(false);
+        fileAskId = null;
+      }
+      /* 弹层期间可能切了画布 / 关了页面，块早就不存在了 */
+      if (!current || current.meta.id !== canvasId || !findItem(id)) return;
+      if (!mode) return;
+      if (mode === "copy" && !(await copyFileBlockIntoCanvas(findItem(id)))) return;
+    }
+
+    let body;
+    try {
+      body = await store.readFileBody(current.meta.id, id);
+    } catch (error) {
+      showError(error);
+      return;
+    }
+    const el = itemEls.get(id);
+    if (!current || !isFileEditable(findItem(id)) || !el) return;
+    openFileEditor(id, el, body);
+  } finally {
+    if (fileOpening === id) fileOpening = null;
   }
-  const el = itemEls.get(id);
-  if (!current || !isFileEditable(findItem(id)) || !el) return;
-  openFileEditor(id, el, body);
 }
 
 /* 「复制进画布」：把副本收进 files/，块改指副本，原文件一个字节都不动。 */
@@ -280,6 +288,9 @@ export function openFileEditor(id, el, body) {
   const card = el.querySelector(".canvas-file-card");
   const preview = el.querySelector(".canvas-file-preview");
   if (!item || !card || !preview) return;
+  /* 已经开着就别再加一层；卡片里有上次没清掉的编辑容器也先摘掉 */
+  if (fileEditor?.itemId === id) return;
+  card.querySelectorAll(".canvas-file-editor").forEach((node) => node.remove());
   const box = document.createElement("div");
   box.className = "canvas-file-editor";
   const textarea = document.createElement("textarea");
@@ -288,6 +299,8 @@ export function openFileEditor(id, el, body) {
   textarea.setAttribute("aria-label", "文件正文");
   textarea.value = body.text;
   box.append(textarea);
+  const toggle = card.querySelector(".canvas-file-toggle");
+  if (toggle) setFileToggleMode(toggle, true);
   if (body.encoding && body.encoding !== "UTF-8") {
     const tip = document.createElement("div");
     tip.className = "canvas-file-editor-tip";
@@ -312,6 +325,28 @@ export function openFileEditor(id, el, body) {
     refreshed: false,
   };
   fileEditor = state;
+  /* Markdown 文件里也允许贴图：图片落到这块自己的 notes/<块id>/ 图床，
+     正文写相对路径；删块时图床跟着一起清。 */
+  textarea.addEventListener("paste", async (event) => {
+    const items = [...(event.clipboardData?.items || [])];
+    const imageItem = items.find((one) => one.type.startsWith("image/"));
+    if (!imageItem) return;
+    event.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    try {
+      const ext = (file.type.split("/")[1] || "png").toLowerCase().replace("jpeg", "jpg");
+      const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+      const rel = await store.saveCanvasNoteImage(state.canvasId, state.itemId, base64, ext);
+      const snippet = `![图片](<${rel}>)`;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? start;
+      textarea.setRangeText(snippet, start, end, "end");
+      textarea.focus({ preventScroll: true });
+    } catch (error) {
+      showError(`图片保存失败：${error}`);
+    }
+  });
   textarea.addEventListener("keydown", onFileEditorKeyDown);
   /* 点哪儿都算收工：只认自己还挂着的那次编辑，免得把后来新开的框顺手关了 */
   textarea.addEventListener("blur", () => {
@@ -368,8 +403,11 @@ export function flushFileEditor() {
 
 export function closeFileEditorBox(state) {
   state.box.remove();
+  state.el.querySelectorAll(".canvas-file-editor").forEach((node) => node.remove());
   state.el.classList.remove("is-editing");
   state.preview.hidden = false;
+  const toggle = state.el.querySelector(".canvas-file-toggle");
+  if (toggle) setFileToggleMode(toggle, false);
 }
 
 /* 写回源文件。返回 false 表示这次没写成（出错或用户选了不覆盖），调用方据此决定留不留编辑框。 */
@@ -490,7 +528,7 @@ export function replaceMissingNoteImage(img) {
 export async function hydrateNoteImages(item, el) {
   if (!current) return;
   const canvasId = current.meta.id;
-  const images = [...el.querySelectorAll(".canvas-note-body img.md-local-img")];
+  const images = [...el.querySelectorAll(".md-body img.md-local-img")];
   for (const img of images) {
     const raw = decodeRel(img.dataset.src || "");
     const rel = noteImageRel(item, raw);

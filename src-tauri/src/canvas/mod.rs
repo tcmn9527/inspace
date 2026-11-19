@@ -82,6 +82,9 @@ impl CanvasState {
     fn root(&self) -> PathBuf {
         self.data.dir(crate::store::SPACE_DIR)
     }
+    pub(crate) fn data_root(&self) -> DataRoot {
+        self.data.clone()
+    }
 }
 
 #[derive(Serialize)]
@@ -784,7 +787,7 @@ fn open_dir(dir: &Path, id: &str) -> Result<CanvasData, String> {
             name,
             item_count,
             modified: file_mtime(&dir.join(ITEMS_FILE)).max(file_mtime(&meta_path(dir))),
-            path: dir.to_string_lossy().to_string(),
+            path: dir.to_string_lossy().replace('/', "\\"),
         },
         camera,
         items,

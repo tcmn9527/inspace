@@ -1,6 +1,8 @@
 /* canvas-items/dom-files.js —— 从 canvas-items.js 拆出（导出名不变，入口统一 re-export）。 */
 
 import { FILE_DOC_SVG, PREVIEW_RENDER_CHARS, TABLE_EXTS, chevronSvg } from "./dom-elements.js";
+import { closeFileEdit, fileEditor, hydrateNoteImages, startFileEdit } from "../canvas.js";
+import { renderMarkdown } from "../markdown.js";
 import { createDelimitedTable, formatSize } from "./dom-media.js";
 import { isCancelled, openPdf, pdfPageSize, pdfProblem, renderPdfPage } from "../canvas-pdf.js";
 
@@ -25,6 +27,20 @@ export function createFileCard(item, options) {
   const head = document.createElement("div");
   head.className = "canvas-file-head";
   head.append(icon, main);
+  /* Markdown 文件：右上角一颗「编辑 / 浏览」开关，默认浏览态（渲染后的正文） */
+  if (item.text && isMarkdownExt(item.ext)) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "canvas-file-toggle";
+    setFileToggleMode(toggle, fileEditor?.itemId === item.id);
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      if (fileEditor?.itemId === item.id) void closeFileEdit();
+      else void startFileEdit(item.id);
+    });
+    head.append(toggle);
+  }
   card.append(head);
 
   /* 不管拷贝还是引用，进画布都问一句文件还在不在；
@@ -65,6 +81,29 @@ export function createFileCard(item, options) {
   attachPlainCopy(body);
   fillFilePreview(card, body, sub, item, options);
   return card;
+}
+
+/* 文件卡右上角的编辑/浏览开关：铅笔进编辑、眼睛回浏览，图标按钮不放文字 */
+const FILE_EDIT_ICON =
+  '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true">' +
+  '<path d="M12.6 3.6l3.8 3.8L7.2 16.6l-4.6.7.7-4.6z" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linejoin="round"/></svg>';
+const FILE_BROWSE_ICON =
+  '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true">' +
+  '<path d="M2.2 10C4 6.8 6.8 5 10 5s6 1.8 7.8 5c-1.8 3.2-4.6 5-7.8 5s-6-1.8-7.8-5z" fill="none" ' +
+  'stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>' +
+  '<circle cx="10" cy="10" r="2.4" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
+
+export function setFileToggleMode(toggle, editing) {
+  toggle.innerHTML = editing ? FILE_BROWSE_ICON : FILE_EDIT_ICON;
+  toggle.title = editing ? "浏览" : "编辑";
+  toggle.setAttribute("aria-label", editing ? "浏览" : "编辑");
+}
+
+/* Markdown 的两个扩展名（.md / .markdown）：浏览态渲染排版、卡片头带编辑开关 */
+export function isMarkdownExt(ext) {
+  const name = String(ext || "").toLowerCase();
+  return name === "md" || name === "markdown";
 }
 
 /* 画布那边也靠这个决定给不给缩放手柄，所以是导出的 */
@@ -720,10 +759,21 @@ async function fillFilePreview(card, body, sub, item, options) {
   if (preview.truncated) tags.push("仅预览开头");
   if (tags.length) sub.textContent += ` · ${tags.join(" · ")}`;
   renderFilePreview(body, item, preview);
+  /* Markdown 里贴的图存在这块自己的 notes/<块id>/ 下，渲染后换成能显示的地址 */
+  if (isMarkdownExt(item.ext)) hydrateNoteImages(item, body);
 }
 
 export function renderFilePreview(body, item, preview) {
   const ext = (item.ext || "").toLowerCase();
+  if (isMarkdownExt(ext) && preview.text) {
+    /* 浏览态直接渲染 Markdown（与笔记卡同一套排版），不在卡片里摆源码 */
+    const md = document.createElement("div");
+    md.className = "md-body canvas-file-markdown";
+    md.innerHTML = renderMarkdown(preview.text);
+    body.classList.add("is-markdown");
+    body.append(md);
+    return;
+  }
   if (TABLE_EXTS.has(ext)) {
     const table = createDelimitedTable(preview.text, ext === "tsv" ? "\t" : ",");
     if (table) {

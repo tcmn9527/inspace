@@ -126,11 +126,21 @@ export function initSettings(options = {}) {
   ui.videoReveal = document.querySelector("#settings-video-reveal");
   ui.videoDirPick = document.querySelector("#settings-video-dir-pick");
   ui.videoDirReset = document.querySelector("#settings-video-dir-reset");
+  ui.h3dDir = document.querySelector("#settings-h3d-dir");
+  ui.h3dCheck = document.querySelector("#settings-h3d-check");
+  ui.h3dReveal = document.querySelector("#settings-h3d-reveal");
+  ui.h3dStatus = document.querySelector("#settings-h3d-status");
+  ui.h3dError = document.querySelector("#settings-h3d-error");
   ui.modelsStatus = document.querySelector("#settings-models-status");
   ui.modelsDir = document.querySelector("#settings-models-dir");
   ui.modelsReveal = document.querySelector("#settings-models-reveal");
   ui.modelsImport = document.querySelector("#settings-models-import");
   ui.modelsError = document.querySelector("#settings-models-error");
+
+  ui.h3dCheck.addEventListener("click", () => refreshH3d(true));
+  ui.h3dReveal.addEventListener("click", () => {
+    void invoke("h3d_reveal").catch((error) => showH3dError(String(error)));
+  });
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -233,6 +243,32 @@ function setupMoveEvents() {
   ).catch(() => {});
 }
 
+/* ---------- 本地 3D 生成 ---------- */
+let h3dChecked = false;
+
+function showH3dError(message) {
+  ui.h3dError.textContent = message || "";
+  ui.h3dError.hidden = !message;
+}
+
+async function refreshH3d(verbose = false) {
+  try {
+    const status = await invoke("h3d_status");
+    if (verbose) h3dChecked = true;
+    ui.h3dDir.textContent = status.dir;
+    if (status.ok) {
+      ui.h3dStatus.textContent = verbose ? "模型齐全，可以生成" : "模型齐全";
+      ui.h3dStatus.hidden = false;
+      showH3dError("");
+    } else {
+      ui.h3dStatus.hidden = true;
+      showH3dError(`还缺 ${status.missing.join("、")}：把 Hunyuan3D 的 ONNX 权重放进上面的目录（onnx/ 与 u2net.onnx）`);
+    }
+  } catch (error) {
+    showH3dError(String(error));
+  }
+}
+
 export async function refreshSettings() {
   try {
     currentRoot = await invoke("data_root");
@@ -246,6 +282,7 @@ export async function refreshSettings() {
   refreshGen();
   refreshVideo();
   refreshModels();
+  refreshH3d();
   paintRouteCard();
   renderRoute();
 }

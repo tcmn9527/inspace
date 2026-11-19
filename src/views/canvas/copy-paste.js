@@ -491,4 +491,6 @@ export async function addImageBlock(path, point, mode) {
   const at = point || insertPoint(fit.w, fit.h);
   imageCache.set(src, url);
   const item = makeImage(at.x, at.y, fit.w, fit.h, src, linked);
+  placeBlock(item);
+  return item;
 }

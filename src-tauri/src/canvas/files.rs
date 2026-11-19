@@ -29,6 +29,7 @@ const TEXT_EXTS: &[&str] = &[
     // 数据与标记
     "json", "jsonc", "json5", "ndjson", "jsonl", "geojson", "yaml", "yml", "toml", "xml", "csv",
     "tsv", "rss", "atom", "gpx", "plist", "svg", "html", "htm", "xhtml", "ics", "vcf",
+    "md", "markdown",
     // 代码
     "js", "mjs", "cjs", "ts", "jsx", "tsx", "rs", "go", "py", "pyi", "java", "kt", "kts", "scala",
     "c", "h", "cc", "cpp", "cxx", "hpp", "cs", "vb", "rb", "php", "swift", "dart", "lua", "pl",
@@ -124,6 +125,159 @@ fn describe_file(path: &Path) -> Result<FileInfo, String> {
 #[tauri::command]
 pub fn canvas_file_info(path: String) -> Result<FileInfo, String> {
     describe_file(Path::new(&path))
+}
+
+/// 在画布 files/ 下新建一个空文本文件：右键菜单「创建文件」用，
+/// 扩展名限白名单里的文本格式，建完块就是拷贝态、可以直接在画布里编辑。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedTextFile {
+    pub rel: String,
+    pub name: String,
+    pub size: u64,
+    pub ext: String,
+    pub text: bool,
+    pub markdown: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTypeOption {
+    pub ext: String,
+    pub label: String,
+    pub group: String,
+}
+
+/* 新建文件时菜单里能选的类型：分组 + 可读名，顺序就是菜单顺序。
+   白名单本身（TEXT_EXTS/MARKDOWN_EXTS）还是唯一裁判，这张表只负责怎么展示。 */
+const FILE_TYPE_TABLE: &[(&str, &str, &str)] = &[
+    ("md", "Markdown", "Markdown"),
+    ("txt", "纯文本", "文本"),
+    ("log", "日志", "文本"),
+    ("srt", "字幕", "文本"),
+    ("vtt", "字幕", "文本"),
+    ("diff", "差异", "文本"),
+    ("patch", "补丁", "文本"),
+    ("eml", "邮件", "文本"),
+    ("bib", "文献 BibTeX", "文本"),
+    ("tex", "LaTeX", "文本"),
+    ("json", "JSON", "数据"),
+    ("jsonc", "JSONC", "数据"),
+    ("json5", "JSON5", "数据"),
+    ("jsonl", "JSON Lines", "数据"),
+    ("ndjson", "NDJSON", "数据"),
+    ("geojson", "GeoJSON", "数据"),
+    ("yaml", "YAML", "数据"),
+    ("yml", "YAML", "数据"),
+    ("toml", "TOML", "数据"),
+    ("xml", "XML", "数据"),
+    ("csv", "CSV", "数据"),
+    ("tsv", "TSV", "数据"),
+    ("ics", "日历 ICS", "数据"),
+    ("vcf", "名片 VCF", "数据"),
+    ("gpx", "GPS 轨迹 GPX", "数据"),
+    ("plist", "Plist", "数据"),
+    ("rss", "RSS", "数据"),
+    ("atom", "Atom", "数据"),
+    ("html", "HTML", "网页"),
+    ("htm", "HTML", "网页"),
+    ("xhtml", "XHTML", "网页"),
+    ("svg", "SVG", "网页"),
+    ("css", "CSS", "网页"),
+    ("scss", "SCSS", "网页"),
+    ("sass", "Sass", "网页"),
+    ("less", "Less", "网页"),
+    ("vue", "Vue", "网页"),
+    ("svelte", "Svelte", "网页"),
+    ("js", "JavaScript", "代码"),
+    ("mjs", "JavaScript", "代码"),
+    ("cjs", "JavaScript", "代码"),
+    ("ts", "TypeScript", "代码"),
+    ("jsx", "JSX", "代码"),
+    ("tsx", "TSX", "代码"),
+    ("py", "Python", "代码"),
+    ("rs", "Rust", "代码"),
+    ("go", "Go", "代码"),
+    ("java", "Java", "代码"),
+    ("kt", "Kotlin", "代码"),
+    ("c", "C", "代码"),
+    ("h", "C 头文件", "代码"),
+    ("cpp", "C++", "代码"),
+    ("hpp", "C++ 头文件", "代码"),
+    ("cs", "C#", "代码"),
+    ("rb", "Ruby", "代码"),
+    ("php", "PHP", "代码"),
+    ("swift", "Swift", "代码"),
+    ("dart", "Dart", "代码"),
+    ("lua", "Lua", "代码"),
+    ("r", "R", "代码"),
+    ("sql", "SQL", "代码"),
+    ("graphql", "GraphQL", "代码"),
+    ("proto", "Protobuf", "代码"),
+    ("tf", "Terraform", "代码"),
+    ("zig", "Zig", "代码"),
+    ("sh", "Shell", "脚本"),
+    ("bash", "Bash", "脚本"),
+    ("zsh", "Zsh", "脚本"),
+    ("fish", "Fish", "脚本"),
+    ("bat", "批处理", "脚本"),
+    ("cmd", "批处理", "脚本"),
+    ("ps1", "PowerShell", "脚本"),
+    ("ini", "INI", "配置"),
+    ("conf", "配置", "配置"),
+    ("cfg", "配置", "配置"),
+    ("env", "环境变量", "配置"),
+    ("properties", "Properties", "配置"),
+    ("editorconfig", "EditorConfig", "配置"),
+    ("gitignore", "Git Ignore", "配置"),
+    ("dockerfile", "Dockerfile", "配置"),
+    ("makefile", "Makefile", "配置"),
+    ("cmake", "CMake", "配置"),
+];
+
+/// 新建文件菜单能选的全部类型（分组与顺序由 FILE_TYPE_TABLE 决定，白名单外的剔除）。
+#[tauri::command]
+pub fn canvas_file_types() -> Vec<FileTypeOption> {
+    FILE_TYPE_TABLE
+        .iter()
+        .filter(|(ext, _, _)| is_text_ext(ext) || is_markdown_ext(ext))
+        .map(|(ext, label, group)| FileTypeOption {
+            ext: ext.to_string(),
+            label: label.to_string(),
+            group: group.to_string(),
+        })
+        .collect()
+}
+
+/// 新建一个空文本文件：文件名和拷贝进来的附件同一套逻辑（毫秒时间戳 + 扩展名），
+/// 建完返回存储相对路径，前端落成文件卡并直接进画布内编辑。
+#[tauri::command]
+pub fn canvas_create_file(
+    id: String,
+    ext: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<CreatedTextFile, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    if !is_text_ext(&ext) && !is_markdown_ext(&ext) {
+        return Err(format!(".{ext} 不是可创建的文本格式"));
+    }
+    let target_dir = dir.join(FILE_DIR);
+    fs::create_dir_all(&target_dir).map_err(|e| format!("创建文件目录失败：{e}"))?;
+    let path = unique_media_path(&target_dir, &safe_file_ext(&ext));
+    fs::write(&path, b"").map_err(|e| format!("建文件失败：{e}"))?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "文件名不合法".to_string())?;
+    Ok(CreatedTextFile {
+        rel: format!("{FILE_DIR}/{name}"),
+        name,
+        size: 0,
+        ext: ext.clone(),
+        text: true,
+        markdown: is_markdown_ext(&ext),
+    })
 }
 
 /// 系统文件框选一个文件，不加扩展名过滤（什么格式都收）。取消返回 null。

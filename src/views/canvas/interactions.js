@@ -26,6 +26,11 @@ export function onStagePointerDown(e) {
     dropTool();
     return;
   }
+  /* 文件卡右上角的「编辑/浏览」开关：点它是切换，不选中、不拖块 */
+  if (e.target.closest?.(".canvas-file-toggle")) {
+    e.preventDefault();
+    return;
+  }
   /* 锁点自己的双击热区：这一次按下不吃，免得锁住的块顺手起平移 */
   if (e.target.closest?.(".canvas-lock-dot")) {
     e.preventDefault();

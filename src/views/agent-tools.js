@@ -7,7 +7,7 @@
  * 传 pace: "instant" 可以跳过这一拍。 */
 
 import { GUIDE_TOPICS, guideText } from "./agent-guide.js";
-import { canvasAgent } from "./canvas.js";
+import { canvasAgent, current } from "./canvas.js";
 import { cosmosFlight, cosmosFlightControl, cosmosRoute, cosmosRouteSet } from "./cosmos.js";
 import { LIGHT_THEMES, THEMES, currentTheme, setTheme } from "./theme.js";
 
@@ -887,6 +887,11 @@ const TOOL_DEFS = [
     scene: { type: "string", description: "可选：生成后直接摆进这个场景块" },
     out: { type: "string", description: "可选：导出到绝对路径（.glb），给了就不进模型库" },
   }, ["name", "parts"], 180),
+  def("h3d_generate", "把画布上的一张图片块（或生图面板）生成 3D 模型：本地 Hunyuan3D 几何阶段，GPU 上约两分半。完成后模型存进模型库（library/models），返回 {name, size, modified}，可用 scene_add_model 放进 3D 场景。", {
+    id: ID,
+    seed: { type: "number", description: "可选：随机种子；同一张图同种子形状一致" },
+  }, ["id"], 300),
+  def("h3d_cancel", "停止正在跑的 h3d_generate（下个批次就停，已生成的部分丢弃）。"),
   def("scene_export_glb", "把 3D 场景块导出成一个 GLB：墙地、家具、程序几何合成一个文件（米制、贴图内嵌），可以交给客户或用外部 3D 软件打开。out 给保存的绝对路径（.glb）。返回 {path, block}。", {
     id: ID,
     out: { type: "string", description: "保存到的绝对路径（.glb）" },
@@ -1659,6 +1664,21 @@ async function dispatch(name, args) {
         scene: args.scene || "",
         out: args.out || "",
       });
+    case "h3d_generate": {
+      await ensureView("canvas");
+      const canvasId = current?.meta?.id;
+      if (!canvasId) throw new Error("先打开一个画布");
+      const model = await invoke("h3d_generate", {
+        id: canvasId,
+        itemId: args.id,
+        seed: args.seed,
+      });
+      await beat(args);
+      return model;
+    }
+    case "h3d_cancel":
+      await invoke("h3d_cancel");
+      return { stopped: true };
     case "scene_export_glb":
       return onCanvas(args, () => canvasAgent.sceneExportGlb(args.id, args.out));
     case "scene_add_model":

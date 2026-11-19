@@ -1,4 +1,5 @@
 [package]
+default-run = "inspace"
 name = "inspace"
 version = "0.1.0"
 description = "无限画布：一块装得下笔记、文件和媒体的桌面空间"
@@ -26,6 +27,9 @@ cmake = "0.1"
 bindgen = "0.71"
 
 [dependencies]
+half = "2"
+npyz = "0.8"
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["download-binaries", "half", "cuda", "std"] }
 # protocol-asset：把磁盘上的视频变成 <video> 能按 Range 读的地址，
 # 20GB 的片子也只占几十 MB 解码缓冲，不用把整份读进内存。
 tauri = { version = "2", features = ["protocol-asset"] }
@@ -57,7 +61,7 @@ rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"
 # 源码由 scripts/prepare-sdcpp.mjs 取到 tools/sdcpp，build.rs 现场编成静态库链进来。
 # cuda 特性关掉就是纯 CPU。
 # 只开 png：出图和逐步预览都要把 RGBA 编成 PNG 推给前端。
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # 落图抓屏：直接读窗口客户区像素，屏幕上 ClearType 渲染的文本才和原面板完全一致。
 windows = { version = "0.62", features = [
   "Win32_Foundation",

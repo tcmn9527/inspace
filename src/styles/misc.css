@@ -739,3 +739,69 @@
 .menu-list::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* 本地图生 3D 的进度小卡片：右下角常驻，不挡画布操作 */
+.h3d-card {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 60;
+  display: grid;
+  gap: 8px;
+  width: 240px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.h3d-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.h3d-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  overflow: hidden;
+}
+
+.h3d-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 2px;
+  background: var(--accent, #4c8dff);
+  transition: width 0.2s ease;
+}
+
+.h3d-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.h3d-stage {
+  opacity: 0.72;
+}
+
+.h3d-cancel {
+  padding: 2px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.h3d-cancel:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--line) 30%, transparent);
+}

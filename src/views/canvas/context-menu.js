@@ -1,5 +1,6 @@
 /* 从 canvas.js 拆出：context-menu */
 
+import { h3dEntry } from "./h3d-ui.js";
 import { BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CLOSE_X_SVG, PAGE_RATIOS, PRESETS, absolutePathOf, addSceneModelFlow, cancelPlanCalibration, changeProductImage, clientToWorld, collectPictureImageSrcs, copyItems, createFurnitureFlow, current, dropGenRun, dropRegionImage, dropVideoRun, ebookKey, ebookTocCache, editingId, exportPictureImage, exportQuote, exportSceneFlow, fileEditor, filePreviewCache, findItem, flushFileEditor, genTimers, imageCache, importCsvFromQuote, isContainer, isFileEditable, itemBounds, itemEls, modalOpen, newSceneForProduct, noteEditor, noteImageCache, noteTimers, openImageCompare, openMenu, ownedMembers, pickProductModel, pictureEditors, pictureMenuEntries, pictureTimers, placeProductInSceneFlow, placeProductOnPlanFlow, planCalibration, previewKey, promptDialog, refreshPictureChrome, refreshQuotes, renamePageFlow, revealFileBlock, revealTarget, scenePlacementActive, sceneTimers, scheduleItemsSave, select, selectedIds, setConnectorBend, setEditingId, setModalOpen, setNoteEditor, setPageOrderFlow, setPageRatio, setSceneCameraPreset, setScenePlacementMode, showError, showToast, srcInUse, startFileEdit, startNoteEdit, startPlanCalibration, store, syncConnector, syncItemElement, toggleContainer, toolMenuEntries, updateSelection, videoControlOf } from "../canvas.js";
 
 /* ---------- 右键菜单 ---------- */
@@ -280,6 +281,8 @@ export function itemMenuEntries(item, x, y, depth = 0) {
     }
     const lockedSave = imageSaveAsEntry(item);
     if (lockedSave) entries.push(lockedSave);
+    const lockedH3d = h3dEntry(item);
+    if (lockedH3d) entries.push(lockedH3d);
     /* 对比是只读查看，锁着也允许 */
     const compare = compareImagesEntry(item);
     if (compare) entries.push(compare);
@@ -537,6 +540,8 @@ export function itemMenuEntries(item, x, y, depth = 0) {
   }
   const saveAs = imageSaveAsEntry(item);
   if (saveAs) entries.push(saveAs);
+  const h3d = h3dEntry(item);
+  if (h3d) entries.push(h3d);
   /* 属性：笔记报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行 */
   if (PROP_KIND[item.type]) {
     entries.push({ label: "属性", onClick: () => openItemProps(item) });
@@ -934,6 +939,12 @@ export function deleteItems(ids) {
     if (item.type === "file" && item.src) {
       if (fileEditor?.itemId === item.id) flushFileEditor();
       filePreviewCache.delete(previewKey(item));
+      /* Markdown 正文里贴过的图落在这块自己的 notes/<块id>/，跟着块一起清 */
+      const assetPrefix = `notes/${item.id}/`;
+      for (const key of [...noteImageCache.keys()]) {
+        if (key.startsWith(assetPrefix)) noteImageCache.delete(key);
+      }
+      void store.deleteNote(canvasId, item.id).catch(() => {});
       if (!item.linked && !usedBy("file", item.src)) {
         void store.deleteCanvasFile(canvasId, item.src, false).catch(() => {});
       }

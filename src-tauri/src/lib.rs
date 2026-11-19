@@ -5,6 +5,7 @@ mod db;
 mod ebook;
 mod ffmpeg;
 mod imageapi;
+mod h3d;
 mod imagegen;
 mod mcp;
 mod models;
@@ -168,6 +169,8 @@ pub fn run() {
             app.manage(videogen::init(data_root.clone(), &db_state));
             // 3D 模型库：library/models/ 下的 .glb，产品卡只记文件名
             app.manage(models::init(data_root.clone())?);
+            // 本地图生 3D：会话按需开、用完即放；取消只改这份共享标志
+            app.manage(h3d::H3dState::default());
             // 换数据目录的搬运同理：进度在后台线程报，停止只改标志
             app.manage(Arc::new(store::RootMoveJobs::default()));
             app.manage(db_state);
@@ -256,6 +259,10 @@ pub fn run() {
             canvas::canvas_import_image,
             canvas::canvas_image_url,
             canvas::canvas_open_image,
+            h3d::h3d_status,
+            h3d::h3d_reveal,
+            h3d::h3d_cancel,
+            h3d::h3d_generate,
             canvas::canvas_image_save_as,
             canvas::canvas_delete_image,
             canvas::canvas_save_note_image,
@@ -290,6 +297,8 @@ pub fn run() {
             canvas::canvas_audio_fix,
             canvas::canvas_delete_video,
             canvas::canvas_file_info,
+            canvas::canvas_create_file,
+            canvas::canvas_file_types,
             canvas::canvas_pick_file,
             canvas::canvas_pick_csv,
             canvas::canvas_import_file,

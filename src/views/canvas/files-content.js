@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：files-content */
 
-import { AUDIO_EXTS, EBOOK_EXTS, IMAGE_EXTS, PICTURE_MAX_CMDS, PICTURE_MAX_EXPANDED, VIDEO_EXTS, addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addImageBlock, addVideoBlock, agentHighlight, agentRequireItem, agentRequireSpace, agentRevealBlock, agentSummary, applyColor, commitEditing, current, edgeLabelEditor, editingId, fileBlockSize, fileExt, imageCache, imageSize, insertPoint, itemEls, normalizeHidden, normalizeLight, normalizePictureCmds, normalizePictureSymbols, persistPicture, pictureImageSrc, pictureLayerCensus, pictureTopLayers, refreshPictureChrome, scheduleItemsSave, store, syncItemElement } from "../canvas.js";
+import { AUDIO_EXTS, EBOOK_EXTS, IMAGE_EXTS, PICTURE_MAX_CMDS, PICTURE_MAX_EXPANDED, VIDEO_EXTS, addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addImageBlock, addVideoBlock, agentHighlight, agentRequireItem, agentRequireSpace, agentRevealBlock, agentSummary, applyColor, commitEditing, current, edgeLabelEditor, editingId, fileBlockSize, fileExt, flushItems, imageCache, imageSize, insertPoint, itemEls, normalizeHidden, normalizeLight, normalizePictureCmds, normalizePictureSymbols, persistPicture, pictureImageSrc, pictureLayerCensus, pictureTopLayers, refreshPictureChrome, scheduleItemsSave, showError, store, syncItemElement, makeFile, placeBlock, select, startFileEdit } from "../canvas.js";
 
 /* ---------- 文件 / 笔记内容 ---------- */
 
@@ -49,6 +49,80 @@ export async function agentImportFile(spec = {}) {
   agentRevealBlock(placed.id);
   agentHighlight([placed.id], 1400);
   return agentSummary(placed);
+}
+
+/* 「新建文件」的二级菜单：后端给的类型白名单清单，分组之间用分隔线隔开。
+   清单在模块加载时就预取，菜单打开时直接用；万一还没回来先给常用四项兜底。 */
+let fileTypeList = [];
+let fileTypesReady = null;
+
+export function loadFileTypes() {
+  if (!fileTypesReady) {
+    fileTypesReady = store
+      .canvasFileTypes()
+      .then((list) => {
+        fileTypeList = Array.isArray(list) ? list : [];
+      })
+      .catch(() => {
+        fileTypeList = [];
+      });
+  }
+  return fileTypesReady;
+}
+void loadFileTypes();
+
+export function fileTypeMenuItems() {
+  const make = (ext, label) => ({
+    label: `${label}（.${ext}）`,
+    onClick: () => void createTextFile(ext),
+  });
+  if (!fileTypeList.length) {
+    return [
+      make("md", "Markdown"),
+      make("txt", "纯文本"),
+      make("json", "JSON"),
+      make("csv", "CSV"),
+    ];
+  }
+  const items = [];
+  let group = "";
+  for (const one of fileTypeList) {
+    if (one.group !== group && items.length) items.push("-");
+    group = one.group;
+    items.push(make(one.ext, one.label));
+  }
+  return items;
+}
+
+/* 选一个类型：在画布 files/ 下建空文件（时间戳命名，和拷贝进来的附件一样），
+   落一块文件卡，落盘后直接进入画布内编辑。 */
+export async function createTextFile(ext) {
+  if (!current) return;
+  const canvasId = current.meta.id;
+  try {
+    const created = await store.createCanvasFile(canvasId, ext);
+    if (!current || current.meta.id !== canvasId) return;
+    const size = fileBlockSize(created);
+    const at = insertPoint(size.w, size.h);
+    const item = makeFile(at.x, at.y, created);
+    placeBlock(item);
+    select(item.id);
+    /* 编辑框要读后端 items.json 认块，先让这块落盘（防抖保存等不及）；
+       文件卡也要等预览渲染完才有编辑容器，挂上再开编辑 */
+    await flushItems();
+    const deadline = Date.now() + 1500;
+    for (;;) {
+      const el = itemEls.get(item.id);
+      if (el && el.querySelector(".canvas-file-card") && el.querySelector(".canvas-file-preview")) {
+        void startFileEdit(item.id);
+        break;
+      }
+      if (Date.now() > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+  } catch (error) {
+    showError(error);
+  }
 }
 
 export function agentPictureOf(id) {

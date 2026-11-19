@@ -12,7 +12,7 @@ const { emitTo, listen } = window.__TAURI__.event;
 
 const appWindow = getCurrentWindow();
 const PANE_KEY = "workbench.settings.pane";
-const PANES = ["theme", "data", "gen", "video", "models", "cosmos", "mcp", "shortcuts", "ffmpeg"];
+const PANES = ["theme", "data", "gen", "video", "models", "h3d", "cosmos", "mcp", "shortcuts", "ffmpeg"];
 
 const ui = {};
 let currentPane = "theme";

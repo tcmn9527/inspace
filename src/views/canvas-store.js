@@ -77,6 +77,10 @@ export const deleteCanvasVideo = (id, src, linked, audioRel) =>
 export const fileInfo = (path) => invoke("canvas_file_info", { path });
 export const pickCanvasFile = () => invoke("canvas_pick_file");
 export const importCanvasFile = (id, path) => invoke("canvas_import_file", { id, path });
+/* 右键「创建文件」：在画布 files/ 下新建一个空文本文件，返回 {rel,name,size,ext,text,markdown} */
+export const createCanvasFile = (id, ext) => invoke("canvas_create_file", { id, ext });
+export const canvasFileTypes = () => invoke("canvas_file_types");
+
 export const copyCanvasFile = (id, path) => invoke("canvas_copy_file", { id, path });
 /* .md 抄正文进笔记块，或引用态每次现读 */
 export const readFileText = (path) => invoke("canvas_file_text", { path });

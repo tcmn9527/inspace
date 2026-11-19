@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：tools-camera */
 
-import { MAX_SCALE, MIN_SCALE, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, ZOOM_HOLD_DELAY, ZOOM_HOLD_INTERVAL, active, agentRevealBlock, assignTool, clamp, ctrlHeld, current, editingId, findItem, insertFileFromPicker, insertGenPanel, insertPoint, insertVideoPanel, itemEls, makeScene, normalizeSceneParts, noteEditor, openMenu, persistScene, placeBlock, positionEdgeLabelEditor, sceneLightOf, sceneSurfacesOf, scheduleCameraSave, scheduleItemsSave, select, setCosmosCamera, setSceneCameraScale, tool, toolboxMarkup, ui, updateSelection } from "../canvas.js";
+import { MAX_SCALE, MIN_SCALE, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, ZOOM_HOLD_DELAY, ZOOM_HOLD_INTERVAL, active, agentRevealBlock, assignTool, clamp, ctrlHeld, current, editingId, findItem, fileTypeMenuItems, insertFileFromPicker, insertGenPanel, insertPoint, insertVideoPanel, itemEls, makeScene, normalizeSceneParts, noteEditor, openMenu, persistScene, placeBlock, positionEdgeLabelEditor, sceneLightOf, sceneSurfacesOf, scheduleCameraSave, scheduleItemsSave, select, setCosmosCamera, setSceneCameraScale, tool, toolboxMarkup, ui, updateSelection } from "../canvas.js";
 
 /* ---------- 工具与相机 ---------- */
 
@@ -45,6 +45,11 @@ export function toolMenuEntries() {
         dropTool();
         insertFileFromPicker();
       },
+    },
+    {
+      label: "新建文件",
+      searchable: true,
+      children: fileTypeMenuItems(),
     },
     {
       label: "AI 出图",

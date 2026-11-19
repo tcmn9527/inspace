@@ -229,6 +229,8 @@ function openSlot(level, row, item, closeAll) {
     });
     el.append(panel.el);
     slot.commit = () => item.slider.onDone?.(panel.value);
+  } else if (item.searchable && Array.isArray(item.children)) {
+    fillSearchable(el, item.children, closeAll);
   } else {
     fill(el, item.children, closeAll, level);
   }
@@ -237,6 +239,43 @@ function openSlot(level, row, item, closeAll) {
   markOpenRow(row);
   el.hidden = false;
   placePanel(el, row);
+}
+
+/* 可搜索的子菜单（「新建文件」这类长列表）：开头一行搜索框，下面固定高列表。
+   行渲染仍走 fill，搜索只做过滤，不改变每行本来的样子。 */
+function fillSearchable(container, items, closeAll) {
+  container.textContent = "";
+  const search = document.createElement("input");
+  search.className = "menu-search";
+  search.type = "text";
+  search.spellcheck = false;
+  search.placeholder = "搜索文件类型…";
+  search.addEventListener("pointerdown", (event) => event.stopPropagation());
+  container.append(search);
+  const list = document.createElement("div");
+  list.className = "menu-list";
+  list.style.maxHeight = "320px";
+  container.append(list);
+  const render = (source) => {
+    list.textContent = "";
+    if (!source.length) {
+      const empty = document.createElement("div");
+      empty.className = "menu-empty";
+      empty.textContent = "没有匹配的类型";
+      list.append(empty);
+      return;
+    }
+    fill(list, source, closeAll, 1);
+  };
+  render(items);
+  search.addEventListener("input", () => {
+    const needle = search.value.trim().toLowerCase();
+    render(
+      needle
+        ? items.filter((one) => typeof one?.label === "string" && one.label.toLowerCase().includes(needle))
+        : items,
+    );
+  });
 }
 
 /* 行尾的展开箭头：字符「›」太细太飘，用一枚圆头的 chevron */

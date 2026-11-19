@@ -519,13 +519,7 @@ export function panelMoveEntries(item) {
 
 export function renderPanelTree(body) {
   const items = current?.items || [];
-  if (!items.length) {
-    const hint = document.createElement("p");
-    hint.className = "space-tree-hint";
-    hint.textContent = current ? "这块画布还是空的" : "先打开一块画布";
-    body.append(hint);
-    return;
-  }
+  if (!items.length) return;
   /* 先算每个容器的孩子，顶层只摆没被任何容器装着的块 */
   const kidsOf = new Map();
   const nested = new Set();

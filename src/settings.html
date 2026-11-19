@@ -35,10 +35,9 @@
       <nav class="settings-nav" id="settings-nav" aria-label="设置分类">
         <button class="settings-nav-item" data-pane="theme" type="button">主题</button>
         <button class="settings-nav-item" data-pane="data" type="button">数据文件夹</button>
-        <button class="settings-nav-item" data-pane="gen" type="button">生图模型</button>
+        <button class="settings-nav-item" data-pane="gen" type="button">图片生成</button>
         <button class="settings-nav-item" data-pane="video" type="button">视频生成</button>
-        <button class="settings-nav-item" data-pane="models" type="button">3D 模型库</button>
-        <button class="settings-nav-item" data-pane="h3d" type="button">本地 3D 生成</button>
+        <button class="settings-nav-item" data-pane="h3d" type="button">3D 生成</button>
         <button class="settings-nav-item" data-pane="cosmos" type="button" hidden>宇宙主题</button>
         <button class="settings-nav-item" data-pane="mcp" type="button">Agent 连接（MCP）</button>
         <button class="settings-nav-item" data-pane="shortcuts" type="button">快捷键</button>
@@ -75,7 +74,7 @@
 
         <section class="settings-pane" data-pane="gen" hidden>
           <div class="settings-card" id="settings-gen-card">
-            <p class="settings-title">生图模型</p>
+            <p class="settings-title">图片生成</p>
             <div class="settings-gen-engine" id="settings-gen-engine" role="tablist" aria-label="生图引擎">
               <button class="settings-gen-family" data-engine="local" type="button" role="tab">本地模型</button>
               <button class="settings-gen-family" data-engine="api" type="button" role="tab">API</button>
@@ -208,25 +207,6 @@
         </section>
 
         <section class="settings-pane" data-pane="h3d" hidden>
-          <div class="settings-card">
-            <p class="settings-title">本地 3D 生成</p>
-            <p class="settings-hint">
-              右键图片块「生成 3D 模型」：本机从单张图生成几何模型（Hunyuan3D 标准版），结果进 3D 模型库。需要 CUDA 12 显卡，生成时约两分半，期间可以取消。
-            </p>
-            <code class="settings-path" id="settings-h3d-dir"></code>
-            <div class="settings-actions">
-              <button class="plain-btn" id="settings-h3d-check" type="button">检测模型</button>
-              <button class="plain-btn" id="settings-h3d-reveal" type="button">打开所在目录</button>
-            </div>
-            <p class="settings-status" id="settings-h3d-status" hidden></p>
-            <p class="settings-error" id="settings-h3d-error" hidden></p>
-            <p class="settings-hint">
-              权重许可：腾讯混元 3D 2.0 社区许可（欧盟、英国、韩国不可用；商业使用需遵守许可条款，月活超过一百万需申请授权）。
-            </p>
-          </div>
-        </section>
-
-        <section class="settings-pane" data-pane="models" hidden>
           <div class="settings-card" id="settings-models-card">
             <p class="settings-title">3D 模型库</p>
             <p class="settings-hint">
@@ -240,6 +220,59 @@
               <button class="plain-btn" id="settings-models-import" type="button">导入模型…</button>
             </div>
             <p class="settings-error" id="settings-models-error" hidden></p>
+          </div>
+
+          <div class="settings-card">
+            <p class="settings-title">3D 生成</p>
+            <div class="settings-gen-engine" id="settings-h3d-engine" role="tablist" aria-label="3D 生成引擎">
+              <button class="settings-gen-family" data-engine="local" type="button" role="tab">本地模型</button>
+              <button class="settings-gen-family" data-engine="api" type="button" role="tab">API</button>
+            </div>
+            <div id="settings-h3d-local">
+              <p class="settings-hint">
+                右键图片块「生成 3D 模型」：本机从单张图生成几何模型（Hunyuan3D 标准版），结果进 3D 模型库。需要 CUDA 12 显卡，生成时约两分半，期间可以取消。
+              </p>
+              <code class="settings-path" id="settings-h3d-dir"></code>
+              <div class="settings-actions">
+                <button class="plain-btn" id="settings-h3d-check" type="button">检测模型</button>
+                <button class="plain-btn" id="settings-h3d-reveal" type="button">打开所在目录</button>
+              </div>
+              <p class="settings-status" id="settings-h3d-status" hidden></p>
+              <p class="settings-error" id="settings-h3d-error" hidden></p>
+              <p class="settings-hint">
+                权重许可：腾讯混元 3D 2.0 社区许可（欧盟、英国、韩国不可用；商业使用需遵守许可条款，月活超过一百万需申请授权）。
+              </p>
+            </div>
+            <div id="settings-h3d-api" hidden>
+              <p class="settings-hint">
+                云端 3D 生成服务的接入配置（协议、接口地址、Key、模型名）。当前版本云端协议还没接上，生成请用本地模型。
+              </p>
+              <label class="settings-field">
+                <span>协议</span>
+                <select id="settings-h3dapi-protocol">
+                  <option value="hunyuan">Hunyuan3D（腾讯混元）</option>
+                  <option value="tripo">Tripo</option>
+                  <option value="fal">Fal</option>
+                </select>
+              </label>
+              <label class="settings-field">
+                <span>接口地址</span>
+                <input id="settings-h3dapi-url" type="text" spellcheck="false" placeholder="https://…" />
+              </label>
+              <label class="settings-field">
+                <span>模型名</span>
+                <input id="settings-h3dapi-model" type="text" spellcheck="false" placeholder="例如 hunyuan3d-2" />
+              </label>
+              <label class="settings-field">
+                <span>API Key</span>
+                <input id="settings-h3dapi-key" type="password" spellcheck="false" placeholder="sk-…" />
+              </label>
+              <label class="settings-field">
+                <span>并行数</span>
+                <input id="settings-h3dapi-parallel" type="number" min="1" max="10" step="1" value="2" />
+              </label>
+              <p class="settings-error" id="settings-h3dapi-error" hidden></p>
+            </div>
           </div>
         </section>
 

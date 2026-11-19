@@ -19,7 +19,7 @@ use half::f16;
 use ort::execution_providers::{CUDAExecutionProvider, ExecutionProvider};
 use ort::session::Session;
 use ort::value::Tensor;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
 use crate::canvas::CanvasState;
@@ -88,6 +88,60 @@ fn check_models(paths: &ModelPaths) -> Vec<String> {
         }
     }
     missing
+}
+
+/* ---------- 云端 3D 生成接口配置（设置页「3D 生成」里填，本地生成不用它） ---------- */
+
+const API_SETTING_KEY: &str = "h3d_api";
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct H3dApiConfig {
+    pub enabled: bool,
+    pub protocol: String,
+    pub parallel: u32,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+#[tauri::command]
+pub fn h3d_api_get(app: tauri::AppHandle) -> H3dApiConfig {
+    let state = app.state::<crate::db::DbState>();
+    let Ok(conn) = state.0.lock() else {
+        return H3dApiConfig::default();
+    };
+    crate::db::read_setting(&conn, API_SETTING_KEY)
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn h3d_api_set(app: tauri::AppHandle, config: H3dApiConfig) -> Result<H3dApiConfig, String> {
+    let mut next = config;
+    next.protocol = match next.protocol.as_str() {
+        "tripo" => "tripo".to_string(),
+        "fal" => "fal".to_string(),
+        _ => "hunyuan".to_string(),
+    };
+    next.parallel = if next.parallel == 0 { 2 } else { next.parallel.min(10) };
+    next.base_url = next.base_url.trim().trim_end_matches('/').to_string();
+    next.api_key = next.api_key.trim().to_string();
+    next.model = next.model.trim().to_string();
+    if !next.base_url.is_empty()
+        && !next.base_url.starts_with("http://")
+        && !next.base_url.starts_with("https://")
+    {
+        return Err("接口地址要以 http:// 或 https:// 开头".to_string());
+    }
+    let state = app.state::<crate::db::DbState>();
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| "数据库连接状态异常（前一次访问发生 panic）".to_string())?;
+    let text = serde_json::to_string(&next).map_err(|e| format!("3D API 配置存不下来：{e}"))?;
+    crate::db::write_setting(&conn, API_SETTING_KEY, &text)?;
+    Ok(next)
 }
 
 #[derive(Serialize)]
@@ -458,6 +512,20 @@ pub async fn h3d_generate(
             "3D 模型文件不全：缺 {}。到设置里看「3D 生成」",
             missing.join("、")
         ));
+    }
+    {
+        let db = app.state::<crate::db::DbState>();
+        let api_on = db
+            .0
+            .lock()
+            .ok()
+            .and_then(|conn| crate::db::read_setting(&conn, API_SETTING_KEY))
+            .and_then(|text| serde_json::from_str::<H3dApiConfig>(&text).ok())
+            .map(|config| config.enabled)
+            .unwrap_or(false);
+        if api_on {
+            return Err("3D 生成引擎现在是 API 模式，但云端协议还没接上；先在设置里切回本地模型".to_string());
+        }
     }
     let img = image_file_of(&canvas, &id, &item_id)?;
     let stem = img

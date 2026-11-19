@@ -1047,10 +1047,10 @@ const TOOL_DEFS = [
     id: { type: "string", description: "画布 id" },
     srcs: { type: "array", items: { type: "string" }, description: "images/ 下相对路径列表" },
   }, ["id", "srcs"], 120),
-  def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen 生图模型、video 视频生成、models 3D 模型库、mcp Agent 连接、shortcuts 快捷键。", {
+  def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen 图片生成、video 视频生成、h3d 3D 生成、mcp Agent 连接、shortcuts 快捷键。", {
     page: {
       type: "string",
-      enum: ["theme", "data", "gen", "video", "models", "mcp", "shortcuts"],
+      enum: ["theme", "data", "gen", "video", "h3d", "mcp", "shortcuts"],
       description: "要打开的那一页；不给就是主题页",
     },
   }),

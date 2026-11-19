@@ -260,6 +260,8 @@ pub fn run() {
             canvas::canvas_image_url,
             canvas::canvas_open_image,
             h3d::h3d_status,
+            h3d::h3d_api_get,
+            h3d::h3d_api_set,
             h3d::h3d_reveal,
             h3d::h3d_cancel,
             h3d::h3d_generate,

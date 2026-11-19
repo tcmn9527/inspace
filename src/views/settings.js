@@ -1,4 +1,4 @@
-/* 设置窗口的内容：数据文件夹、生图模型、模型库、宇宙贴图、航线、MCP、视频组件。
+/* 设置窗口的内容：数据文件夹、图片生成、模型库、宇宙贴图、航线、MCP、视频组件。
 
    这个模块只管各页里的控件和状态，窗口长什么样、左侧菜单选哪一项由
    settings-window.js 负责。所有路径/模型目录都在 Rust 侧，主窗口和这里读写同一份。
@@ -126,6 +126,15 @@ export function initSettings(options = {}) {
   ui.videoReveal = document.querySelector("#settings-video-reveal");
   ui.videoDirPick = document.querySelector("#settings-video-dir-pick");
   ui.videoDirReset = document.querySelector("#settings-video-dir-reset");
+  ui.h3dEngine = document.querySelector("#settings-h3d-engine");
+  ui.h3dLocalBox = document.querySelector("#settings-h3d-local");
+  ui.h3dApiBox = document.querySelector("#settings-h3d-api");
+  ui.h3dApiProtocol = document.querySelector("#settings-h3dapi-protocol");
+  ui.h3dApiUrl = document.querySelector("#settings-h3dapi-url");
+  ui.h3dApiModel = document.querySelector("#settings-h3dapi-model");
+  ui.h3dApiKey = document.querySelector("#settings-h3dapi-key");
+  ui.h3dApiParallel = document.querySelector("#settings-h3dapi-parallel");
+  ui.h3dApiError = document.querySelector("#settings-h3dapi-error");
   ui.h3dDir = document.querySelector("#settings-h3d-dir");
   ui.h3dCheck = document.querySelector("#settings-h3d-check");
   ui.h3dReveal = document.querySelector("#settings-h3d-reveal");
@@ -138,6 +147,14 @@ export function initSettings(options = {}) {
   ui.modelsError = document.querySelector("#settings-models-error");
 
   ui.h3dCheck.addEventListener("click", () => refreshH3d(true));
+  ui.h3dEngine.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-engine]");
+    if (button) void pickH3dEngine(button.dataset.engine);
+  });
+  for (const field of [ui.h3dApiUrl, ui.h3dApiModel, ui.h3dApiKey, ui.h3dApiParallel]) {
+    field.addEventListener("blur", () => void saveH3dApi());
+  }
+  ui.h3dApiProtocol.addEventListener("change", () => void saveH3dApi());
   ui.h3dReveal.addEventListener("click", () => {
     void invoke("h3d_reveal").catch((error) => showH3dError(String(error)));
   });
@@ -269,6 +286,66 @@ async function refreshH3d(verbose = false) {
   }
 }
 
+/* ---------- 3D 生成引擎：本地模型 / API（二选一） ---------- */
+let h3dApi = { enabled: false, protocol: "hunyuan", parallel: 2, baseUrl: "", apiKey: "", model: "" };
+
+function paintH3dEngine() {
+  const usingApi = Boolean(h3dApi.enabled);
+  if (ui.h3dEngine) {
+    for (const button of ui.h3dEngine.querySelectorAll("[data-engine]")) {
+      const on = button.dataset.engine === (usingApi ? "api" : "local");
+      button.classList.toggle("is-active", on);
+      button.setAttribute("aria-selected", on ? "true" : "false");
+    }
+  }
+  if (ui.h3dLocalBox) ui.h3dLocalBox.hidden = usingApi;
+  if (ui.h3dApiBox) ui.h3dApiBox.hidden = !usingApi;
+}
+
+async function pickH3dEngine(engine) {
+  const want = engine === "api";
+  if (want === Boolean(h3dApi.enabled)) return;
+  try {
+    h3dApi = await invoke("h3d_api_set", { config: { ...h3dApi, enabled: want } });
+    paintH3dEngine();
+  } catch (error) {
+    showH3dError(String(error));
+  }
+}
+
+async function refreshH3dApi() {
+  try {
+    h3dApi = await invoke("h3d_api_get");
+    ui.h3dApiProtocol.value = h3dApi.protocol || "hunyuan";
+    ui.h3dApiUrl.value = h3dApi.baseUrl || "";
+    ui.h3dApiModel.value = h3dApi.model || "";
+    ui.h3dApiKey.value = h3dApi.apiKey || "";
+    ui.h3dApiParallel.value = String(h3dApi.parallel || 2);
+    paintH3dEngine();
+  } catch {
+    /* 读不出来就留空，不打扰 */
+  }
+}
+
+async function saveH3dApi() {
+  try {
+    h3dApi = await invoke("h3d_api_set", {
+      config: {
+        enabled: Boolean(h3dApi.enabled),
+        protocol: ui.h3dApiProtocol.value,
+        parallel: Number(ui.h3dApiParallel.value) || 2,
+        baseUrl: ui.h3dApiUrl.value.trim(),
+        apiKey: ui.h3dApiKey.value.trim(),
+        model: ui.h3dApiModel.value.trim(),
+      },
+    });
+    ui.h3dApiError.hidden = true;
+  } catch (error) {
+    ui.h3dApiError.textContent = String(error);
+    ui.h3dApiError.hidden = false;
+  }
+}
+
 export async function refreshSettings() {
   try {
     currentRoot = await invoke("data_root");
@@ -283,6 +360,7 @@ export async function refreshSettings() {
   refreshVideo();
   refreshModels();
   refreshH3d();
+  refreshH3dApi();
   paintRouteCard();
   renderRoute();
 }
@@ -729,7 +807,7 @@ async function clearCosmosTextures() {
   }
 }
 
-/* ---------- 生图模型 ---------- */
+/* ---------- 图片生成 ---------- */
 
 /* 权重四件：VAE 和视觉投影跟模型一对一、没得挑，DiT 和文本编码器各有量化档。
    打开设置只读一行状态（gen_status 不探测，随时可读）；点「检测模型」才摊开整块结论：

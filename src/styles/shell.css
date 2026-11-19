@@ -265,22 +265,28 @@
   background: var(--surface-2);
 }
 
-.settings-gen-api {
+/* 生图和 3D 生成的 API 配置共用一套表单样式：标签定宽，输入框整宽 */
+.settings-gen-api,
+#settings-h3d-api {
   margin-top: 4px;
 }
 
-.settings-gen-api .settings-field {
+.settings-gen-api .settings-field,
+#settings-h3d-api .settings-field {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
   gap: 10px;
 }
 
-.settings-gen-api .settings-field > span {
+.settings-gen-api .settings-field > span,
+#settings-h3d-api .settings-field > span {
   align-self: center;
 }
 
 .settings-gen-api input,
-.settings-gen-api select {
+.settings-gen-api select,
+#settings-h3d-api input,
+#settings-h3d-api select {
   width: 100%;
   height: 30px;
   padding: 0 8px;
@@ -292,7 +298,9 @@
 }
 
 .settings-gen-api input:focus,
-.settings-gen-api select:focus {
+.settings-gen-api select:focus,
+#settings-h3d-api input:focus,
+#settings-h3d-api select:focus {
   outline: none;
   border-color: var(--accent);
 }

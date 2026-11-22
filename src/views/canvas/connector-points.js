@@ -89,6 +89,9 @@ export function onStageDoubleClick(e) {
     if (hitItem && hitItem.type !== "connector") {
       e.preventDefault();
       e.stopPropagation();
+      /* 顺手选中它：左侧面板树跟着亮底并滚到那一行（updateSelection → syncTreeSelection）。
+         只改锁不改选中时，树里什么都不会动，看着像这一下没生效。 */
+      select(hitItem.id);
       setLocked(hitItem, !hitItem.locked);
       return;
     }

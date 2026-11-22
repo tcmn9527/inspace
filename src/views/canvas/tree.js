@@ -217,6 +217,10 @@ export function renderTree() {
   /* 正在就地改名就别重排：输入框会被排掉，blur 还会误提交一次 */
   if (treeRenaming) return;
   const body = treeUi.body;
+  /* 整棵树是重建的，两个滚动区的位置要自己接住：否则每次保存块
+     （scheduleItemsSave 顺手调这里）都把面板列表弹回顶部，
+     刚滚到选中行又被甩走，看着就像「树不跟着选中走」 */
+  const keepScroll = treeScrollOf(body);
   body.textContent = "";
   /* 画布区和面板区各占一块、各自滚动；中间的分隔条可以上下拖，调两边的高度 */
   const canvasPart = document.createElement("div");
@@ -296,6 +300,24 @@ export function renderTree() {
   panelsPart.append(treeSectionHeader("panels"));
   if (treeSections.panels) renderPanelTree(panelsPart);
   body.append(panelsPart);
+  applyTreeScroll(body, keepScroll);
+}
+
+/* 重建前/后接住两个滚动区的位置：画布区与面板区各自滚，按 data-part 记 */
+function treeScrollOf(body) {
+  const out = {};
+  for (const part of body?.querySelectorAll(".space-tree-part") || []) {
+    out[part.dataset.part] = part.scrollTop;
+  }
+  return out;
+}
+
+function applyTreeScroll(body, saved) {
+  if (!saved) return;
+  for (const part of body?.querySelectorAll(".space-tree-part") || []) {
+    const top = saved[part.dataset.part];
+    if (top) part.scrollTop = top;
+  }
 }
 
 /* 拖分隔条：画布区变成固定高度，面板区吃掉剩下的空间；松手存偏好 */

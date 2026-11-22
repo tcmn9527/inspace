@@ -283,7 +283,6 @@ export function itemMenuEntries(item, x, y, depth = 0) {
         item.type === "file" ? () => startFileEdit(item.id) : item.type === "text" ? () => startTextEdit(item.id) : () => startNoteEdit(item.id);
       entries.push({ label: "编辑", onClick: edit });
     }
-    if (PROP_KIND[item.type]) entries.push({ label: "属性", onClick: () => openItemProps(item) });
     if (revealTarget(item)) {
       entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
     }
@@ -295,6 +294,8 @@ export function itemMenuEntries(item, x, y, depth = 0) {
     if (compare) entries.push(compare);
     entries.push("-");
     entries.push({ label: "删除", danger: true, onClick: () => deleteItems([item.id]) });
+    /* 属性能看清这块到底是什么，放最后一行收尾（系统右键也是这个习惯） */
+    if (PROP_KIND[item.type]) entries.push({ label: "属性", onClick: () => openItemProps(item) });
     return entries;
   }
   const entries = [];
@@ -551,10 +552,6 @@ export function itemMenuEntries(item, x, y, depth = 0) {
   const saveAs = imageSaveAsEntry(item);
   if (saveAs) entries.push(saveAs);
   entries.push(...h3dEntries(item));
-  /* 属性：笔记报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行 */
-  if (PROP_KIND[item.type]) {
-    entries.push({ label: "属性", onClick: () => openItemProps(item) });
-  }
   if (entries.length) entries.push("-");
   /* 锁定贴着删除放，都在分隔线下面 */
   if (item.type !== "connector") {
@@ -563,6 +560,11 @@ export function itemMenuEntries(item, x, y, depth = 0) {
     if (lockAll) entries.push(lockAll);
   }
   entries.push({ label: "删除", danger: true, onClick: () => deleteItems([item.id]) });
+  /* 属性：笔记报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行。
+     位置固定在最后一行，和系统右键一致，也不打断上面那串操作。 */
+  if (PROP_KIND[item.type]) {
+    entries.push({ label: "属性", onClick: () => openItemProps(item) });
+  }
   return entries;
 }
 

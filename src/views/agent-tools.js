@@ -656,6 +656,10 @@ const TOOL_DEFS = [
       description: "文字块垂直对齐，默认 top；块被拉高后才看得出来",
     },
     radius: { type: "number", description: "圆角像素（px）：矩形/文字/图片/笔记/文件都认，椭圆没有圆角" },
+    container: {
+      type: "boolean",
+      description: "rect 专用：建成容器——框里已有的块会认它当爹，拖容器就连块一起走，左侧树也归到它名下",
+    },
     borderWidth: { type: "number", description: "边框宽度（px，0 为无边框）：矩形/椭圆/文字/图片默认 2，笔记/文件默认 1" },
     locked: { type: "boolean", description: "建好就锁住（锁住的块不能移动、缩放、改内容、删除，要先解锁）" },
     color: COLOR,
@@ -715,6 +719,10 @@ const TOOL_DEFS = [
     color: { type: "string", description: "文字色" },
     textColor: { type: "string", description: "文字色" },
     text: { type: "string", description: "文字块正文" },
+    treeName: {
+      type: "string",
+      description: "左侧面板树上的名字（留空恢复成「#序号 + 类型」）。成百上千块按编号命名时用它，比一个个右键改名快",
+    },
     markdown: { type: "string", description: "画布内笔记块的 Markdown 正文（引用外部 .md 的块用 note_write）" },
     name: { type: "string", description: "产品卡：名称" },
     brand: { type: "string", description: "产品卡：品牌" },
@@ -1168,7 +1176,7 @@ function pick(args, keys) {
 
 const BLOCK_FIELDS = [
   "x", "y", "w", "h", "x2", "y2", "fontSize", "align", "vAlign", "radius", "borderWidth", "locked",
-  "borderColor", "fillColor", "color", "textColor", "text", "markdown",
+  "borderColor", "fillColor", "color", "textColor", "text", "markdown", "treeName",
   "name", "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
   "seconds", "width", "height",
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
@@ -1614,7 +1622,7 @@ async function dispatch(name, args) {
         canvasAgent.blockCreate(
           pick(args, [
             "type", "x", "y", "w", "h", "text", "markdown", "name", "path", "mode", "as",
-            "fontSize", "align", "vAlign", "radius", "borderWidth", "locked", "color", "textColor", "borderColor", "fillColor",
+            "fontSize", "align", "vAlign", "radius", "borderWidth", "locked", "container", "color", "textColor", "borderColor", "fillColor",
             "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
             "paperColor", "cmds", "symbols", "light", "parts", "surfaces", "camera", "groundColor", "shadow",
             ...GEN_KEYS,

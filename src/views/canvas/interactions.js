@@ -1,7 +1,7 @@
 /* 从 canvas.js 拆出：interactions */
 
 import { moveGroup } from "./layout.js";
-import { active, beginMarquee, blurMinimapFocus, clientToWorld, commitEditing, current, drag, dropTool, edgeLabelEditor, editingId, fileEditor, findItem, isContainer, select, selectedIds, setDrag, startDraw, tool, ui } from "../canvas.js";
+import { active, beginMarquee, blurMinimapFocus, clientToWorld, commitEditing, current, drag, dropTool, edgeLabelEditor, editingId, fileEditor, findItem, isContainer, select, selectedIds, setDrag, startDraw, tool } from "../canvas.js";
 
 /* ---------- 指针交互 ---------- */
 
@@ -86,8 +86,8 @@ export function onStagePointerDown(e) {
   /* Ctrl/⌘ 按住时进入框选：起点在块上或空白都一样，拖动拉框；不拖仍是 Ctrl 点击加选 */
   if ((e.ctrlKey || e.metaKey) && !e.altKey && tool === "select") {
     e.preventDefault();
-    /* 捕获指针：拖出窗口边界也能继续收 move，框才拉得到远处 */
-    ui.stage.setPointerCapture?.(e.pointerId);
+    /* 指针捕获要等真的拖起来再做（见 alt-measure 的 marquee 分支）：按下就捕获的话，
+       后面那次 click / dblclick 会被改派到画布上，Ctrl+双击锁面板就落不到块上了 */
     setDrag(beginMarquee(e, target?.dataset.id || null));
     return;
   }

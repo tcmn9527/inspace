@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：tools-camera */
 
 import { MAX_SCALE, MIN_SCALE, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, ZOOM_HOLD_DELAY, ZOOM_HOLD_INTERVAL, active, agentRevealBlock, assignTool, clamp, ctrlHeld, current, editingId, findItem, fileTypeMenuItems, insertFileFromPicker, insertGenPanel, insertPoint, insertVideoPanel, itemBounds, itemEls, makeScene, normalizeSceneParts, noteEditor, openMenu, persistScene, placeBlock, positionEdgeLabelEditor, sceneLightOf, sceneSurfacesOf, scheduleCameraSave, scheduleItemsSave, select, setCosmosCamera, setSceneCameraScale, tool, toolboxMarkup, ui, updateSelection } from "../canvas.js";
+import { refreshMinimap } from "../minimap.js";
 import { clampCameraXToPage } from "./page-width-core.js";
 
 /* ---------- 工具与相机 ---------- */
@@ -278,6 +279,10 @@ export function applyCamera() {
      不重画的话放到 4 倍就是一坨马赛克 */
   setSceneCameraScale(camera.scale);
   scheduleCulling();
+  /* 鸟瞰窗跟着相机走：以前只有拖块结束、改画布宽度才重画，平移/缩放/agent 改块之后
+     它还停在上一帧的内容上（看着就像「鸟瞰图没显示全」）。这里每帧只排队一次，
+     几百个块的矩形重画一帧也就一毫秒量级。 */
+  refreshMinimap();
 }
 
 /* 视口裁剪：只渲染视野附近的面板。上千块的参考画布如果全部挂在 DOM 里，

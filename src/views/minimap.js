@@ -309,9 +309,11 @@ function redraw() {
     (viewport.h * VIEWPORT_FIT) / 2,
   );
   const fitH = halfH * 2;
-  /* 固定宽度：横向视野钉死在 [−PAGE_FIT_MARGIN/2, W+PAGE_FIT_MARGIN/2]，缩放也由横向独占
-     —— 纵向内容再长也不许把 s 拉小，否则横向就会露出页面外一大片灰底。
-     纵向仍以内容中心对齐，超出小窗的部分靠下面 box 的 clamp 贴边提示偏哪一边。 */
+  /* 固定宽度：横向视野钉死在 [−PAGE_FIT_MARGIN/2, W+PAGE_FIT_MARGIN/2]，缩放优先由横向定
+     —— 页面正常比例时纵向内容再长也不把 s 拉小，免得横向露出页面外一大片灰底。
+     但内容比小窗高得多时（整面 2 万像素高的图鉴墙），横向定出的 s 会让纵向下半截永远
+     看不见。这时按纵向也收一次（取两者更小的那个），宁可横向多露一点灰，也要把全部内容
+     框进小窗——「鸟瞰图看不全」比「两侧有灰边」难用得多。 */
   const fitW =
     pageWidth > 0
       ? pageWidth + PAGE_FIT_MARGIN
@@ -320,10 +322,7 @@ function redraw() {
           viewport.w * VIEWPORT_FIT,
         );
   const cx = pageWidth > 0 ? pageWidth / 2 : (content.x1 + content.x2) / 2;
-  const s =
-    pageWidth > 0
-      ? (w - EDGE_PAD * 2) / fitW
-      : Math.min((w - EDGE_PAD * 2) / fitW, (h - EDGE_PAD * 2) / fitH);
+  const s = Math.min((w - EDGE_PAD * 2) / fitW, (h - EDGE_PAD * 2) / fitH);
   const ox = (w - fitW * s) / 2 - (cx - fitW / 2) * s;
   const oy = (h - fitH * s) / 2 - (cy - fitH / 2) * s;
 

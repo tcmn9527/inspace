@@ -1,9 +1,10 @@
 /* 从 canvas.js 拆出：delivery */
 
 import { BORDER_MAX_WIDTH, ratio } from "../canvas-items.js";
+import { toggleContainer } from "./containers.js";
 import { clampXToPage } from "./page-width.js";
 import { BORDER_DEFAULT_WIDTH } from "../canvas-items.js";
-import { GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_TEXT_MAX, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, addItemElement, agentFindSpace, agentImportFile, agentOpenSpace, agentPlacePoint, agentRequireItem, agentRequireSpace, agentSummary, applyColor, applyGenDefaultsToItem, applyGenFields, applyProductFields, boundsOfItem, bytesToBase64, clamp, commitEditing, connectorGeometry, current, deleteItems, edgeLabelEditor, editingId, exporter, findItem, fitGenPrompt, flushBlockContents, flushItems, hydrateNoteImages, imageCache, imageSize, itemBounds, itemEls, landBlock, makeBox, makeConnector, makeGen, makeLine, makeNote, makePage, makePicture, makePlan, makeProduct, makeQuote, makeScene, makeText, makeVideoGen, mergePictureSymbols, moveLayer, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmds, normalizePictureSymbols, normalizeSceneCamera, normalizeSceneParts, numOr, persistGen, persistNote, persistPicture, persistScene, pictureWashed, pinConnectorSides, placeBlock, promptDialog, refreshConnectors, refreshGenPanel, refreshPictureChrome, refreshQuotes, refreshVideoPanel, rejectFatalDrop, renderMarkdown, replaceSelection, resolvePictureImages, roomShellParts, roomShellSurfaces, sceneLightOf, sceneSurfacesOf, sceneView, scheduleItemsSave, select, selectedIds, setFontSize, setSceneFurnitureSelection, setTextAlign, stageCenterWorld, store, syncConnectorElement, syncItemElement, syncSelectedClasses, updateSelection } from "../canvas.js";
+import { GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_TEXT_MAX, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, addItemElement, agentFindSpace, agentImportFile, agentOpenSpace, agentPlacePoint, agentRequireItem, agentRequireSpace, agentSummary, applyColor, applyGenDefaultsToItem, applyGenFields, applyProductFields, boundsOfItem, bytesToBase64, clamp, commitEditing, connectorGeometry, current, deleteItems, edgeLabelEditor, editingId, exporter, findItem, fitGenPrompt, flushBlockContents, flushItems, hydrateNoteImages, imageCache, imageSize, itemBounds, itemEls, landBlock, makeBox, makeConnector, makeGen, makeLine, makeNote, makePage, makePicture, makePlan, makeProduct, makeQuote, makeScene, makeText, makeVideoGen, mergePictureSymbols, moveLayer, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmds, normalizePictureSymbols, normalizeSceneCamera, normalizeSceneParts, numOr, persistGen, persistNote, persistPicture, persistScene, pictureWashed, pinConnectorSides, placeBlock, promptDialog, refreshConnectors, refreshGenPanel, refreshPictureChrome, refreshQuotes, refreshTree, refreshVideoPanel, rejectFatalDrop, renderMarkdown, replaceSelection, resolvePictureImages, roomShellParts, roomShellSurfaces, sceneLightOf, sceneSurfacesOf, sceneView, scheduleItemsSave, select, selectedIds, setFontSize, setSceneFurnitureSelection, setTextAlign, stageCenterWorld, store, syncConnectorElement, syncItemElement, syncSelectedClasses, updateSelection } from "../canvas.js";
 
 /* ---------- 提案页与客户版交付 ---------- */
 
@@ -523,6 +524,8 @@ export async function agentCreateBlock(spec = {}) {
       item.radius = Math.max(0, Math.round(numOr(spec.radius, 0)));
     }
     const placed = placeBlock(item);
+    /* 建完再编容器：这一步会按几何把框里已有的块认下来，并把框垫到它们底下 */
+    if (type === "rect" && spec.container === true) toggleContainer(placed);
     return agentSummary(placed);
   }
 
@@ -951,6 +954,15 @@ export async function agentUpdateBlock(id, patch = {}) {
   if (patch.locked !== undefined) item.locked = patch.locked === true;
   /* 客户版隐藏是所有块都有的开关，连线没有内容，不参与 */
   if (patch.internal !== undefined && item.type !== "connector") item.internal = patch.internal === true;
+  /* 左侧面板树上的名字：留空就回到「#序号 + 类型」。图鉴这类成百上千块的东西
+     只能靠它按编号命名，界面上一个个右键改不现实 */
+  let renamed = false;
+  if (patch.treeName !== undefined) {
+    const treeName = String(patch.treeName ?? "").trim();
+    if (treeName) item.treeName = treeName.slice(0, 60);
+    else delete item.treeName;
+    renamed = true;
+  }
   const el = itemEls.get(item.id);
   let geometry = false;
 
@@ -963,8 +975,9 @@ export async function agentUpdateBlock(id, patch = {}) {
     item.y = Number(patch.y);
     geometry = true;
   }
-  if (item.type !== "text" && patch.w !== undefined) {
-    item.w = Math.max(8, numOr(patch.w, item.w));
+  if (patch.w !== undefined) {
+    /* 文字块也认宽度：整理图鉴时说明要收到图下面，宽度得跟着格子走 */
+    item.w = Math.max(item.type === "text" ? 24 : 8, numOr(patch.w, item.w));
     /* 固定宽度画布：宽度不许超过页面，夹完顺便把 x 收回页内 */
     clampXToPage(item);
     geometry = true;
@@ -1145,11 +1158,16 @@ export async function agentUpdateBlock(id, patch = {}) {
     }
   }
   if (el) syncItemElement(el, item);
+  /* 文字块换了宽度会重新折行，高度跟着量一次；被视口裁掉的量不到，回到视野里再补 */
+  if (item.type === "text" && patch.w !== undefined && el && !el.classList.contains("is-culled")) {
+    item.h = el.offsetHeight;
+  }
   if (item.type === "product") refreshQuotes();
   if (geometry) {
     updateSelection();
     refreshConnectors();
   }
+  if (renamed) refreshTree();
   scheduleItemsSave();
   if (item.type === "note" && patch.borderColor !== undefined) void persistNote(item);
   return pictureDropped.length ? { ...agentSummary(item), dropped: pictureDropped } : agentSummary(item);

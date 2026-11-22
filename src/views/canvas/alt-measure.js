@@ -228,6 +228,12 @@ export function onWindowPointerMove(e) {
     const dy = e.clientY - drag.startClient.y;
     if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     drag.moved = true;
+    /* 真拖起来才捕获指针：按下即捕获会把这次点击的 click / dblclick 改派到画布上，
+       Ctrl+双击锁面板就认不到块。拖出窗口边界仍要收 move，所以在这里补一次。 */
+    if (!drag.captured) {
+      drag.captured = true;
+      ui.stage.setPointerCapture?.(e.pointerId);
+    }
     updateMarquee(drag, e.clientX, e.clientY);
     return;
   }

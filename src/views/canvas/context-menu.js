@@ -1,7 +1,7 @@
 /* 从 canvas.js 拆出：context-menu */
 
-import { h3dEntry } from "./h3d-ui.js";
-import { BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CLOSE_X_SVG, PAGE_RATIOS, PRESETS, absolutePathOf, addSceneModelFlow, cancelPlanCalibration, changeProductImage, clientToWorld, collectPictureImageSrcs, copyItems, createFurnitureFlow, current, dropGenRun, dropRegionImage, dropVideoRun, ebookKey, ebookTocCache, editingId, exportPictureImage, exportQuote, exportSceneFlow, fileEditor, filePreviewCache, findItem, flushFileEditor, genTimers, imageCache, importCsvFromQuote, isContainer, isFileEditable, itemBounds, itemEls, modalOpen, newSceneForProduct, noteEditor, noteImageCache, noteTimers, openImageCompare, openMenu, ownedMembers, pickProductModel, pictureEditors, pictureMenuEntries, pictureTimers, placeProductInSceneFlow, placeProductOnPlanFlow, planCalibration, previewKey, promptDialog, refreshPictureChrome, refreshQuotes, renamePageFlow, revealFileBlock, revealTarget, scenePlacementActive, sceneTimers, scheduleItemsSave, select, selectedIds, setConnectorBend, setEditingId, setModalOpen, setNoteEditor, setPageOrderFlow, setPageRatio, setSceneCameraPreset, setScenePlacementMode, showError, showToast, srcInUse, startFileEdit, startNoteEdit, startPlanCalibration, store, syncConnector, syncItemElement, toggleContainer, toolMenuEntries, updateSelection, videoControlOf } from "../canvas.js";
+import { h3dEntries } from "./h3d-ui.js";
+import { BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CLOSE_X_SVG, PAGE_RATIOS, PRESETS, absolutePathOf, addSceneModelFlow, cancelPlanCalibration, changeProductImage, clientToWorld, collectPictureImageSrcs, copyItems, createFurnitureFlow, current, dropGenRun, dropRegionImage, dropVideoRun, ebookKey, ebookTocCache, editingId, exportPictureImage, exportQuote, exportSceneFlow, fileEditor, filePreviewCache, findItem, flushFileEditor, genTimers, imageCache, importCsvFromQuote, isContainer, isFileEditable, itemBounds, itemEls, modalOpen, newSceneForProduct, noteEditor, noteImageCache, noteTimers, openImageCompare, openMenu, ownedMembers, pickProductModel, pictureEditors, pictureMenuEntries, pictureTimers, placeProductInSceneFlow, placeProductOnPlanFlow, planCalibration, previewKey, promptDialog, refreshFileBlock, refreshPictureChrome, refreshQuotes, renamePageFlow, revealFileBlock, revealTarget, scenePlacementActive, sceneTimers, scheduleItemsSave, select, selectedIds, setConnectorBend, setEditingId, setModalOpen, setNoteEditor, setPageOrderFlow, setPageRatio, setSceneCameraPreset, setScenePlacementMode, showError, showToast, srcInUse, startFileEdit, startNoteEdit, startTextEdit, startPlanCalibration, store, syncConnector, syncItemElement, toggleContainer, toolMenuEntries, updateSelection, videoControlOf } from "../canvas.js";
 
 /* ---------- 右键菜单 ---------- */
 
@@ -275,14 +275,21 @@ export function itemMenuEntries(item, x, y, depth = 0) {
     if (lockAll) entries.push(lockAll);
     const below = selectBelowEntry(item, x, y, depth);
     if (below) entries.push(below);
+    if (item.type === "file" && item.text && !item.linked) {
+      entries.push({ label: "修改文件名…", onClick: () => void renameFileBlock(item) });
+    }
+    if (isFileEditable(item) || item.type === "text" || item.type === "note") {
+      const edit =
+        item.type === "file" ? () => startFileEdit(item.id) : item.type === "text" ? () => startTextEdit(item.id) : () => startNoteEdit(item.id);
+      entries.push({ label: "编辑", onClick: edit });
+    }
     if (PROP_KIND[item.type]) entries.push({ label: "属性", onClick: () => openItemProps(item) });
     if (revealTarget(item)) {
       entries.push({ label: "在文件夹中显示", onClick: () => revealFileBlock(item) });
     }
     const lockedSave = imageSaveAsEntry(item);
     if (lockedSave) entries.push(lockedSave);
-    const lockedH3d = h3dEntry(item);
-    if (lockedH3d) entries.push(lockedH3d);
+    entries.push(...h3dEntries(item));
     /* 对比是只读查看，锁着也允许 */
     const compare = compareImagesEntry(item);
     if (compare) entries.push(compare);
@@ -399,6 +406,9 @@ export function itemMenuEntries(item, x, y, depth = 0) {
   } else if (item.type === "file") {
     if (isFileEditable(item)) {
       entries.push({ label: "编辑", onClick: () => startFileEdit(item.id) });
+    }
+    if (item.text && !item.linked) {
+      entries.push({ label: "修改文件名…", onClick: () => void renameFileBlock(item) });
     }
     entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
     entries.push({
@@ -540,8 +550,7 @@ export function itemMenuEntries(item, x, y, depth = 0) {
   }
   const saveAs = imageSaveAsEntry(item);
   if (saveAs) entries.push(saveAs);
-  const h3d = h3dEntry(item);
-  if (h3d) entries.push(h3d);
+  entries.push(...h3dEntries(item));
   /* 属性：笔记报类型，媒体和文件类报绝对路径。文字、图形、连线没有「属性」这一行 */
   if (PROP_KIND[item.type]) {
     entries.push({ label: "属性", onClick: () => openItemProps(item) });
@@ -966,4 +975,38 @@ export function removeItemFromDom(id) {
   const el = itemEls.get(id);
   if (el) el.remove();
   itemEls.delete(id);
+}
+
+/* 文本文件块改名：只改复制进画布的那份（files/ 下），扩展名保持不变。
+   引用态没有这一项——改的就是用户磁盘上的原文件了。 */
+async function renameFileBlock(item) {
+  if (!current || item.linked) return;
+  const { invoke } = window.__TAURI__?.core || {};
+  if (typeof invoke !== "function") return;
+  const ext = String(item.ext || "").toLowerCase();
+  const oldName = String(item.name || "");
+  const base =
+    ext && oldName.toLowerCase().endsWith(`.${ext}`) ? oldName.slice(0, -(ext.length + 1)) : oldName;
+  const next = await promptDialog({
+    title: "修改文件名",
+    label: ext ? `扩展名 .${ext} 保持不变` : "",
+    value: base,
+    okText: "改名",
+  });
+  if (!next || next === base) return;
+  try {
+    const res = await invoke("canvas_rename_file", {
+      id: current.meta.id,
+      itemId: item.id,
+      name: next,
+    });
+    const same = findItem(item.id);
+    if (!same) return;
+    same.name = res.name;
+    same.src = res.src;
+    scheduleItemsSave();
+    refreshFileBlock(same);
+  } catch (error) {
+    showError(error);
+  }
 }

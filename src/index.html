@@ -237,6 +237,9 @@
 
         <div class="canvas-stage" id="canvas-stage">
           <canvas class="canvas-backdrop" id="canvas-cosmos" hidden aria-hidden="true"></canvas>
+          <!-- 固定宽度时画白页/灰底：视口大小的渐变层，pointer-events:none 不吃事件，
+               夹在星空底和连线层之间，既不遮连线也不挡块的命中 -->
+          <div class="canvas-page-shade" id="canvas-page-shade" hidden aria-hidden="true"></div>
           <svg class="canvas-edge-layer" id="canvas-edge-layer" aria-hidden="true">
             <g id="canvas-edge-transform"></g>
           </svg>

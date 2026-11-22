@@ -14,6 +14,7 @@ export const rawExporter = createExporter({
   },
   getMeta: () => current?.meta || {},
   getStage: () => ui.stage,
+  getPageWidth: () => current?.pageWidth || 0,
   /* 用户此刻看到的这一屏，换算成世界坐标的矩形 */
   getViewportBox: () => {
     if (!current) return null;

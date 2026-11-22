@@ -28,6 +28,7 @@ use crate::store::{DataRoot, GEN_DIR, LIBRARY_DIR};
 mod geo;
 mod pre;
 mod tables;
+pub mod tex;
 
 const H3D_SUB: &str = "h3d";
 const N_TOK: usize = 3072;
@@ -50,6 +51,17 @@ struct ModelPaths {
 
 fn model_root(data: &DataRoot) -> PathBuf {
     data.dir(GEN_DIR).join(H3D_SUB)
+}
+
+/// 设置页把 3D 引擎切到 API 模式时，本地生成要被明确拦住。
+fn api_enabled(app: &tauri::AppHandle) -> bool {
+    let db = app.state::<crate::db::DbState>();
+    db.0.lock()
+        .ok()
+        .and_then(|conn| crate::db::read_setting(&conn, API_SETTING_KEY))
+        .and_then(|text| serde_json::from_str::<H3dApiConfig>(&text).ok())
+        .map(|config| config.enabled)
+        .unwrap_or(false)
 }
 
 fn model_paths(data: &DataRoot) -> ModelPaths {
@@ -150,6 +162,9 @@ pub struct H3dStatus {
     pub ok: bool,
     pub dir: String,
     pub missing: Vec<String>,
+    /// 纹理阶段依赖（libtorch + TorchScript 模型 + 常量）就绪情况
+    pub texture_ok: bool,
+    pub texture_missing: Vec<String>,
 }
 
 #[tauri::command]
@@ -157,10 +172,14 @@ pub fn h3d_status(state: tauri::State<'_, crate::store::StoreState>) -> H3dStatu
     let data = crate::store::root_handle(&state);
     let paths = model_paths(&data);
     let missing = check_models(&paths);
+    let texture_missing = tex::check_tex_assets(&data);
+    let texture_ok = texture_missing.is_empty();
     H3dStatus {
         ok: missing.is_empty(),
         dir: model_root(&data).to_string_lossy().to_string(),
         missing,
+        texture_ok,
+        texture_missing,
     }
 }
 
@@ -351,13 +370,17 @@ fn randn(n: usize, seed: u64) -> Vec<f32> {
 struct Progress<'a> {
     app: &'a tauri::AppHandle,
     cancel: &'a AtomicBool,
+    /// 阶段局部 0..1 → 全局进度：offset + value * scale
+    scale: f64,
+    offset: f64,
 }
 
 impl Progress<'_> {
     fn report(&self, stage: &str, value: f64) {
+        let global = (self.offset + value * self.scale).clamp(0.0, 1.0);
         let _ = self.app.emit(
             "h3d-progress",
-            serde_json::json!({ "stage": stage, "value": value.clamp(0.0, 1.0) }),
+            serde_json::json!({ "stage": stage, "value": global }),
         );
     }
     fn check(&self) -> Result<(), String> {
@@ -513,19 +536,8 @@ pub async fn h3d_generate(
             missing.join("、")
         ));
     }
-    {
-        let db = app.state::<crate::db::DbState>();
-        let api_on = db
-            .0
-            .lock()
-            .ok()
-            .and_then(|conn| crate::db::read_setting(&conn, API_SETTING_KEY))
-            .and_then(|text| serde_json::from_str::<H3dApiConfig>(&text).ok())
-            .map(|config| config.enabled)
-            .unwrap_or(false);
-        if api_on {
-            return Err("3D 生成引擎现在是 API 模式，但云端协议还没接上；先在设置里切回本地模型".to_string());
-        }
+    if api_enabled(&app) {
+        return Err("3D 生成引擎现在是 API 模式，但云端协议还没接上；先在设置里切回本地模型".to_string());
     }
     let img = image_file_of(&canvas, &id, &item_id)?;
     let stem = img
@@ -551,6 +563,8 @@ pub async fn h3d_generate(
         let progress = Progress {
             app: &app_for_job,
             cancel: cancel.as_ref(),
+            scale: 1.0,
+            offset: 0.0,
         };
         generate_glb(&img, &paths, seed, &progress).map(|bytes| (bytes, started.elapsed()))
     })

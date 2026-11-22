@@ -2,6 +2,7 @@
 
 import { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, AUDIO_MIN_HEIGHT, AUDIO_MIN_WIDTH, BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CARD_DEFAULT_BORDER_WIDTH, CARD_DEFAULT_RADIUS, DEFAULT_BORDER, DOCX_DEFAULT_HEIGHT, DOCX_DEFAULT_WIDTH, DOCX_MIN_HEIGHT, DOCX_MIN_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, EBOOK_MIN_HEIGHT, EBOOK_MIN_WIDTH, FILE_DEFAULT_HEIGHT, FILE_DEFAULT_WIDTH, FILE_MIN_HEIGHT, FILE_MIN_WIDTH, GEN_CFG_AUTO, GEN_CFG_MAX, GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_IMAGE_DEFAULT, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_MODES, GEN_MODE_DEFAULT, GEN_STEPS_AUTO, GEN_STEPS_MAX, GEN_STRENGTH_DEFAULT, GEN_STRENGTH_MAX, GEN_STRENGTH_MIN, GEN_TEXT_MAX, GEN_VIDEO_DEFAULT_HEIGHT, GEN_VIDEO_DEFAULT_WIDTH, GEN_VIDEO_MIN_HEIGHT, GEN_VIDEO_MIN_WIDTH, GEN_VIDEO_SECONDS_DEFAULT, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PPTX_DEFAULT_HEIGHT, PPTX_DEFAULT_WIDTH, PPTX_MIN_HEIGHT, PPTX_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_RADIUS, TEXT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, VIDEO_MIN_HEIGHT, VIDEO_MIN_WIDTH, XLSX_DEFAULT_HEIGHT, XLSX_DEFAULT_WIDTH, XLSX_MIN_HEIGHT, XLSX_MIN_WIDTH } from "./constants.js";
 import { snapGenSize } from "./gen-makes.js";
+import { sanitizeInlineHtml } from "../inline-html.js";
 import { normalizeHidden, normalizeLight, normalizePictureCmds, normalizePictureSymbols } from "./picture.js";
 import { normalizePlanAreas, normalizePlanCalibration, normalizePlanCameras, normalizePlanFootprints } from "./plan.js";
 import { normalizeSceneCamera, normalizeSceneParts, normalizeSceneSurfaces } from "./scene-parts.js";
@@ -251,11 +252,17 @@ export function normalizeBlock(raw) {
       ext: typeof raw.ext === "string" ? raw.ext : "",
       size: Math.max(0, num(raw.size)),
       text: raw.text === true,
+      /* 选中文字设的字级样式只存在画布这块上，不写回 .txt / .md 源文件。
+         复制块带着它一起走；落进内存前先过白名单，别让外部 HTML 混进来。 */
+      ...(typeof raw.richHtml === "string" && raw.richHtml ? { richHtml: sanitizeInlineHtml(raw.richHtml) } : {}),
       /* 引用态 src 就是原文件绝对路径，画布 files/ 里没有副本 */
       linked: raw.linked === true,
       /* PDF 块读到哪儿是这块自己的状态：第几页 + 这一页滚过去几成，重开接着读 */
       page: Math.max(1, Math.trunc(num(raw.page, 1))),
       pageFrac: Math.min(1, Math.max(0, num(raw.pageFrac, 0))),
+      /* 文本预览读到哪儿：滚过的比例（0~1）。存比例不存像素，块被拉宽拉窄、
+         正文重新排版后位置依然对得上；重开画布、切回浏览态都接着上次读。 */
+      readFrac: Math.min(1, Math.max(0, num(raw.readFrac, 0))),
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
       fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
       borderWidth: Math.min(

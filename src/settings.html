@@ -231,6 +231,7 @@
             <div id="settings-h3d-local">
               <p class="settings-hint">
                 右键图片块「生成 3D 模型」：本机从单张图生成几何模型（Hunyuan3D 标准版），结果进 3D 模型库。需要 CUDA 12 显卡，生成时约两分半，期间可以取消。
+                「生成带纹理的 3D 模型」会连颜色纹理一起做，总共约五分钟。
               </p>
               <code class="settings-path" id="settings-h3d-dir"></code>
               <div class="settings-actions">
@@ -239,6 +240,7 @@
               </div>
               <p class="settings-status" id="settings-h3d-status" hidden></p>
               <p class="settings-error" id="settings-h3d-error" hidden></p>
+              <p class="settings-error" id="settings-h3d-tex-error" hidden></p>
               <p class="settings-hint">
                 权重许可：腾讯混元 3D 2.0 社区许可（欧盟、英国、韩国不可用；商业使用需遵守许可条款，月活超过一百万需申请授权）。
               </p>

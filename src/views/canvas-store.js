@@ -9,6 +9,8 @@ export const createCanvas = (name, parent) => invoke("canvas_create", { name, pa
 export const openCanvas = (id) => invoke("canvas_open", { id });
 export const saveCanvasItems = (id, items) => invoke("canvas_save_items", { id, items });
 export const saveCanvasCamera = (id, camera) => invoke("canvas_save_camera", { id, camera });
+/* 固定页面宽度：传 null 退回无限画布 */
+export const saveCanvasPageWidth = (id, pageWidth) => invoke("canvas_set_page_width", { id, pageWidth });
 export const renameCanvas = (id, name) => invoke("canvas_rename", { id, name });
 /* 复制整个画布到别的分组：独立副本新 id；不支持移动，打开中的画布路径不变 */
 export const copyCanvas = (id, parent) => invoke("canvas_copy", { id, parent: parent || "" });
@@ -134,6 +136,9 @@ export const readCanvasNoteImage = (id, itemId, rel) =>
 /* 画布自己的笔记：一块一份文件，住在 <画布>/notes 里。 */
 export const readNoteText = (id, itemId) => invoke("canvas_read_note", { id, itemId });
 export const writeNoteText = (id, itemId, text) => invoke("canvas_write_note", { id, itemId, text });
+/* 复制 Markdown 文件块：图床 notes/<块id>/ 搬一份、正文里旧块路径换成新块 */
+export const duplicateFileAssets = (id, itemId, toId, toItemId, toSrc) =>
+  invoke("canvas_duplicate_file_assets", { id, itemId, toId, toItemId, toSrc });
 export const duplicateNote = (id, itemId, toId, toItem) =>
   invoke("canvas_duplicate_note", { id, itemId, toId, toItem });
 export const deleteNote = (id, itemId) => invoke("canvas_delete_note", { id, itemId });

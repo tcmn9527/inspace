@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：tools-camera */
 
-import { MAX_SCALE, MIN_SCALE, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, ZOOM_HOLD_DELAY, ZOOM_HOLD_INTERVAL, active, agentRevealBlock, assignTool, clamp, ctrlHeld, current, editingId, findItem, fileTypeMenuItems, insertFileFromPicker, insertGenPanel, insertPoint, insertVideoPanel, itemEls, makeScene, normalizeSceneParts, noteEditor, openMenu, persistScene, placeBlock, positionEdgeLabelEditor, sceneLightOf, sceneSurfacesOf, scheduleCameraSave, scheduleItemsSave, select, setCosmosCamera, setSceneCameraScale, tool, toolboxMarkup, ui, updateSelection } from "../canvas.js";
+import { MAX_SCALE, MIN_SCALE, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, ZOOM_HOLD_DELAY, ZOOM_HOLD_INTERVAL, active, agentRevealBlock, assignTool, clamp, ctrlHeld, current, editingId, findItem, fileTypeMenuItems, insertFileFromPicker, insertGenPanel, insertPoint, insertVideoPanel, itemBounds, itemEls, makeScene, normalizeSceneParts, noteEditor, openMenu, persistScene, placeBlock, positionEdgeLabelEditor, sceneLightOf, sceneSurfacesOf, scheduleCameraSave, scheduleItemsSave, select, setCosmosCamera, setSceneCameraScale, tool, toolboxMarkup, ui, updateSelection } from "../canvas.js";
+import { clampCameraXToPage } from "./page-width-core.js";
 
 /* ---------- 工具与相机 ---------- */
 
@@ -130,35 +131,86 @@ export function setMarqueeCursor() {
   ui.stage.classList.toggle("is-marquee-ready", ctrlHeld && tool === "select");
 }
 
+/* 框选拖到窗口边缘时自动平移视野：拖出去的框才能罩到视野外的块。
+   起点存世界坐标，相机一动框就跟着视野重新算（屏幕层只是显示）。 */
+const MARQUEE_EDGE = 52;
+const MARQUEE_MAX_SPEED = 22;
+let marqueeFrame = 0;
+let marqueeState = null;
+
+function stopMarqueePan() {
+  if (marqueeFrame) cancelAnimationFrame(marqueeFrame);
+  marqueeFrame = 0;
+  marqueeState = null;
+}
+
+function marqueeAutoPan(dragState) {
+  const stage = ui.stage;
+  const r = stage.getBoundingClientRect();
+  const at = dragState.last;
+  let vx = 0;
+  let vy = 0;
+  if (at.x < r.left + MARQUEE_EDGE) vx = MARQUEE_MAX_SPEED * Math.min(1, (r.left + MARQUEE_EDGE - at.x) / MARQUEE_EDGE);
+  else if (at.x > r.right - MARQUEE_EDGE) vx = -MARQUEE_MAX_SPEED * Math.min(1, (at.x - (r.right - MARQUEE_EDGE)) / MARQUEE_EDGE);
+  if (at.y < r.top + MARQUEE_EDGE) vy = MARQUEE_MAX_SPEED * Math.min(1, (r.top + MARQUEE_EDGE - at.y) / MARQUEE_EDGE);
+  else if (at.y > r.bottom - MARQUEE_EDGE) vy = -MARQUEE_MAX_SPEED * Math.min(1, (at.y - (r.bottom - MARQUEE_EDGE)) / MARQUEE_EDGE);
+  if (vx || vy) {
+    current.camera.x += vx;
+    current.camera.y += vy;
+    applyCamera();
+    scheduleCulling();
+    scheduleCameraSave();
+    updateMarquee(dragState, at.x, at.y);
+  }
+  marqueeFrame = requestAnimationFrame(() => marqueeAutoPan(dragState));
+}
+
 export function beginMarquee(event, clickId) {
   const box = document.createElement("div");
   box.className = "canvas-marquee";
   box.hidden = true;
   document.body.append(box);
   marqueeEl = box;
-  return {
+  const world = clientToWorld(event.clientX, event.clientY);
+  const state = {
     kind: "marquee",
     startClient: { x: event.clientX, y: event.clientY },
+    startWorld: { x: world.x, y: world.y },
+    last: { x: event.clientX, y: event.clientY },
     clickId,
     moved: false,
   };
+  stopMarqueePan();
+  marqueeState = state;
+  marqueeFrame = requestAnimationFrame(() => marqueeAutoPan(state));
+  return state;
 }
 
 export function updateMarquee(dragState, clientX, clientY) {
   if (!marqueeEl) return;
-  const left = Math.min(dragState.startClient.x, clientX);
-  const top = Math.min(dragState.startClient.y, clientY);
-  const width = Math.abs(clientX - dragState.startClient.x);
-  const height = Math.abs(clientY - dragState.startClient.y);
+  dragState.last = { x: clientX, y: clientY };
+  /* 起点按世界坐标换算成当前屏幕位置：视野被自动平移后框会跟着一起走 */
+  const start = worldToStage(dragState.startWorld.x, dragState.startWorld.y);
+  const left = Math.min(start.x, clientX);
+  const top = Math.min(start.y, clientY);
+  const width = Math.abs(clientX - start.x);
+  const height = Math.abs(clientY - start.y);
   marqueeEl.hidden = false;
   marqueeEl.style.left = `${left}px`;
   marqueeEl.style.top = `${top}px`;
   marqueeEl.style.width = `${width}px`;
   marqueeEl.style.height = `${height}px`;
-  dragState.rect = { left, top, right: left + width, bottom: top + height };
+  const endWorld = clientToWorld(clientX, clientY);
+  dragState.rect = {
+    x1: Math.min(dragState.startWorld.x, endWorld.x),
+    y1: Math.min(dragState.startWorld.y, endWorld.y),
+    x2: Math.max(dragState.startWorld.x, endWorld.x),
+    y2: Math.max(dragState.startWorld.y, endWorld.y),
+  };
 }
 
 export function finishMarquee(dragState) {
+  stopMarqueePan();
   marqueeEl?.remove();
   marqueeEl = null;
   if (!dragState.moved) {
@@ -174,8 +226,8 @@ export function finishMarquee(dragState) {
     if (item.type === "connector") continue;
     const el = itemEls.get(item.id);
     if (!el) continue;
-    const box = el.getBoundingClientRect();
-    if (box.right < rect.left || box.left > rect.right || box.bottom < rect.top || box.top > rect.bottom) {
+    const box = itemBounds(item, el);
+    if (box.x > rect.x2 || box.x + box.w < rect.x1 || box.y > rect.y2 || box.y + box.h < rect.y1) {
       continue;
     }
     hits.push(item.id);
@@ -192,6 +244,9 @@ export function dropTool() {
 export function applyCamera() {
   if (!current) return;
   const camera = current.camera;
+  /* 固定宽度横移约束：视口不得跑出页面左右各 50px。所有改相机的入口（拖画布、
+     缩放、鸟瞰窗、agent 动画）都走这里，集中一处收口。y 无限，不碰。 */
+  clampCameraXToPage(camera, ui.stage?.clientWidth || 0, current.pageWidth);
   ui.world.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`;
   /* 选中框、端口、缩放手柄都画在块的坐标系里，乘上这个倒数才在屏幕上保持固定粗细和大小。
      只挂在 world 上：连线端点手柄在 world 外面的屏幕坐标层，本来就不该跟着缩放。 */
@@ -201,6 +256,20 @@ export function applyCamera() {
     "transform",
     `translate(${camera.x} ${camera.y}) scale(${camera.scale})`,
   );
+  /* 固定宽度的白页/灰底跟着相机一起走：横向两个色标就是页面左右边界的屏幕 x */
+  const shade = document.querySelector("#canvas-page-shade");
+  if (shade) {
+    shade.hidden = !(current.pageWidth > 0);
+  }
+  if (shade && !shade.hidden) {
+    const stageW = ui.stage?.clientWidth || 0;
+    const left = Math.max(0, Math.min(stageW, camera.x));
+    const right = Math.max(0, Math.min(stageW, camera.x + current.pageWidth * camera.scale));
+    shade.style.background =
+      `linear-gradient(to right, var(--page-outside) 0 ${left}px,` +
+      ` var(--page-inside) ${left}px ${right}px,` +
+      ` var(--page-outside) ${right}px ${stageW}px)`;
+  }
   syncZoomLabel();
   updateSelection();
   positionEdgeLabelEditor();

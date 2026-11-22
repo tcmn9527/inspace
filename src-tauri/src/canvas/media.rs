@@ -389,6 +389,42 @@ pub fn canvas_duplicate_note(
     Ok(())
 }
 
+/// 复制 Markdown 文件块（file 块）时把它贴图的图床 notes/<块id>/ 一起搬过去，
+/// 并把副本正文里指向旧块目录的图片路径换成新块目录——删掉原块后副本的图不裂。
+/// 正文位置用前端递来的新 rel（复制刚发生，目标画布的 items.json 可能还没落盘这块）。
+#[tauri::command]
+pub fn canvas_duplicate_file_assets(
+    id: String,
+    item_id: String,
+    to_id: String,
+    to_item_id: String,
+    to_src: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    let from_dir = resolve_dir(&state, &id)?;
+    let to_dir = resolve_dir(&state, &to_id)?;
+    let from_assets = note_item_dir(&from_dir, &item_id)?;
+    let to_assets = note_item_dir(&to_dir, &to_item_id)?;
+    if from_assets.is_dir() {
+        copy_dir_all(&from_assets, &to_assets)?;
+    }
+    let rel = to_src.replace('\\', "/");
+    let path = media_path_in(&to_dir, &rel, FILE_DIR, "文件")?;
+    if !path.is_file() {
+        return Ok(());
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("读取正文失败：{e}"))?;
+    let decoded = super::files::decode_text(&bytes)?;
+    let old = format!("notes/{}/", item_id.trim());
+    if !decoded.text.contains(&old) {
+        return Ok(());
+    }
+    let new = format!("notes/{}/", to_item_id.trim());
+    let updated = decoded.text.replace(&old, &new);
+    let out = super::files::encode_text(&updated, decoded.format, decoded.crlf)?;
+    super::files::write_bytes_atomic(&path, &out)
+}
+
 // ---------- 画面块的绘制指令 ----------
 
 /// 一幅画面最多收多少条指令，口径跟前端那条上限一致。

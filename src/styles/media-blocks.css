@@ -861,6 +861,28 @@
   scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
 }
 
+/* 普通文本文件的富文本编辑区：换行要像 pre 一样保留，选中文字才能设字级样式。
+   样式 span 只活在块数据里，写盘仍是纯文本。 */
+.canvas-file-rich {
+  white-space: pre-wrap;
+  overflow: auto;
+  outline: none;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  /* 覆盖 .canvas-file-textarea 的固定 16px：大字号选区要能撑开行框 */
+  line-height: 1.5;
+  min-height: 0;
+}
+
+.canvas-file-rich-preview {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  /* 无单位行高：子元素按自身 font-size 重算行框。写死 16px 时，
+     选中文字设成 24px 会被挤在 16px 行框里，字形上下被裁掉显示不全。 */
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .canvas-item-file.is-editing {
   cursor: default;
 }

@@ -57,18 +57,36 @@ export function openImageCompare({ a, b }) {
   let mode = ""; // "" / "split" / "pan"
   let start = null;
 
-  const stageRect = () => stage.getBoundingClientRect();
+  /* 拖动中每帧都读 getBoundingClientRect 会强制布局、拖分割线就发涩；
+     浮层尺寸只在打开和窗口 resize 时变，缓存一份就够 */
+  let hostRect = stage.getBoundingClientRect();
+  const onResize = () => {
+    hostRect = stage.getBoundingClientRect();
+    paint();
+  };
+  window.addEventListener("resize", onResize);
+
+  let frame = 0;
+  const queuePaint = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      paint();
+    });
+  };
 
   const paint = () => {
-    canvas.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-    const box = canvas.getBoundingClientRect();
-    const host = stageRect();
-    const dividerX = host.left + ratio * host.width;
+    /* canvas 铺满 stage、以中心缩放：尺寸用 hostRect 直接算，不再读 DOM */
+    const boxW = hostRect.width * scale;
+    const boxL = hostRect.left + (hostRect.width - boxW) / 2 + tx;
+    canvas.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+    const dividerX = hostRect.left + ratio * hostRect.width;
     /* 图片内容被缩放/平移后，分割线（屏幕位置）对应到图片坐标里的百分比要重算 */
-    const pct = box.width > 0 ? ((dividerX - box.left) / box.width) * 100 : ratio * 100;
+    const pct = boxW > 0 ? ((dividerX - boxL) / boxW) * 100 : ratio * 100;
     top.style.clipPath = `inset(0 0 0 ${Math.min(100, Math.max(0, pct))}%)`;
-    divider.style.left = `${ratio * 100}%`;
-    handle.style.left = `${ratio * 100}%`;
+    const offset = ratio * hostRect.width;
+    divider.style.transform = `translate3d(${offset}px, 0, 0)`;
+    handle.style.transform = `translate3d(${offset}px, 0, 0)`;
     zoomValue.textContent = `${Math.round(scale * 100)}%`;
     stage.classList.toggle("is-zoomed", scale > 1);
   };
@@ -83,21 +101,20 @@ export function openImageCompare({ a, b }) {
   };
 
   const moveSplit = (clientX) => {
-    const rect = stageRect();
-    if (!rect.width) return;
-    ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    paint();
+    if (!hostRect.width) return;
+    ratio = Math.min(1, Math.max(0, (clientX - hostRect.left) / hostRect.width));
+    queuePaint();
   };
 
   const nearDivider = (clientX) => {
-    const rect = stageRect();
-    return Math.abs(clientX - (rect.left + ratio * rect.width)) <= 14;
+    return Math.abs(clientX - (hostRect.left + ratio * hostRect.width)) <= 14;
   };
 
   stage.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     event.preventDefault();
     stage.setPointerCapture?.(event.pointerId);
+    hostRect = stage.getBoundingClientRect();
     if (scale > 1 && !nearDivider(event.clientX)) {
       mode = "pan";
       start = { x: event.clientX, y: event.clientY, tx, ty };
@@ -116,7 +133,7 @@ export function openImageCompare({ a, b }) {
     }
     tx = start.tx + (event.clientX - start.x);
     ty = start.ty + (event.clientY - start.y);
-    paint();
+    queuePaint();
   });
 
   const stop = (event) => {
@@ -155,6 +172,7 @@ export function openImageCompare({ a, b }) {
 
   const close = () => {
     document.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("resize", onResize);
     mask.remove();
   };
   const onKey = (event) => {
@@ -170,7 +188,8 @@ export function openImageCompare({ a, b }) {
   });
   document.addEventListener("keydown", onKey, true);
 
-  paint();
   document.body.append(mask);
+  hostRect = stage.getBoundingClientRect();
+  paint();
   panel.focus({ preventScroll: true });
 }

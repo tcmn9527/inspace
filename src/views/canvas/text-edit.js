@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：text-edit */
 
 import { commitEdgeLabelEdit, commitNoteEditing, deleteItems, edgeLabelEditor, editingId, findItem, itemEls, scheduleItemsSave, select, setEditingId, updateSelection } from "../canvas.js";
+import { holdCanvasTextSelection, releaseCanvasTextSelection } from "./editor-toolbar.js";
 
 /* ---------- 文字编辑 ---------- */
 
@@ -16,6 +17,8 @@ export function startTextEdit(id) {
   const body = el.querySelector(".canvas-text-body");
   body.contentEditable = "plaintext-only";
   body.spellcheck = false;
+  /* 拖选文字到面板外时，body 的 user-select:none 会把选区折叠掉，编辑期放开 */
+  holdCanvasTextSelection();
   el.querySelector(".canvas-text-body").focus({ preventScroll: true });
 
   const range = document.createRange();
@@ -72,6 +75,7 @@ export function commitEditing() {
   }
   const id = editingId;
   setEditingId(null);
+  releaseCanvasTextSelection();
   const item = findItem(id);
   const el = itemEls.get(id);
   if (!item || !el) return;

@@ -666,12 +666,15 @@ export function enterSceneEdit(item) {
   setScenePlacementMode(item, true);
 }
 
-/* 沉浸式编辑中窗口变了：场景块跟着铺满，不然会露出一条画布背景 */
-window.addEventListener("resize", () => {
+/* 沉浸式编辑中窗口变了：场景块跟着铺满，不然会露出一条画布背景。
+   画布那边改窗口尺寸时会先重算相机再叫它一次，所以这里不能假设 rect 和
+   camera 是同一轮 resize 里的值，每次都按当下这两样重新算。 */
+export function fitEditingScene() {
   if (!current || !ui || !ui.stage) return;
   const item = current.items.find((one) => one.type === "scene" && one.__editRestore);
   if (!item) return;
   const rect = ui.stage.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
   const scale = current.camera.scale || 1;
   item.x = -current.camera.x / scale;
   item.y = -current.camera.y / scale;
@@ -680,7 +683,9 @@ window.addEventListener("resize", () => {
   const el = itemEls.get(item.id);
   if (el) syncItemElement(el, item);
   updateSelection();
-});
+}
+
+window.addEventListener("resize", fitEditingScene);
 
 export function exitSceneEdit(item) {
   if (!item) return;

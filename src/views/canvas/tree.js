@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：tree */
 
 import { LOCK_BADGE_SVG, active, agentDeleteSpace, agentHighlight, agentRevealBlock, commitEditing, confirmDialog, current, edgeLabelEditor, editingId, enterScenePart, exitSceneEdit, exportTreeSpace, findItem, flushBlockContents, flushCamera, flushItems, genInputItems, genModeFor, importIntoGroup, insideBox, isContainer, itemBounds, itemEls, itemMenuEntries, loadList, openMenu, ownedByContainer, promptDialog, scenePartBaseLabel, sceneView, scheduleCulling, scheduleItemsSave, select, selectedIds, setLockedMany, setSceneFurnitureSelection, setScenePlacementMode, showError, startTreeRename, store, switchTo, treeRenaming } from "../canvas.js";
+import { pageWidthMenuFlow } from "./page-width.js";
 
 /* ---------- 左侧画布树 ---------- */
 
@@ -676,7 +677,13 @@ export function openTreeCanvasMenu(node, x, y) {
       onClick: () => copyCanvasFlow(node.id, group.id),
     })),
   ];
+  const width = current?.pageWidth;
   openMenu(x, y, [
+    {
+      label: "画布尺寸…",
+      trailing: width ? `<span class="menu-trailing-text">${Math.round(width)} px</span>` : "",
+      onClick: () => void pageWidthMenuFlow(),
+    },
     { label: "导出画布", onClick: () => void exportTreeSpace(node, false) },
     "-",
     ...treeMoveEntries(node),

@@ -27,6 +27,7 @@ export function createExporter({
   getBounds,
   getMeta,
   getStage,
+  getPageWidth,
   getViewportBox,
   loadImageData,
   onError,
@@ -46,6 +47,13 @@ export function createExporter({
       bottom = Math.max(bottom, bounds.y + bounds.h);
     }
     if (!Number.isFinite(left)) return null;
+    /* 固定宽度的画布：横向取景钉在页面上（x=0..W），别让内容少一块就露出灰底。
+       高度仍按内容走，所以上下不受影响。 */
+    const pageWidth = Number(getPageWidth?.()) || 0;
+    if (pageWidth > 0) {
+      left = Math.min(left, 0);
+      right = Math.max(right, pageWidth);
+    }
     return {
       x: left - PADDING,
       y: top - PADDING,
@@ -208,9 +216,12 @@ export function createExporter({
      这里只做浅克隆，图片已经是 data URL，不会重复读盘。 */
   function buildSvg(slice, prepared, pxW, pxH, only, transparent = false) {
     const stageStyle = getComputedStyle(getStage());
+    /* 固定宽度的画布导出的是这张页面：底色用页面白，别把页面外的浅灰带进成品 */
     const background = transparent
       ? "transparent"
-      : stageStyle.backgroundColor || "#ffffff";
+      : Number(getPageWidth?.()) > 0
+        ? "#ffffff"
+        : stageStyle.backgroundColor || "#ffffff";
     const w = Math.max(0.5, slice.w);
     const h = Math.max(0.5, slice.h);
 

@@ -58,6 +58,9 @@ export function onStagePointerDown(e) {
 
   /* 文本块的编辑框里按下是给输入框的：选字、拖滚动条，不该顺手把这块拖走 */
   if (fileEditor && target?.dataset.id === fileEditor.itemId) {
+    /* 标题行、缩放手柄这些「卡片自己的壳」按下时别抢焦点：
+       正文一失焦就会被当成离开编辑。正文区不拦，拦了就没法放光标选字。 */
+    if (e.target.closest?.(".canvas-file-head, .canvas-handle")) e.preventDefault();
     dropTool();
     return;
   }
@@ -83,6 +86,8 @@ export function onStagePointerDown(e) {
   /* Ctrl/⌘ 按住时进入框选：起点在块上或空白都一样，拖动拉框；不拖仍是 Ctrl 点击加选 */
   if ((e.ctrlKey || e.metaKey) && !e.altKey && tool === "select") {
     e.preventDefault();
+    /* 捕获指针：拖出窗口边界也能继续收 move，框才拉得到远处 */
+    ui.stage.setPointerCapture?.(e.pointerId);
     setDrag(beginMarquee(e, target?.dataset.id || null));
     return;
   }
@@ -96,7 +101,6 @@ export function onStagePointerDown(e) {
         origin: { x: current.camera.x, y: current.camera.y },
         moved: false,
       });
-      ui.stage.classList.add("is-panning");
     } else {
       startDraw(e);
     }
@@ -137,7 +141,6 @@ export function onStagePointerDown(e) {
         start: clientToWorld(e.clientX, e.clientY),
         moved: false,
       });
-      ui.stage.classList.add("is-moving");
       return;
     }
     setDrag({
@@ -146,7 +149,6 @@ export function onStagePointerDown(e) {
       origin: { x: current.camera.x, y: current.camera.y },
       moved: false,
     });
-    ui.stage.classList.add("is-panning");
     return;
   }
   /* 连线没有整条拖动；打开折点后，拖线身才会插一个折点跟着走 */
@@ -170,5 +172,4 @@ export function onStagePointerDown(e) {
     start,
     moved: false,
   });
-  ui.stage.classList.add("is-moving");
 }

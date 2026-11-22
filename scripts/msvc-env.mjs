@@ -153,6 +153,16 @@ function main(argv) {
     log(`警告：${clangBin} 下没有 libclang.dll，编译 C++ 绑定会失败。`);
   }
 
+  // tch/torch-sys 编译期要找到 libtorch（运行期同样从数据根找）；没设时按数据根默认位探测
+  if (!env.LIBTORCH) {
+    const candidates = [path.join("D:\\work\\gzt_data\\gen\\h3d\\libtorch"), path.join(ROOT, "tools", "libtorch")];
+    const found = candidates.find((p) => fs.existsSync(path.join(p, "lib", "torch_cuda.dll")));
+    if (found) {
+      env.LIBTORCH = found;
+      log(`libtorch：${found}`);
+    }
+  }
+
   // 4080 SUPER 是 sm_89；不给的话 CMake 按 ggml 的默认架构编，跑不满新卡
   if (!env.CUDA_COMPUTE_CAP) env.CUDA_COMPUTE_CAP = "89";
 

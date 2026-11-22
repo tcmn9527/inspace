@@ -2,6 +2,8 @@
 
 import { CLOSE_X_SVG, active, agentRequireItem, agentRequireSpace, agentSummary, contentBox, current, exportPartsGLB, exportSceneGLB, itemEls, makeScene, moveSceneFurnitureParts, newId, normalizeLight, normalizeSceneCamera, normalizeSceneParts, normalizeSceneSurfaces, openMenu, persistScene, placeBlock, renderModelThumbnail, sceneCameraState, sceneFurnitureGroup, sceneFurnitureInspect, sceneFurnitureMoveDelta, scenePatch, scenePlacementActive, scheduleItemsSave, select, setSceneFurnitureSelection, setScenePlacementMode, showError, showToast, store, syncItemElement } from "../canvas.js";
 
+const { invoke } = window.__TAURI__.core;
+
 /* ---------- 3D 房间壳 / 灯光 / 机位 ---------- */
 
 export function sceneSurfacesOf(value) {

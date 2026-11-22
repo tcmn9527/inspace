@@ -95,6 +95,8 @@ export function closeColorPicker(commit = true) {
   document.removeEventListener("keydown", state.onKeyDown, true);
   state.panel.remove();
   if (commit) state.onDone?.(state.current);
+  /* 无论确认还是取消都通知一声：调用方靠它收尾实时预览（取消时要还原） */
+  state.onClose?.(commit);
 }
 
 /**
@@ -127,6 +129,12 @@ export function createColorPanel({
 
   const panel = document.createElement("div");
   panel.className = "color-pop";
+  /* 面板自己拦下按下：调用方可能正处在一个「失焦就退出」的编辑态里，
+     点色盘的空白处不该把它带退出。输入框要留给自己拿焦点。 */
+  panel.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("input, textarea")) return;
+    e.preventDefault();
+  });
   panel.innerHTML = `
     <div class="color-pop-sv" role="slider" aria-label="饱和度和明度" tabindex="0">
       <span class="color-pop-cursor"></span>
@@ -345,6 +353,7 @@ export function openColorPicker({
   dismissCommits = true,
   onChange,
   onDone,
+  onClose,
 } = {}) {
   closeColorPicker(true); // 旧面板先按「确定」收尾，保证它的变更不会丢
 
@@ -393,6 +402,7 @@ export function openColorPicker({
   open = {
     panel: panel.el,
     onDone,
+    onClose,
     onDocDown,
     onKeyDown,
     get current() {

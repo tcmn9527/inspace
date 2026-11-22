@@ -294,6 +294,27 @@
   background-color: var(--bg);
 }
 
+/* 富文本编辑态：body 的 user-select:none 会让「从编辑区拖选到面板外」时选区被折叠掉。
+   编辑期间整个窗口放开选择——拖选可能一路移到标题栏、侧栏，只放开画布不够。
+   非编辑态照旧禁止误选；块头部/控件那圈仍保持不可选，免得顺手选中一堆 UI 字。 */
+body.is-text-editing,
+body.is-text-editing * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+body.is-text-editing .canvas-file-head,
+body.is-text-editing .canvas-file-toggle,
+body.is-text-editing .canvas-handle,
+body.is-text-editing .canvas-port,
+body.is-text-editing .titlebar,
+body.is-text-editing .titlebar *,
+body.is-text-editing .space-tree,
+body.is-text-editing .space-tree * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* 主题背景层（宇宙）：压在画布最底下，块和连线都在它上面 */
 .canvas-backdrop {
   position: absolute;
@@ -306,6 +327,25 @@
 
 .canvas-backdrop[hidden] {
   display: none;
+}
+
+/* 固定宽度画布：白页居中，页外用浅灰。只按 x 画渐变——高度无限，不用造一个几万像素高的 DOM。
+   z-index 0 且在连线层之前，连线仍压在白页上方；pointer-events:none 不抢画布命中。 */
+.canvas-page-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--page-outside);
+}
+
+.canvas-page-shade[hidden] {
+  display: none;
+}
+
+:root {
+  --page-inside: #ffffff;
+  --page-outside: color-mix(in srgb, var(--muted) 22%, var(--bg));
 }
 
 /* 宇宙主题下纯文字块没有底色，背景会从字后面透出来；给字补一层弱阴影压住 */
@@ -349,6 +389,16 @@
 .canvas-stage[data-tool="text"],
 .canvas-stage[data-tool="picture"] {
   cursor: crosshair;
+}
+
+/* 拖动/平移的几十毫秒里把这层提到合成层：内容（尤其画面块的 SVG）不跟着重绘 */
+.canvas-stage.is-panning .canvas-world,
+.canvas-stage.is-moving .canvas-world {
+  will-change: transform;
+}
+
+.canvas-stage.is-moving .canvas-item {
+  will-change: transform;
 }
 
 .canvas-world {

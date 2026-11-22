@@ -129,19 +129,36 @@ export function buildPdfPages(pages) {
   return concatBytes(parts);
 }
 
-/* 当前文档里所有样式规则。取不到的（跨域字体表之类）直接跳过，不该为它挡住导出。 */
+/* 当前文档里所有样式规则，递归展开 @import。
+ *
+ * 光栅化是把内容塞进 SVG data URL 的 foreignObject 里画：那份文档没有 base URL，
+ * 原样带过去的 `@import url("./styles/canvas.css")` 一条都解析不了，
+ * 结果块没了 CSS（position/尺寸/背景全丢），导出和截图就是一张白图。
+ * 所以这里把导入样式表的规则内联进来，只输出真正的样式规则。
+ * 取不到的（跨域字体表之类）直接跳过，不该为它挡住导出。 */
 export function collectCss() {
   const parts = [];
-  for (const sheet of document.styleSheets) {
+  const seen = new Set();
+  const walk = (sheet) => {
+    if (!sheet || seen.has(sheet)) return;
+    seen.add(sheet);
     let rules = null;
     try {
       rules = sheet.cssRules;
     } catch {
-      continue;
+      return;
     }
-    if (!rules) continue;
-    for (const rule of rules) parts.push(rule.cssText);
-  }
+    if (!rules) return;
+    for (const rule of rules) {
+      /* @import 展开成被导入表的规则；其余按 cssText 原样带出 */
+      if (rule instanceof CSSImportRule && rule.styleSheet) {
+        walk(rule.styleSheet);
+        continue;
+      }
+      parts.push(rule.cssText);
+    }
+  };
+  for (const sheet of document.styleSheets) walk(sheet);
   return parts.join("\n");
 }
 

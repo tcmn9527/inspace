@@ -59,3 +59,7 @@ tools/llamacpp/
 
 # 本地模型探针是开发工具（硬编码本机路径），不进版本库
 src-tauri/src/bin/
+
+# 打包用 worker 可执行文件（构建产物，由 scripts/prepare-worker.mjs 生成）
+src-tauri/resources/worker/
+src-tauri/h3d-worker/target/

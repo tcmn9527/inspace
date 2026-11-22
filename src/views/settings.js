@@ -140,6 +140,7 @@ export function initSettings(options = {}) {
   ui.h3dReveal = document.querySelector("#settings-h3d-reveal");
   ui.h3dStatus = document.querySelector("#settings-h3d-status");
   ui.h3dError = document.querySelector("#settings-h3d-error");
+  ui.h3dTexError = document.querySelector("#settings-h3d-tex-error");
   ui.modelsStatus = document.querySelector("#settings-models-status");
   ui.modelsDir = document.querySelector("#settings-models-dir");
   ui.modelsReveal = document.querySelector("#settings-models-reveal");
@@ -274,12 +275,20 @@ async function refreshH3d(verbose = false) {
     if (verbose) h3dChecked = true;
     ui.h3dDir.textContent = status.dir;
     if (status.ok) {
-      ui.h3dStatus.textContent = verbose ? "模型齐全，可以生成" : "模型齐全";
+      const texReady = status.textureOk;
+      ui.h3dStatus.textContent =
+        texReady && verbose ? "模型齐全，几何和纹理都能生成" : "模型齐全";
       ui.h3dStatus.hidden = false;
       showH3dError("");
     } else {
       ui.h3dStatus.hidden = true;
       showH3dError(`还缺 ${status.missing.join("、")}：把 Hunyuan3D 的 ONNX 权重放进上面的目录（onnx/ 与 u2net.onnx）`);
+    }
+    if (status.textureOk) {
+      ui.h3dTexError.hidden = true;
+    } else {
+      ui.h3dTexError.textContent = `「生成带纹理」还缺 ${status.textureMissing.join("、")}：放进 ${status.dir}\libtorch 与 jit 目录`;
+      ui.h3dTexError.hidden = false;
     }
   } catch (error) {
     showH3dError(String(error));

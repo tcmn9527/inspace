@@ -30,6 +30,7 @@ bindgen = "0.71"
 half = "2"
 npyz = "0.8"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["download-binaries", "half", "cuda", "std"] }
+# 纹理二期：libtorch（TorchScript）推理；LIBTORCH 环境变量指向 gen/h3d/libtorch
 # protocol-asset：把磁盘上的视频变成 <video> 能按 Range 读的地址，
 # 20GB 的片子也只占几十 MB 解码缓冲，不用把整份读进内存。
 tauri = { version = "2", features = ["protocol-asset"] }
@@ -70,6 +71,8 @@ windows = { version = "0.62", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+xatlas-rs-v2 = "0.1.4"
+meshopt = "0.7.0"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
@@ -83,3 +86,7 @@ strip = true
 # 接 AcceleratorKeyPressed，才能既保留其它浏览器快捷键、又拿到 F10。
 [target."cfg(windows)".dependencies]
 webview2-com = "0.39"
+
+# xatlas 的 C++ 内核经 cc 编译，debug profile 下 OPT_LEVEL=0 会让 36 万面展开慢到不可用
+[profile.dev.package.xatlas-rs-v2]
+opt-level = 3

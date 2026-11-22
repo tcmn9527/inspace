@@ -60,6 +60,19 @@
   display: block;
 }
 
+/* 行尾是文字（如「1280 px」）时按内容自适应宽度、不折行；
+   24px 的固定宽度是留给图标的，文字塞进去会被挤成两行。 */
+.menu-icon:has(.menu-trailing-text) {
+  width: auto;
+  min-width: 24px;
+  white-space: nowrap;
+}
+
+/* 右键画布的树菜单可能带宽度这样的数值尾标，给足宽度别让标签和尾标互相挤 */
+.ctx-menu:has(.menu-trailing-text) {
+  min-width: 196px;
+}
+
 /* 文字靠左、指示靠右 */
 .ctx-menu button.has-trailing {
   display: flex;

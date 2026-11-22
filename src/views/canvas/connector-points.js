@@ -121,8 +121,7 @@ export function onStageDoubleClick(e) {
     e.preventDefault();
     return;
   }
-  /* 锁住的块不进入编辑 */
-  if (item.locked) return;
+  /* 锁只锁坐标：文本/笔记/文件锁着也能双击进编辑 */
   if (!["text", "note", "file"].includes(item.type)) return;
   /* 非文本的附件没有正文可编，双击仍然什么都不做（找文件走右键「在文件夹中显示」） */
   if (item.type === "file" && !isFileEditable(item)) return;

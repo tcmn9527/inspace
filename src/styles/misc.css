@@ -440,14 +440,16 @@
 
 .compare-top {
   clip-path: inset(0 0 0 50%);
+  will-change: clip-path;
 }
 
 .compare-divider {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
+  left: 0;
   width: 1px;
+  will-change: transform;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
   pointer-events: none;
@@ -456,7 +458,8 @@
 .compare-handle {
   position: absolute;
   top: 50%;
-  left: 50%;
+  left: 0;
+  will-change: transform;
   display: flex;
   align-items: center;
   justify-content: center;

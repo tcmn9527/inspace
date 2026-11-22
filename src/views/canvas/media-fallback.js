@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：media-fallback */
 
 import { addItemElement, audioCache, audioExtFor, audioFix, copyTask, current, fileToDataUrl, fitImageSize, formatSize, imageCache, imageSize, itemEls, makeAudio, makeImage, openVideoHelp, pastePoint, persistGen, persistNote, persistPicture, persistScene, refreshQuotes, scheduleItemsSave, select, setAudioFix, setCopyTask, showError, stageCenterWorld, store, ui, updateSelection, videoCache } from "../canvas.js";
+import { clampXToPage } from "./page-width.js";
 
 /* ---------- 播不出来时的兜底 ---------- */
 
@@ -202,6 +203,8 @@ export function insertPoint(w, h) {
 
 export function placeBlock(item) {
   if (!current) return null;
+  /* 固定宽度的画布：所有新块统一在这里夹进页面，别让任何一个创建入口漏出去 */
+  clampXToPage(item);
   current.items.push(item);
   addItemElement(item);
   /* 新进来一张产品卡，清单当场重算：粘贴、复制、批量导入都走这里 */

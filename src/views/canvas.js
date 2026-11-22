@@ -27,7 +27,7 @@ export { onStageContextMenu, onStageDoubleClick, onStagePointerDown, onWindowPoi
 export { setupGenEvents, setupVideoCopyEvents, setupVideoEvents, startConnect, startResize, watchGenApi, watchGenFamily, zoomAt, zoomLabel };
 import { agentAnimateCamera, agentBlock, agentCameraState, agentCreateSpace, agentDeleteSpace, agentFindSpace, agentFitView, agentFocusBlock, agentGroupCreate, agentGroupDelete, agentGroupRename, agentHighlight, agentOpenSpace, agentPlacePoint, agentRenameSpace, agentRequireItem, agentRequireSpace, agentRevealBlock, agentScene, agentSpaceCopy, agentSpaceList, agentSpaceTree, agentStopCameraAnim, agentSummary, applyProductFields } from "./canvas/agent-layer.js";
 import { numOr } from "./canvas/agent-layer.js";
-import { onWindowPointerMove, onWindowPointerUp, scheduleMeasurements, setMeasureHeld, startDraw, startResize } from "./canvas/alt-measure.js";
+import { onWindowPointerMove, onWindowPointerUp, scheduleMeasurements, setMeasureHeld, settlePointerUp, startDraw, startResize } from "./canvas/alt-measure.js";
 import { agentResetZoom, agentSetCamera } from "./canvas/camera.js";
 import { bendInsertIndex, nearestPathPoint, onBendHandleDoubleClick, onStageContextMenu, onStageDoubleClick, openImageExternally, setConnectorBend } from "./canvas/connector-points.js";
 import { connectHit, drawConnectPreview, finishConnect, finishConnectEnd, setConnectTarget, setHoverId, startConnect, updatePorts } from "./canvas/connectors.js";
@@ -45,6 +45,7 @@ import { exportTreeSpace, importIntoGroup, renameTreeGroup, startTreeRename } fr
 import { onStagePointerDown, stageTargetAt } from "./canvas/interactions.js";
 import { addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addVideoBlock, askInsertMode, attachProductCard, attachQuoteCard, attachSceneControls, bytesToBase64, changeProductImage, exportQuote, importCsvFromQuote, importProductsFromCsv, moveSceneFurnitureParts, productItems, refreshQuotes, revealFileBlock, revealTarget, sceneFurnitureGroup, scenePlacementActive, setScenePlacementMode } from "./canvas/inventory.js";
 import { flushCamera, flushItems, onKeyDown, scheduleCameraSave, scheduleItemsSave, setupFileDrop, showError } from "./canvas/keys-save.js";
+import { sanitizePageWidth } from "./canvas/page-width-core.js";
 import { alignSelected, distributeSelected, tidySelected } from "./canvas/layout.js";
 import { commitEdgeLabelEdit, finishEdgeLabelEdit, positionEdgeLabelEditor, startEdgeLabelEdit } from "./canvas/linktext.js";
 import { BATCH_GAP, copyIntoCanvas, insertPoint, openVideoProblem, pasteAudio, pasteImage, placeBlock, probeCache, setupVideoCopyEvents } from "./canvas/media-fallback.js";
@@ -53,9 +54,10 @@ import { closeFileEdit, commitNoteEditing, fileEditor, flushFileEditor, hydrateN
 import { PICTURE_BRUSH_SPEED, PICTURE_UNDO_LIMIT, attachPictureTools, dropRegionImage, exportPictureImage, paintingTarget, pictureEditorOf, pictureEditors, pictureMenuEntries, refreshPictureChrome, setPictureEditing } from "./canvas/paint.js";
 import { agentEbookGoto, agentEbookToc, agentMediaControl, agentMediaState, agentPdfGoto, agentPdfState } from "./canvas/pdf-media.js";
 import { addItemElement, boundsOfItem, findItem, refreshConnectors, renderAll, revealSelectionInTree, select, selectAll, syncConnector, syncSelectedClasses } from "./canvas/render.js";
-import { LOCK_BADGE_SVG, addOverlayBox, enterSceneEdit, enterScenePart, exitSceneEdit, loneSelected, refreshSceneToolbar, refreshTitlebarPath, scenePartBaseLabel, scenePatch, updateSelection } from "./canvas/scene-toolbar.js";
+import { LOCK_BADGE_SVG, addOverlayBox, enterSceneEdit, enterScenePart, exitSceneEdit, fitEditingScene, loneSelected, refreshSceneToolbar, refreshTitlebarPath, scenePartBaseLabel, scenePatch, updateSelection } from "./canvas/scene-toolbar.js";
 import { FURNITURE_COLORS, SCENE_LIGHT_PRESETS, addSceneFloor, addSceneModel, addSceneModelFlow, agentSceneApplyMaterial, agentSceneCameraPreset, agentSceneFurnitureBind, agentSceneFurnitureMove, agentSceneGet, agentSceneLightPreset, agentScenePlaceProduct, agentSceneRoomShell, agentSceneSurfaceSet, applyFurniture, bufferToBase64, createFurnitureFlow, exportSceneFlow, newSceneForProduct, pickProductModel, placeProductInSceneFlow, roomShellParts, roomShellSurfaces, sceneLightOf, sceneSurfacesOf } from "./canvas/scene-tools.js";
 import { sceneView, setSceneCameraPreset } from "./canvas/scene-tools.js";
+import { resetCanvasTextSelection } from "./canvas/editor-toolbar.js";
 import { commitEditing, startTextEdit } from "./canvas/text-edit.js";
 import { applyCamera, applyZoomInput, beginMarquee, bindZoomHold, clientToWorld, dropTool, finishMarquee, hasScrollableAncestor, openToolMenu, refreshCulling, resetZoom, scheduleCulling, selectZoomDigits, setMarqueeCursor, setTool, toolMenuEntries, updateMarquee, withAllVisible, worldToStage, zoomAt, zoomLabel } from "./canvas/tools-camera.js";
 import { initSpaceTree, panelTreeLabel, refreshTree, renderTree, treeCollapsed, treeData, treeGroupList, treePanelCollapsed, treeSavePrefs, treeUi } from "./canvas/tree.js";
@@ -148,7 +150,7 @@ export const RESIZE_MIN = {
   gen: { w: GEN_MIN_WIDTH, h: GEN_MIN_HEIGHT },
   genvideo: { w: GEN_VIDEO_MIN_WIDTH, h: GEN_VIDEO_MIN_HEIGHT },
 };
-export const NOTE_EDITOR_GUARDS = ".canvas-note-editor, .color-pop, #ctx-menu";
+export const NOTE_EDITOR_GUARDS = ".canvas-note-editor, .color-pop, #ctx-menu, #canvas-editor-toolbar";
 export const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 export const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "opus", "weba"]);
 /* 浏览器能解的容器：不在列表里的也能拖进来，但只能按引用播，交给浏览器试 */
@@ -164,7 +166,7 @@ export let ui = null;
 export let active = false;
 export let searchApi = null;
 export let canvases = [];
-export let current = null; // { meta, camera, items }
+export let current = null; // { meta, camera, items, pageWidth }；pageWidth=null 表示无限画布
 /* 选中的块：平时点选只会有一个，Ctrl 点选往里加/摘，Ctrl+A 全往里倒 */
 export let selectedIds = new Set();
 export let editingId = null;
@@ -417,6 +419,7 @@ export function initCanvas() {
     getStageSize: () => ({ w: ui.stage.clientWidth, h: ui.stage.clientHeight }),
     getItems: () => (current ? current.items : []),
     getSelectedIds: () => selectedIds,
+    getPageWidth: () => current?.pageWidth || 0,
     setCamera: (x, y) => {
       if (!current) return;
       current.camera.x = x;
@@ -428,6 +431,43 @@ export function initCanvas() {
 
   setTool("select");
   updateChrome();
+
+  /* 舞台尺寸一变（拽窗口边缘、拖动左侧空间树），画布得按新视野重算一遍：
+     相机要重新套固定宽度约束；白页/灰底那两个色标是按舞台宽算的，不重画的话
+     窗口一窄左边/右边就会漏出没上色的一条；鸟瞰窗的视窗框也吃视野尺寸。
+     光重算还不够——整幅内容死贴着旧窗口的左上角不动，看着就像画布没跟上窗口，
+     所以先按尺寸差的一半挪相机，让视野中心那个世界点还留在窗口中心，再让
+     applyCamera 去收固定宽度的约束。沉浸式场景编辑时块是钉在视口上的，
+     相机挪完还要请它按新视口重新铺一次。 */
+  let stageSize = null;
+  let stageSyncFrame = 0;
+  const syncStageSize = () => {
+    const w = ui.stage.clientWidth;
+    const h = ui.stage.clientHeight;
+    /* 视图切走时舞台被藏起来、尺寸归零，这不是窗口真的变了：留住上次的真尺寸，
+       回来时再按真实差值补一次 */
+    if (!w || !h) return;
+    const last = stageSize;
+    stageSize = { w, h };
+    if (!last || !current) return;
+    const dw = w - last.w;
+    const dh = h - last.h;
+    if (!dw && !dh) return;
+    current.camera.x += dw / 2;
+    current.camera.y += dh / 2;
+    applyCamera();
+    refreshMinimap();
+    fitEditingScene();
+    scheduleCameraSave();
+  };
+  /* 一次拖动窗口边缘会连着来几十个 resize，一帧只算一次就够 */
+  new ResizeObserver(() => {
+    if (stageSyncFrame) return;
+    stageSyncFrame = requestAnimationFrame(() => {
+      stageSyncFrame = 0;
+      syncStageSize();
+    });
+  }).observe(ui.stage);
 
   searchApi = initSearch({
     getItems: () => (current ? current.items : []),
@@ -460,6 +500,8 @@ export function initCanvas() {
   window.addEventListener("blur", () => {
     ctrlHeld = false;
     setMarqueeCursor();
+    /* 窗口外松手收不到 pointerup：失焦就把框选收掉，别让框和中途状态挂着 */
+    if (drag?.kind === "marquee") settlePointerUp(null);
   });
 }
 
@@ -567,10 +609,12 @@ export async function switchTo(id) {
       meta: data.meta,
       camera: sanitizeCamera(data.camera),
       items: sanitizeItems(data.items),
+      pageWidth: sanitizePageWidth(data.pageWidth),
     };
     setCosmosSeed(current.meta.id);
     selectedIds = new Set();
-    editingId = null;
+    setEditingId(null);
+    resetCanvasTextSelection();
     noteEditor = null;
     flushFileEditor();
     imageCache = new Map();
@@ -784,7 +828,8 @@ export function showEmpty() {
   if (edgeLabelEditor) finishEdgeLabelEdit(false);
   current = null;
   selectedIds = new Set();
-  editingId = null;
+  setEditingId(null);
+  resetCanvasTextSelection();
   noteEditor = null;
   flushFileEditor();
   imageCache.clear();
@@ -1283,10 +1328,64 @@ export const canvasAgent = {
         rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
       };
     }),
+  /* 程序化设置真实的 window.getSelection()：合成键鼠事件造不出浏览器原生选区，
+     但 Range + addRange 会触发 selectionchange，工具栏的启用判断照常响应。
+     三种定位：字符偏移 start/end；子串 text（取第一次出现）；all 全选元素正文。 */
+  debugSelectText: ({ selector, start, end, text = "", all = false } = {}) => {
+    const el = document.querySelector(String(selector || ""));
+    if (!el) throw new Error("没找到要设置选区的元素");
+    if (typeof el.focus === "function") el.focus({ preventScroll: true });
+
+    /* 把元素里所有文本节点按顺序摊平，偏移按「可见文字」算，跨 <br>/<span> 也能选中 */
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let total = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      nodes.push({ node, from: total, to: total + node.nodeValue.length });
+      total += node.nodeValue.length;
+    }
+    if (!nodes.length) throw new Error("元素里没有可选的文字");
+
+    const flat = nodes.map((n) => n.node.nodeValue).join("");
+    let a;
+    let b;
+    if (all) {
+      a = 0;
+      b = total;
+    } else if (text) {
+      const at = flat.indexOf(String(text));
+      if (at < 0) throw new Error(`没找到子串：${text}`);
+      a = at;
+      b = at + String(text).length;
+    } else {
+      a = Math.max(0, Math.min(Number(start) || 0, total));
+      b = a + Math.max(1, Math.min(Number(end) || 0, total) - a);
+    }
+
+    const locate = (offset, bias) => {
+      const hit = nodes.find((n) => offset >= n.from && (offset < n.to || (bias === "end" && offset === n.to)));
+      if (!hit) return { node: nodes[bias === "end" ? nodes.length - 1 : 0].node, at: 0 };
+      return { node: hit.node, at: Math.max(0, Math.min(offset - hit.from, hit.node.nodeValue.length)) };
+    };
+    const from = locate(a, "start");
+    const to = locate(b, "end");
+    const range = document.createRange();
+    range.setStart(from.node, from.at);
+    range.setEnd(to.node, to.at);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return { selected: sel.toString(), start: a, end: b, rangeCount: sel.rangeCount, collapsed: sel.isCollapsed };
+  },
   debugInspect: ({ selector, pseudo = "" } = {}) => {    const nodes = [...document.querySelectorAll(String(selector || ""))].slice(0, 40);
     const active = document.activeElement;
+    const sel = window.getSelection();
+    const selection = sel && sel.rangeCount
+      ? { text: sel.toString(), collapsed: sel.isCollapsed, rangeCount: sel.rangeCount }
+      : { text: "", collapsed: true, rangeCount: 0 };
     return {
       count: nodes.length,
+      selection,
       activeElement: active
         ? {
             tag: active.tagName.toLowerCase(),
@@ -1301,6 +1400,7 @@ export const canvasAgent = {
           tag: el.tagName.toLowerCase(),
           className: typeof el.className === "string" ? el.className : "",
           text: (el.textContent || "").trim().slice(0, 30),
+          html: (el.innerHTML || "").slice(0, 400),
           value:
             el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
               ? el.value
@@ -1319,10 +1419,13 @@ export const canvasAgent = {
               }`
             : "",
           visibility: style.visibility,
+          userSelect: style.userSelect || style.webkitUserSelect,
           position: style.position,
           zIndex: style.zIndex,
           cursor: style.cursor,
+          backgroundImage: style.backgroundImage === "none" ? undefined : style.backgroundImage,
           scrollHeight: el.scrollHeight || undefined,
+          scrollTop: el.scrollTop || undefined,
           clientHeight: el.clientHeight || undefined,
           rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
           display: style.display,

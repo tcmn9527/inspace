@@ -1,8 +1,15 @@
 /* 从 canvas.js 拆出：alt-measure */
 
 import { CONNECTOR_MAX_POINTS, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, RESIZE_MIN, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, active, addItemElement, applyCamera, assignMeasureHeld, bendInsertIndex, boundsOfItem, capturePagePin, clientToWorld, connectHit, connectorGeometry, current, drag, drawConnectPreview, drawSnapGuides, dropTool, editingId, findItem, finishConnect, finishConnectEnd, finishMarquee, finishPaint, fitGenPrompt, itemBounds, itemEls, loneSelected, makeBox, makeLine, makePicture, makeScene, makeText, measureFrame, measureHeld, nearestPathPoint, onPaintPointerMove, pinEbookPage, reassignContainerOwners, refreshConnectors, refreshMinimap, releaseEbookPage, removeItemFromDom, scheduleCameraSave, scheduleItemsSave, select, setConnectTarget, setDrag, setHoverId, setMeasureFrame, setTool, snapLineAngle, snapOffset, snapResize, startTextEdit, stretchEbookPage, syncConnector, syncItemElement, tool, ui, updateMarquee, updatePorts, updateSelection, worldToStage } from "../canvas.js";
+import { clampGroupDx, clampXToPage } from "./page-width.js";
 
 /* ---------- Alt 测距 ---------- */
+
+/* 整块拖动要走出这么多个屏幕像素才算「真的在拖」，按缩放折成世界坐标。
+   点块、按住块头部时手抖的那一两像素不算数。 */
+const MOVE_SLOP_PX = 3;
+/* 平移画布（点空白、按锁定块）同理：客户端像素，不用折缩放 */
+const PAN_SLOP_PX = 3;
 
 export function setMeasureHeld(on) {
   if (measureHeld === on) return;
@@ -144,6 +151,8 @@ export function startDraw(e) {
 
   e.preventDefault();
   select(null);
+  /* text 块不走 placeBlock，创建这一下自己夹 */
+  clampXToPage(item);
   current.items.push(item);
   addItemElement(item);
   setDrag({
@@ -226,9 +235,21 @@ export function onWindowPointerMove(e) {
   if (drag.kind === "pan") {
     const dx = e.clientX - drag.startClient.x;
     const dy = e.clientY - drag.startClient.y;
-    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) drag.moved = true;
-    current.camera.x = drag.origin.x + dx;
-    current.camera.y = drag.origin.y + dy;
+    /* 点一下（手抖一两像素）不算拖视野：没走出死区就一帧都不挪。
+       锁定的块按住是拖画布，所以这条在「点锁定面板」时最容易被看到——
+       以前按一下就整屏偏几像素，看着像画面在晃。 */
+    if (!drag.moved && Math.abs(dx) <= PAN_SLOP_PX && Math.abs(dy) <= PAN_SLOP_PX) return;
+    drag.moved = true;
+    /* 真拖起来才提升合成层：光按一下不动，提升会触发一次重栅格化，整屏抖一下 */
+    ui.stage.classList.add("is-panning");
+    /* 走增量：固定宽度下 applyCamera 会把 x 夹在页面附近，若用 origin + 总位移，
+       夹住后下一帧又从旧 origin 重算，会把夹掉的部分吐回来（边界处回弹）。
+       每帧以「当前已夹过的相机」为基准推进，y 无约束、同样处理无妨。 */
+    const stepX = e.clientX - (drag.lastClient ? drag.lastClient.x : drag.startClient.x);
+    const stepY = e.clientY - (drag.lastClient ? drag.lastClient.y : drag.startClient.y);
+    drag.lastClient = { x: e.clientX, y: e.clientY };
+    current.camera.x += stepX;
+    current.camera.y += stepY;
     applyCamera();
     return;
   }
@@ -251,10 +272,20 @@ export function onWindowPointerMove(e) {
   const point = clientToWorld(e.clientX, e.clientY);
   let dx = point.x - drag.start.x;
   let dy = point.y - drag.start.y;
-  if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) drag.moved = true;
+  /* 整块拖动要先走出一点死区才算「真的在拖」：手按下去那零点几像素的抖动
+     不能算数，否则按下瞬间就会触发吸附，把块吸到别块边上又弹回来。 */
+  const moveSlop = drag.kind === "move" ? MOVE_SLOP_PX / Math.max(0.01, current.camera.scale) : 0.5;
+  if (Math.abs(dx) > moveSlop || Math.abs(dy) > moveSlop) drag.moved = true;
 
   /* 整组挪位：单选就一个成员，多选把选中的都按各自起点平移同样的距离 */
   if (drag.kind === "move") {
+    /* 还没走出死区：原地不动，既不吸附也不位移（松手时也就没有「跳一下」可看） */
+    if (!drag.moved) {
+      drawSnapGuides([]);
+      return;
+    }
+    /* 同上：走出死区才把块提到合成层 */
+    ui.stage.classList.add("is-moving");
     let offsetX = dx;
     let offsetY = dy;
     /* Shift 锁一个轴：只沿此刻走得更远的那条轴动，另一轴钉死 */
@@ -265,6 +296,8 @@ export function onWindowPointerMove(e) {
       else offsetX = 0;
     }
     const snapped = snapOffset(drag.group, offsetX, offsetY, onlyAxis);
+    /* 固定宽度：整组按外接框夹回页内，再落到各成员的坐标上 */
+    snapped.dx = clampGroupDx(drag.group, snapped.dx, true);
     for (const member of drag.group) {
       member.item.x = member.origin.x + snapped.dx;
       member.item.y = member.origin.y + snapped.dy;
@@ -272,7 +305,9 @@ export function onWindowPointerMove(e) {
         member.item.x2 = member.origin.x2 + snapped.dx;
         member.item.y2 = member.origin.y2 + snapped.dy;
       }
-      syncItemElement(member.el, member.item);
+      /* 拖动期间不写 left/top（那会重排、重绘整块内容，画面块几万条 SVG 时每帧都在重新栅格化），
+         用 transform 平移——只走合成层；松手时再落回 left/top */
+      member.el.style.transform = `translate3d(${snapped.dx}px, ${snapped.dy}px, 0)`;
     }
     drawSnapGuides(snapped.guides);
     /* 选中框和端口本来就长在块自己身上，跟着块一起走；每帧只补算连线、坐标和鸟瞰窗。
@@ -361,6 +396,8 @@ export function onWindowPointerMove(e) {
       item.w = Math.max(40, Math.abs(dx));
       item.minH = Math.max(32, Math.abs(dy));
     }
+    /* 从页面外起笔画、或拖出右边界：都把这块收回页内 */
+    clampXToPage(item);
   } else if (drag.kind === "resize") {
     const origin = drag.origin;
     const snapped = snapResize(drag, dx, dy);
@@ -416,6 +453,8 @@ export function onWindowPointerMove(e) {
       /* 手动拉过就别再自动按视频比例改了（自动改只在第一次拿到元数据时发生） */
       if (item.type === "video") item.sized = true;
     }
+    /* 往左拉出页面时把块整体推回来，宽度保持用户拖出来的值 */
+    clampXToPage(item);
     drawSnapGuides(snapped.guides);
   }
 
@@ -552,7 +591,21 @@ export function settlePointerUp(e) {
     return;
   }
 
+  /* 只是点了一下（没走出死区）：把可能残留的拖影一起擦掉，块留在原地 */
+  if (!finished.moved && finished.kind === "move" && finished.group) {
+    for (const member of finished.group) {
+      if (member.el) member.el.style.transform = "";
+    }
+  }
   if (!finished.moved) return;
+  /* 拖动期间的 transform 偏移在这里落回 left/top */
+  if (finished.kind === "move" && finished.group) {
+    for (const member of finished.group) {
+      if (!member.el) continue;
+      member.el.style.transform = "";
+      syncItemElement(member.el, member.item);
+    }
+  }
   /* 拖完重算这几块的容器归属：拖出就脱组、拖进就入组，重叠区各认各的 */
   if (finished.kind === "move" && finished.group) {
     reassignContainerOwners(finished.group.map((member) => member.item));

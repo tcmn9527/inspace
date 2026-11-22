@@ -8,6 +8,7 @@
 
 import { GUIDE_TOPICS, guideText } from "./agent-guide.js";
 import { canvasAgent, current } from "./canvas.js";
+import { outsideCount, pageWidth, setPageWidth } from "./canvas/page-width.js";
 import { cosmosFlight, cosmosFlightControl, cosmosRoute, cosmosRouteSet } from "./cosmos.js";
 import { LIGHT_THEMES, THEMES, currentTheme, setTheme } from "./theme.js";
 
@@ -376,6 +377,10 @@ const TOOL_DEFS = [
   def("group_delete", "删除空分组，文件夹进系统回收站。里面还有画布或子分组会报错——先把它们删掉或复制走，画布不能被分组连坐。", {
     group: { type: "string", description: "分组 id 或名字（同名分组必须给 id）" },
   }, ["group"]),
+  def("space_get_meta", "看当前画布的尺寸状态：pageWidth（null=无限画布）、越界面板数、画布 id/名字。"),
+  def("space_set_page_width", "设置/取消画布固定宽度。只限宽度，高度无限；pageWidth 给 null 退回无限。已有越界的面板会被夹回页内。", {
+    pageWidth: { type: "number", description: "固定宽度（200–10000），不传或 null 表示无限画布" },
+  }),
   def("space_scene", "看当前画布里所有块的摘要：id、类型、位置尺寸、层级、各类型的关键字段。做任何块操作前先调这个拿 id。", {
     type: { type: "string", description: "只看某一类块（text/rect/ellipse/line/arrow/note/picture/scene/file/image/audio/video/ebook/connector），不传就全部" },
   }),
@@ -533,6 +538,18 @@ const TOOL_DEFS = [
       selector: { type: "string", description: "CSS 选择器" },
       text: { type: "string", description: "多个匹配时，挑文字里包含这一段的那个" },
       ctrl: { type: "boolean", description: "按住 Ctrl 一起双击，默认 false" },
+    },
+    ["selector"],
+  ),
+  def(
+    "ui_select_text",
+    "调试用：给元素设置真实的 window.getSelection()（合成键鼠造不出浏览器原生选区，Range 可以，且会触发 selectionchange）。用来验证「选中文字后工具栏按钮点亮」这类依赖选区的交互。三种定位：给 start/end 字符偏移；给 text 子串取第一次出现；all=true 全选元素正文。返回选中的文字。",
+    {
+      selector: { type: "string", description: "文本所在元素，例如 .canvas-file-rich" },
+      start: { type: "number", description: "起始字符偏移（跨 span/br 按可见文字算），与 end 一起用" },
+      end: { type: "number", description: "结束字符偏移，与 start 一起用" },
+      text: { type: "string", description: "按子串选中第一次出现的位置，优先于 start/end" },
+      all: { type: "boolean", description: "true 时全选元素正文，优先于其它定位" },
     },
     ["selector"],
   ),
@@ -887,10 +904,11 @@ const TOOL_DEFS = [
     scene: { type: "string", description: "可选：生成后直接摆进这个场景块" },
     out: { type: "string", description: "可选：导出到绝对路径（.glb），给了就不进模型库" },
   }, ["name", "parts"], 180),
-  def("h3d_generate", "把画布上的一张图片块（或生图面板）生成 3D 模型：本地 Hunyuan3D 几何阶段，GPU 上约两分半。完成后模型存进模型库（library/models），返回 {name, size, modified}，可用 scene_add_model 放进 3D 场景。", {
+  def("h3d_generate", "把画布上的一张图片块（或生图面板）生成 3D 模型：本地 Hunyuan3D 几何阶段，GPU 上约两分半。完成后模型存进模型库（library/models），返回 {name, size, modified}，可用 scene_add_model 放进 3D 场景。给 textured:true 会连纹理一起生成（几何 + 去光照 + 六视图扩散 + 烘焙贴图，总共约五分钟，返回带贴图的 GLB）。", {
     id: ID,
     seed: { type: "number", description: "可选：随机种子；同一张图同种子形状一致" },
-  }, ["id"], 300),
+    textured: { type: "boolean", description: "true 生成带纹理的模型（更慢）；默认只生成几何" },
+  }, ["id"], 600),
   def("h3d_cancel", "停止正在跑的 h3d_generate（下个批次就停，已生成的部分丢弃）。"),
   def("scene_export_glb", "把 3D 场景块导出成一个 GLB：墙地、家具、程序几何合成一个文件（米制、贴图内嵌），可以交给客户或用外部 3D 软件打开。out 给保存的绝对路径（.glb）。返回 {path, block}。", {
     id: ID,
@@ -1158,6 +1176,22 @@ const BLOCK_FIELDS = [
   "parts", "surfaces", "camera", "groundColor", "shadow",
   ...GEN_KEYS,
 ];
+
+function spaceMeta() {
+  if (!current) throw new Error("当前没有打开的画布");
+  return {
+    id: current.meta.id,
+    name: current.meta.name,
+    pageWidth: pageWidth(),
+    outside: outsideCount(),
+    camera: current.camera,
+  };
+}
+
+async function setSpacePageWidth(width) {
+  if (!current) throw new Error("当前没有打开的画布");
+  return setPageWidth(width ?? null, { silent: true });
+}
 
 async function appState() {
   const [dataRoot, mcpInfo] = await Promise.all([
@@ -1483,6 +1517,10 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.groupRename(args.group, args.name));
     case "group_delete":
       return onCanvas(args, () => canvasAgent.groupDelete(args.group));
+    case "space_get_meta":
+      return onCanvas(args, () => spaceMeta());
+    case "space_set_page_width":
+      return onCanvas(args, () => setSpacePageWidth(args.pageWidth));
     case "space_scene":
       return onCanvas(args, () => canvasAgent.scene(pick(args, ["type"])));
     case "space_snapshot":
@@ -1537,6 +1575,14 @@ async function dispatch(name, args) {
       });
     case "ui_dblclick":
       return canvasAgent.debugDoubleClick({ selector: args.selector, text: args.text, ctrl: args.ctrl === true });
+    case "ui_select_text":
+      return canvasAgent.debugSelectText({
+        selector: args.selector,
+        start: args.start,
+        end: args.end,
+        text: args.text,
+        all: args.all === true,
+      });
     case "ui_wheel":
       return canvasAgent.debugWheel({
         x: Number(args.x) || 0,
@@ -1668,7 +1714,7 @@ async function dispatch(name, args) {
       await ensureView("canvas");
       const canvasId = current?.meta?.id;
       if (!canvasId) throw new Error("先打开一个画布");
-      const model = await invoke("h3d_generate", {
+      const model = await invoke(args.textured ? "h3d_texture" : "h3d_generate", {
         id: canvasId,
         itemId: args.id,
         seed: args.seed,

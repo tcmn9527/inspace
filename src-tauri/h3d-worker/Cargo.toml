@@ -1,0 +1,20 @@
+# 纹理推理 worker：独立 crate 链接 libtorch（静态导入 torch DLL），由主程序按需拉起。
+# 单独成 crate 的原因：主程序必须能在没有 libtorch（5.5GB，数据根可选组件）的机器上启动；
+# Windows 加载器在入口点前解析导入表，链接了 tch 就永远启动不起来。
+[package]
+name = "h3d-tex-worker"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "h3d_tex_worker"
+path = "src/main.rs"
+
+[dependencies]
+tch = { version = "0.20", default-features = false }
+half = "2"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.dev]
+# tch 的调用面很大，worker 是短命进程，优化一下加载/采样循环
+opt-level = 1

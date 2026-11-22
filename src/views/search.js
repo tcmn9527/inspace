@@ -180,6 +180,25 @@ export function initSearch({ getItems, getSpaceId, focusBlock, jumpToSpace }) {
       renderResults([]);
       return;
     }
+    /* 单独一个 #：列出当前画布所有面板编号，点哪条跳哪条 */
+    if (text === "#") {
+      const rows = getItems()
+        .filter((item) => item.type !== "connector")
+        .sort((a, b) => (a.seq || 0) - (b.seq || 0))
+        .map((item) => {
+          const { title } = describeBlock(item);
+          return {
+            kind: "block",
+            id: item.id,
+            type: item.type,
+            title: `#${item.seq || "?"} · ${TYPE_LABEL[item.type] || item.type}`,
+            text: title.length > 60 ? `${title.slice(0, 60)}…` : title,
+            score: 1,
+          };
+        });
+      renderResults(rows, "", { emptyText: "这个画布里还没有面板" });
+      return;
+    }
     /* #N 是「定位到 N 号面板」的实时指令：数字没敲完就只跳已经能对上的号，
        对不上就停在这儿显示没有；不走全文搜索，也别去别的画布找 */
     const seqMatch = /^#(\d+)$/.exec(text);

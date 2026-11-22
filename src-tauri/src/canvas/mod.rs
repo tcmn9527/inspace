@@ -103,6 +103,18 @@ pub struct CanvasData {
     pub meta: CanvasMeta,
     pub camera: Value,
     pub items: Value,
+    /// 固定页面宽度（世界坐标 0..pageWidth），None = 无限画布；高度始终无限
+    pub page_width: Option<f64>,
+}
+
+/// space.json 里记的固定宽度：缺字段、非正数、非有限值都当「无限」。
+/// 老画布没有这个键，读出来就是 None，不用迁移写盘。
+pub(crate) fn read_page_width(dir: &Path) -> Option<f64> {
+    read_json(&meta_path(dir))
+        .ok()
+        .flatten()
+        .and_then(|meta| meta.get("pageWidth").and_then(|v| v.as_f64()))
+        .filter(|w| w.is_finite() && *w > 0.0)
 }
 
 fn now_ms() -> i64 {
@@ -780,6 +792,7 @@ fn open_dir(dir: &Path, id: &str) -> Result<CanvasData, String> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| id.to_string());
     let (name, camera) = read_meta(dir, &fallback);
+    let page_width = read_page_width(dir);
     let item_count = items.as_array().map(|a| a.len()).unwrap_or(0);
     Ok(CanvasData {
         meta: CanvasMeta {
@@ -791,6 +804,7 @@ fn open_dir(dir: &Path, id: &str) -> Result<CanvasData, String> {
         },
         camera,
         items,
+        page_width,
     })
 }
 
@@ -969,6 +983,42 @@ pub fn canvas_save_camera(
     let (name, _) = read_meta(&dir, &fallback);
     meta["name"] = json!(name);
     meta["camera"] = camera;
+    if meta.get("createdAt").is_none() {
+        meta["createdAt"] = json!(now_ms());
+    }
+    write_json(&meta_path(&dir), &meta)
+}
+
+/// 设置/取消画布的固定宽度。传 null 就退回无限画布（键直接删掉）。
+/// 只动 space.json 的 pageWidth 一个键，其它元数据原样保留。
+#[tauri::command]
+pub fn canvas_set_page_width(
+    id: String,
+    page_width: Option<f64>,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<(), String> {
+    if let Some(width) = page_width {
+        if !width.is_finite() || width <= 0.0 {
+            return Err("页面宽度必须是正数".to_string());
+        }
+    }
+    let dir = resolve_dir(&state, &id)?;
+    let mut meta = read_json(&meta_path(&dir))?.unwrap_or_else(|| json!({}));
+    match page_width {
+        Some(width) => {
+            meta["pageWidth"] = json!(width);
+        }
+        None => {
+            meta.as_object_mut().map(|m| m.remove("pageWidth"));
+        }
+    }
+    if meta.get("name").is_none() {
+        let fallback = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| id.clone());
+        meta["name"] = json!(fallback);
+    }
     if meta.get("createdAt").is_none() {
         meta["createdAt"] = json!(now_ms());
     }

@@ -1,10 +1,55 @@
 /* canvas-items/dom-files.js —— 从 canvas-items.js 拆出（导出名不变，入口统一 re-export）。 */
 
 import { FILE_DOC_SVG, PREVIEW_RENDER_CHARS, TABLE_EXTS, chevronSvg } from "./dom-elements.js";
-import { closeFileEdit, fileEditor, hydrateNoteImages, startFileEdit } from "../canvas.js";
+import { closeFileEdit, fileEditor, hydrateNoteImages, scheduleItemsSave, startFileEdit } from "../canvas.js";
 import { renderMarkdown } from "../markdown.js";
+import { sanitizeInlineHtml } from "../inline-html.js";
 import { createDelimitedTable, formatSize } from "./dom-media.js";
 import { isCancelled, openPdf, pdfPageSize, pdfProblem, renderPdfPage } from "../canvas-pdf.js";
+
+/* ---------- 文本预览的阅读进度 ----------
+   读到哪儿按「滚过的比例」记在块上（item.readFrac），跟块一起落盘、复制也带走。
+   每次打开（含切回浏览态、重开画布）都滚回上次的位置；只在滚动停下时记一次，
+   不在滚动过程中反复排队存盘。 */
+const READ_SAVE_DELAY = 240;
+
+function readSpanOf(body) {
+  return body.scrollHeight - body.clientHeight;
+}
+
+function attachReadProgress(body, item) {
+  let timer = 0;
+  body.addEventListener(
+    "scroll",
+    () => {
+      if (timer) return;
+      timer = window.setTimeout(() => {
+        timer = 0;
+        const span = readSpanOf(body);
+        const frac = span > 4 ? Math.min(1, Math.max(0, body.scrollTop / span)) : 0;
+        if (Math.abs((Number(item.readFrac) || 0) - frac) < 0.0005) return;
+        item.readFrac = frac;
+        scheduleItemsSave();
+      }, READ_SAVE_DELAY);
+    },
+    { passive: true },
+  );
+}
+
+/* 内容刚塞进 DOM 时还量不到 scrollHeight：等两帧排版完再滚。
+   滚到接近底部就直接到底，别因为比例取整差一两像素停在那儿。 */
+export function restoreReadProgress(body, item) {
+  const frac = Number(item.readFrac) || 0;
+  if (frac <= 0) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const span = readSpanOf(body);
+      if (span <= 4) return;
+      const top = span * frac;
+      body.scrollTop = top >= span - 2 ? span : Math.round(top);
+    });
+  });
+}
 
 export function createFileCard(item, options) {
   const card = document.createElement("div");
@@ -27,8 +72,8 @@ export function createFileCard(item, options) {
   const head = document.createElement("div");
   head.className = "canvas-file-head";
   head.append(icon, main);
-  /* Markdown 文件：右上角一颗「编辑 / 浏览」开关，默认浏览态（渲染后的正文） */
-  if (item.text && isMarkdownExt(item.ext)) {
+  /* 文本类文件：右上角一颗「编辑 / 浏览」开关，默认浏览态（按类型渲染的只读正文） */
+  if (item.text) {
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "canvas-file-toggle";
@@ -79,6 +124,7 @@ export function createFileCard(item, options) {
   body.className = "canvas-file-preview";
   card.append(body);
   attachPlainCopy(body);
+  attachReadProgress(body, item);
   fillFilePreview(card, body, sub, item, options);
   return card;
 }
@@ -759,8 +805,12 @@ async function fillFilePreview(card, body, sub, item, options) {
   if (preview.truncated) tags.push("仅预览开头");
   if (tags.length) sub.textContent += ` · ${tags.join(" · ")}`;
   renderFilePreview(body, item, preview);
-  /* Markdown 里贴的图存在这块自己的 notes/<块id>/ 下，渲染后换成能显示的地址 */
-  if (isMarkdownExt(item.ext)) hydrateNoteImages(item, body);
+  restoreReadProgress(body, item);
+  /* Markdown 里贴的图存在这块自己的 notes/<块id>/ 下，渲染后换成能显示的地址。
+     图是异步加载的，撑高正文会把刚滚好的位置顶偏，换完再对一次。 */
+  if (isMarkdownExt(item.ext)) {
+    hydrateNoteImages(item, body).then(() => restoreReadProgress(body, item));
+  }
 }
 
 export function renderFilePreview(body, item, preview) {
@@ -781,6 +831,14 @@ export function renderFilePreview(body, item, preview) {
       body.append(table);
       return;
     }
+  }
+  /* 文本文件在画布里设过字级样式：浏览态回显存于块上的富文本，源文件仍是纯文本 */
+  if (item.richHtml) {
+    const rich = document.createElement("div");
+    rich.className = "canvas-file-rich-preview";
+    rich.innerHTML = sanitizeInlineHtml(item.richHtml);
+    body.append(rich);
+    return;
   }
   const pre = document.createElement("pre");
   pre.className = "canvas-file-lines";
@@ -829,6 +887,7 @@ export function createDocxBody(item, options) {
   wrap.append(content);
 
   attachPlainCopy(content);
+  attachReadProgress(content, item);
   loadDocxPreview(wrap, content, state, item, options);
   return wrap;
 }
@@ -862,6 +921,8 @@ async function loadDocxPreview(wrap, content, state, item, options) {
       html || "<p class=\"canvas-file-docx-empty\">（这份 DOCX 里没有可显示的文字）</p>";
     state.hidden = true;
     content.hidden = false;
+    /* 正文到位、容器露出来之后才量得到高度，这时候再把阅读位置滚回去 */
+    restoreReadProgress(content, item);
   } catch (error) {
     failDocx(state, content, error);
   }

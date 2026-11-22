@@ -12,6 +12,7 @@ const MIN_FIT = 1200; /* 没有画布时的兜底取景边长（世界像素）�
 const MIN_DOT = 1.5; /* 块再小也至少画这么大，否则内容铺得远时看不见 */
 const NUDGE = 0.05; /* 方向键一格挪视野的 5% */
 const NUDGE_FAST = 0.25; /* 按住 Shift 一格挪 25% */
+const PAGE_FIT_MARGIN = 100; /* 固定宽度画布：鸟瞰横向视野比页面宽出的总量，左右各留一半 */
 
 /* 按类型分色，只求一眼分辨「找那张图还是找那段字」，不追求还原卡片外观。
    线、箭头、连线不在表里 —— 鸟瞰窗里不画它们。 */
@@ -294,28 +295,37 @@ function redraw() {
      代价是跑到内容外面时框会顶出小窗，所以下面把它贴到边上画，至少看得出「偏哪一边」。
      地板按视窗的「大小」放（不看相机在哪儿），所以拖框喂不出正反馈：
      内容只有两块时，光靠 MIN_FIT 兜底会窄于视野，框一画就铺满小窗、贴边钉死，怎么挪都不动。 */
-  const content =
+  let content =
     contentBounds(items) ||
     (() => {
       /* 空的画布钉一块以原点为中心的死区域，否则缩小版跟着视窗一起滑，看不出自己在动 */
       const half = MIN_FIT / 2;
       return { x1: -half, y1: -half, x2: half, y2: half };
     })();
-  const cx = (content.x1 + content.x2) / 2;
+  const pageWidth = hooks.getPageWidth?.() || 0;
   const cy = (content.y1 + content.y2) / 2;
-  const halfW = Math.max(
-    (content.x2 - content.x1) / 2 + Math.max((content.x2 - content.x1) * FIT_PAD, MIN_FIT * FIT_PAD),
-    (viewport.w * VIEWPORT_FIT) / 2,
-  );
   const halfH = Math.max(
     (content.y2 - content.y1) / 2 + Math.max((content.y2 - content.y1) * FIT_PAD, MIN_FIT * FIT_PAD),
     (viewport.h * VIEWPORT_FIT) / 2,
   );
-  const fitW = halfW * 2;
   const fitH = halfH * 2;
-  const s = Math.min((w - EDGE_PAD * 2) / fitW, (h - EDGE_PAD * 2) / fitH);
-  const ox = (w - fitW * s) / 2 - (cx - halfW) * s;
-  const oy = (h - fitH * s) / 2 - (cy - halfH) * s;
+  /* 固定宽度：横向视野钉死在 [−PAGE_FIT_MARGIN/2, W+PAGE_FIT_MARGIN/2]，缩放也由横向独占
+     —— 纵向内容再长也不许把 s 拉小，否则横向就会露出页面外一大片灰底。
+     纵向仍以内容中心对齐，超出小窗的部分靠下面 box 的 clamp 贴边提示偏哪一边。 */
+  const fitW =
+    pageWidth > 0
+      ? pageWidth + PAGE_FIT_MARGIN
+      : Math.max(
+          (content.x2 - content.x1) + 2 * Math.max((content.x2 - content.x1) * FIT_PAD, MIN_FIT * FIT_PAD),
+          viewport.w * VIEWPORT_FIT,
+        );
+  const cx = pageWidth > 0 ? pageWidth / 2 : (content.x1 + content.x2) / 2;
+  const s =
+    pageWidth > 0
+      ? (w - EDGE_PAD * 2) / fitW
+      : Math.min((w - EDGE_PAD * 2) / fitW, (h - EDGE_PAD * 2) / fitH);
+  const ox = (w - fitW * s) / 2 - (cx - fitW / 2) * s;
+  const oy = (h - fitH * s) / 2 - (cy - fitH / 2) * s;
 
   const vw = viewport.w * s;
   const vh = viewport.h * s;

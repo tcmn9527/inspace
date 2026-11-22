@@ -288,3 +288,201 @@
 .md-tool-color:hover .md-tool-swatch {
   border-color: color-mix(in srgb, var(--fg) 55%, transparent);
 }
+
+/* ---------- 编辑态顶部工具栏 ----------
+   文本块的字级工具和 Markdown 文件的 md-toolbar 都挂在这个居中宿主里，
+   脱离块本身：块拖到画布哪儿，工具条都钉在顶部同一处。 */
+
+.editor-toolbar-host {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: none;
+  max-width: calc(100% - 32px);
+}
+
+.editor-toolbar-host.is-visible {
+  display: block;
+}
+
+.editor-toolbar-host[hidden] {
+  display: none;
+}
+
+.canvas-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.16);
+  white-space: nowrap;
+}
+
+.text-toolbar-label {
+  padding: 0 6px 0 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 字号 = 输入框 + 下拉箭头合成一格：左边随便敲，右边 ▾ 选常用档 */
+.text-size-combo {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  height: 26px;
+  border: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  border-radius: 5px;
+  background: var(--surface);
+  overflow: visible;
+}
+
+.text-size-combo:hover {
+  border-color: color-mix(in srgb, var(--line) 90%, transparent);
+}
+
+.text-size-combo:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.text-tool-size-input {
+  width: 44px;
+  height: 100%;
+  padding: 0 2px 0 7px;
+  border: none;
+  border-radius: 5px 0 0 5px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+  outline: none;
+}
+
+.text-tool-size-input::placeholder {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.text-tool-size-input.is-locked {
+  opacity: 0.38;
+  cursor: default;
+}
+
+/* 下拉箭头：贴着输入框右缘，不占一整颗按钮的宽度 */
+.text-size-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 0 5px 5px 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.text-size-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.text-size-toggle.is-open .text-size-caret {
+  transform: rotate(180deg);
+}
+
+.text-size-caret {
+  width: 0;
+  height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 4px solid currentColor;
+  transition: transform 0.12s ease;
+}
+
+/* 常用字号浮层：贴在合成格下方，单列竖排，宽度跟输入格对齐 */
+.text-size-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  min-width: 58px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.text-size-menu[hidden] {
+  display: none;
+}
+
+.text-size-option {
+  width: 100%;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.text-size-option:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.text-size-option.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* 字号输入期间替编辑区画的选区高亮：编辑区失焦后浏览器不再上色，
+   这里用和原生选中同色系的方块把选中的字标出来。纯展示，不接指针事件。 */
+.text-selection-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  pointer-events: none;
+}
+
+.text-selection-box {
+  position: absolute;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* 灰化只作用在按钮和标签上，工具条本身始终清晰可见：
+   整条一起降透明度时，浅色主题下会淡得跟画布背景融为一体，
+   看着就像工具栏根本没挂上来。 */
+.canvas-editor-toolbar.is-disabled .md-tool,
+.canvas-editor-toolbar.is-disabled .text-toolbar-label,
+.canvas-editor-toolbar .md-tool:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.canvas-editor-toolbar .md-tool:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+/* 背景色按钮：用一半文字色、一半底色的小色块，跟文字色按钮区分开 */
+.md-tool-swatch-bg {
+  background: linear-gradient(135deg, #e5484d 0 50%, #fff3bf 50% 100%);
+}

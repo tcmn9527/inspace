@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：layout */
 
 import { findItem, isContainer, itemBounds, itemEls, moveMembers, scheduleItemsSave, selectedIds, syncItemElement, updateSelection } from "../canvas.js";
+import { clampXToPage } from "./page-width.js";
 
 /* ---------- 批量排版 ---------- */
 
@@ -19,7 +20,9 @@ export function editableSelection() {
 
 /* 平移一块。直线和箭头要连终点一起挪，不然框走了线还钉在原地 */
 export function shiftItem(item, dx, dy) {
+  /* 对齐/分布/整理也会改 x，统一夹回页内 */
   item.x += dx;
+  clampXToPage(item);
   item.y += dy;
   if (item.type === "line" || item.type === "arrow") {
     item.x2 += dx;

@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：containers */
 
 import { moveGroup } from "./layout.js";
+import { clampGroupDx } from "./page-width.js";
 import { current, findItem, itemBounds, itemEls, scheduleItemsSave, showToast, syncItemElement, ui, updateSelection, worldToStage } from "../canvas.js";
 
 /* ---------- 分组容器 ----------
@@ -171,8 +172,10 @@ export function toggleContainer(item) {
 /* 方向键挪位：一次 1px，按住 Shift 走 10px。整组各加同样的偏移；
    直线/箭头连端点一起挪，否则只动起点、线会变形。 */
 export function nudgeSelected(dx, dy) {
-  /* 方向和拖动一样：容器带着框里的块一起挪 */
-  for (const { item, el } of moveGroup()) {
+  /* 方向和拖动一样：容器带着框里的块一起挪；固定宽度时整组夹回页内 */
+  const group = moveGroup();
+  dx = clampGroupDx(group, dx);
+  for (const { item, el } of group) {
     item.x += dx;
     item.y += dy;
     if (item.type === "line" || item.type === "arrow") {

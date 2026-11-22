@@ -7,7 +7,7 @@ use super::video::{VIDEO_DIR, video_path, part_path, clear_parts, copy_stream};
 
 /// 图片/音频/视频之外的都算文件：一律拷进画布 files/，双击交给系统默认程序打开。
 /// 这一层不认格式、不装解析器，先保证「任何文件拖进来都有个落点，原文件删了也还在」。
-const FILE_DIR: &str = "files";
+pub(super) const FILE_DIR: &str = "files";
 /// 视频和文件共用这根进度事件：同一时刻只跑一个后台拷贝，两根进度条会打架。
 pub(super) const COPY_EVENT: &str = "canvas-video-copy";
 /// 到这个体积以内同步拷完直接返回，更大的走后台进度拷贝，界面不至于像卡住了
@@ -277,6 +277,76 @@ pub fn canvas_create_file(
         ext: ext.clone(),
         text: true,
         markdown: is_markdown_ext(&ext),
+    })
+}
+
+/// 文本文件块的改名：只改复制进画布的那份（files/ 下），引用态的原文件不动；
+/// 扩展名固定沿用，前端只递交主体名。返回新的文件名和相对路径，由前端更新块并落盘。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamedFile {
+    pub name: String,
+    pub src: String,
+}
+
+#[tauri::command]
+pub fn canvas_rename_file(
+    id: String,
+    item_id: String,
+    name: String,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<RenamedFile, String> {
+    let dir = resolve_dir(&state, &id)?;
+    let (src, linked) = editable_text_item(&dir, &item_id)?;
+    if linked {
+        return Err("引用的是原文件，改不了名字；先「复制进画布」再改".to_string());
+    }
+    let rel = src.replace('\\', "/");
+    if !rel.starts_with(&format!("{FILE_DIR}/")) || rel.contains("..") {
+        return Err("这块的文件不在画布里".to_string());
+    }
+    let old_path = dir.join(&rel);
+    if !old_path.is_file() {
+        return Err("文件已经不在画布目录里了".to_string());
+    }
+    let ext = old_path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    /* 输入框可能带着扩展名回来：和原扩展名相同就先摘掉，避免 a.md.md */
+    let mut stem = name.trim().trim_matches('.').to_string();
+    if !ext.is_empty() {
+        let suffix = format!(".{ext}");
+        if stem.to_lowercase().ends_with(&suffix.to_lowercase()) {
+            stem = stem[..stem.len() - suffix.len()].trim().trim_matches('.').to_string();
+        }
+    }
+    if stem.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+    if stem.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')) {
+        return Err("文件名里有不能用的字符".to_string());
+    }
+    if stem.chars().count() > 80 {
+        return Err("文件名太长了".to_string());
+    }
+    let new_name = if ext.is_empty() { stem } else { format!("{stem}.{ext}") };
+    let new_rel = format!("{FILE_DIR}/{new_name}");
+    let new_path = old_path
+        .parent()
+        .map(|p| p.join(&new_name))
+        .ok_or_else(|| "路径不对".to_string())?;
+    if new_path == old_path {
+        return Ok(RenamedFile { name: new_name, src: rel });
+    }
+    if new_path.exists() {
+        return Err(format!("已经有叫「{new_name}」的文件了"));
+    }
+    fs::rename(&old_path, &new_path).map_err(|e| format!("改名失败：{e}"))?;
+    Ok(RenamedFile {
+        name: new_name,
+        src: new_rel,
     })
 }
 
@@ -731,12 +801,12 @@ pub fn canvas_file_write_back(
     })
 }
 
-struct DecodedText {
-    text: String,
+pub(super) struct DecodedText {
+    pub(super) text: String,
     /// 记的是具体哪一种字节形态（utf8 / utf8bom / gb18030 / utf16le / utf16be），
     /// 写回原文件时照它还原，不能只凭给人看的那个标签。
-    format: &'static str,
-    crlf: bool,
+    pub(super) format: &'static str,
+    pub(super) crlf: bool,
 }
 
 /// 卡片上给人看的编码名。UTF-8 家族合成一个，正常态前端根本不显示这行。
@@ -750,7 +820,7 @@ fn encoding_label(format: &str) -> &'static str {
 
 /// 文本解码：BOM 说了算，没 BOM 先严格 UTF-8，解不动再让系统按 GB18030 解一遍。
 /// 两样都对不上就直说，别把乱码当正文塞进块里。
-fn decode_text(bytes: &[u8]) -> Result<DecodedText, String> {
+pub(super) fn decode_text(bytes: &[u8]) -> Result<DecodedText, String> {
     if let Some(raw) = bytes.strip_prefix(&[0xFF, 0xFE]) {
         return utf16_text(raw, "utf16le", true);
     }
@@ -789,7 +859,7 @@ fn decoded_text(text: String, format: &'static str) -> DecodedText {
 
 /// 写回原文件时把读上来时记下的编码和换行还原回去：
 /// GBK 存的中文笔记不该因为画布改了一次就变 UTF-8，CRLF 的文件别整篇换行大改。
-fn encode_text(text: &str, format: &str, crlf: bool) -> Result<Vec<u8>, String> {
+pub(super) fn encode_text(text: &str, format: &str, crlf: bool) -> Result<Vec<u8>, String> {
     let normalized = if crlf {
         text.replace('\n', "\r\n")
     } else {

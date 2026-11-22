@@ -1,6 +1,12 @@
 /* 从 canvas.js 拆出：note */
 
 import { NOTE_EDITOR_GUARDS, active, addItemElement, bytesToBase64, choiceDialog, commitEditing, confirmDialog, createMarkdownEditor, current, edgeLabelEditor, editingId, filePreviewCache, findItem, itemEls, modalOpen, noteAskId, noteEditor, noteImageCache, noteWriteBack, persistNote, previewKey, removeItemFromDom, renderAll, renderMarkdown, scheduleItemsSave, select, setEditingId, setModalOpen, setNoteAskId, setNoteEditor, setNoteWriteBack, setFileToggleMode, showError, store, updateSelection } from "../canvas.js";
+import { isMarkdownExt, restoreReadProgress } from "../canvas-items/dom-files.js";
+import { sanitizeInlineHtml } from "../inline-html.js";
+import { holdCanvasTextSelection, mountEditorToolbar, releaseCanvasTextSelection, unmountEditorToolbar } from "./editor-toolbar.js";
+import { closeTextToolbar, openTextToolbar } from "./text-toolbar.js";
+
+const { invoke } = window.__TAURI__.core;
 
 /* ---------- 笔记块 ---------- */
 
@@ -283,6 +289,75 @@ export async function copyFileBlockIntoCanvas(item) {
   return true;
 }
 
+/* 记下最后一次按下的落点：编辑区一失焦就来不及问了，只能靠按下那一下判断
+   「是不是点在卡片自己身上」。捕获阶段先记，免得被别处 stopPropagation 吃掉。 */
+let lastDownTarget = null;
+document.addEventListener(
+  "pointerdown",
+  (event) => {
+    lastDownTarget = event.target;
+  },
+  true,
+);
+
+/* 进编辑态时把「读到哪儿」接上：滚动条回到上次的位置，光标落到当前视口的第一行。
+   之前一进编辑就是 focus 到文首，读了几百行的地方瞬间回到第一行。 */
+function editorLineHeight(el) {
+  const style = getComputedStyle(el);
+  return parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.4 || 16;
+}
+
+/* textarea 只按「行号」取行首：按比例估字符容易落进句子中间，
+   接着打字就改到别处去了，宁可偏几行也不能偏进正文里 */
+function textOffsetAtTop(textarea, top) {
+  if (!(top > 0)) return 0;
+  const lines = Math.floor(top / editorLineHeight(textarea));
+  if (lines <= 0) return 0;
+  const text = textarea.value;
+  let offset = 0;
+  for (let i = 0; i < lines; i += 1) {
+    const at = text.indexOf("\n", offset);
+    if (at < 0) return text.length;
+    offset = at + 1;
+  }
+  return offset;
+}
+
+/* 富文本直接用坐标取视口顶部那个字的位置，比按行数估准 */
+function caretAtTopOfView(el) {
+  const rect = el.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const range = document.caretRangeFromPoint?.(rect.left + 6, rect.top + 6);
+  if (!range || !el.contains(range.startContainer)) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function restoreEditorPosition(el, state) {
+  const frac = Number(state.item?.readFrac) || 0;
+  if (!(frac > 0)) return;
+  /* 内容和字号排好版之前量不到 scrollHeight，等两帧再放 */
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const span = el.scrollHeight - el.clientHeight;
+      if (span <= 4) return;
+      const top = frac >= 0.999 ? span : Math.round(span * frac);
+      el.scrollTop = top;
+      if (el.isContentEditable) {
+        caretAtTopOfView(el);
+        return;
+      }
+      if (el.selectionStart === 0 && el.selectionEnd === 0) {
+        const offset = textOffsetAtTop(el, top);
+        el.setSelectionRange(offset, offset);
+        /* 选完光标可能被浏览器带着滚一下，再压回去 */
+        el.scrollTop = top;
+      }
+    });
+  });
+}
+
 export function openFileEditor(id, el, body) {
   const item = findItem(id);
   const card = el.querySelector(".canvas-file-card");
@@ -323,38 +398,120 @@ export function openFileEditor(id, el, body) {
     saving: false,
     closing: false,
     refreshed: false,
+    markdown: false,
+    rich: false,
+    editorEl: null,
+    toolbar: null,
+    editor: null,
+    /* 进来时的富文本基线：退出时只改了样式没改文字也要重建预览 */
+    initialRichHtml: item.richHtml || "",
   };
+  /* 编辑区两种形态：Markdown 是 textarea（源码），普通文本是 contentEditable（富文本）。
+     写盘只认纯文本，所以统一从这里取：富文本取 innerText，Markdown 取 textarea.value。 */
+  state.getText = () =>
+    state.rich ? (state.editorEl?.innerText || "").replace(/\n$/, "") : state.textarea.value;
+  state.focusEditor = () => (state.rich ? state.editorEl : state.textarea)?.focus({ preventScroll: true });
   fileEditor = state;
-  /* Markdown 文件里也允许贴图：图片落到这块自己的 notes/<块id>/ 图床，
-     正文写相对路径；删块时图床跟着一起清。 */
-  textarea.addEventListener("paste", async (event) => {
-    const items = [...(event.clipboardData?.items || [])];
-    const imageItem = items.find((one) => one.type.startsWith("image/"));
-    if (!imageItem) return;
-    event.preventDefault();
-    const file = imageItem.getAsFile();
-    if (!file) return;
-    try {
-      const ext = (file.type.split("/")[1] || "png").toLowerCase().replace("jpeg", "jpg");
-      const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
-      const rel = await store.saveCanvasNoteImage(state.canvasId, state.itemId, base64, ext);
-      const snippet = `![图片](<${rel}>)`;
-      const start = textarea.selectionStart ?? textarea.value.length;
-      const end = textarea.selectionEnd ?? start;
-      textarea.setRangeText(snippet, start, end, "end");
-      textarea.focus({ preventScroll: true });
-    } catch (error) {
-      showError(`图片保存失败：${error}`);
-    }
+
+  if (isMarkdownExt(item.ext)) {
+    /* Markdown 文件：工具栏用笔记块那一套，挪到画布顶部中间，正文仍是本地文件。
+       图片落到这块自己的 notes/<块id>/ 图床，正文写相对路径。 */
+    state.markdown = true;
+    const toolbar = document.createElement("div");
+    toolbar.className = "canvas-editor-toolbar md-toolbar canvas-file-toolbar";
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Markdown 工具栏");
+    state.toolbar = toolbar;
+    mountEditorToolbar(toolbar);
+    state.editor = createMarkdownEditor({
+      textarea,
+      toolbar,
+      saveImage: async (data, ext) => {
+        if (!current || current.meta.id !== state.canvasId) throw new Error("画布已切换");
+        return store.saveCanvasNoteImage(state.canvasId, state.itemId, data, ext);
+      },
+      onError: (message) => showError(message),
+    });
+    state.editor.setValue(body.text);
+    state.editor.setEnabled(true);
+  } else {
+    /* 普通文本文件：编辑区做成富文本，选中文字能设字号/文字色/背景色。
+       样式只存画布上的 item.richHtml，写盘仍写纯文本——用户的 .txt 一个字节都不动。 */
+    state.rich = true;
+    const editor = document.createElement("div");
+    editor.className = "md-textarea canvas-file-textarea canvas-file-rich";
+    editor.contentEditable = "true";
+    editor.spellcheck = false;
+    editor.setAttribute("role", "textbox");
+    editor.setAttribute("aria-label", "文件正文");
+    /* 有富文本样式就回显样式，否则回显磁盘读来的纯文本 */
+    if (item.richHtml) editor.innerHTML = sanitizeInlineHtml(item.richHtml);
+    else editor.textContent = body.text;
+    textarea.replaceWith(editor);
+    state.editorEl = editor;
+    /* 编辑期放开画布文字选择：拖选移出面板才不会掉选区 */
+    holdCanvasTextSelection();
+
+    /* 样式变更即时落到 item（不落盘），另有一次 items 保存排队 */
+    const syncRich = () => {
+      const html = sanitizeInlineHtml(editor.innerHTML);
+      if (html) item.richHtml = html;
+      else delete item.richHtml;
+      scheduleItemsSave();
+    };
+    editor.addEventListener("input", syncRich);
+    openTextToolbar(editor, syncRich);
+
+    /* 粘贴一律按纯文本塞，别把外部富文本/脚本带进编辑区 */
+    editor.addEventListener("paste", (event) => {
+      event.preventDefault();
+      const text = event.clipboardData?.getData("text/plain") || "";
+      if (text) document.execCommand("insertText", false, text);
+    });
+  }
+  const editEl = state.editorEl || textarea;
+  editEl.addEventListener("keydown", onFileEditorKeyDown);
+  /* 点顶部工具栏 / 取色盘不算离开编辑，别把刚要用的工具给收了 */
+  editEl.addEventListener("blur", () => {
+    setTimeout(() => {
+      if (fileEditor !== state) return;
+      const active = document.activeElement;
+      if (active?.closest?.(NOTE_EDITOR_GUARDS)) return;
+      /* 点在卡片自己的壳上（标题行、边框、缩放手柄）：这次不算离开编辑。
+         必须顺手把焦点还回正文——否则编辑区已经失焦，下一次点别处不再有 blur，
+         编辑态就永远退不出去了。 */
+      const down = lastDownTarget;
+      lastDownTarget = null;
+      if (down && state.el?.contains(down)) {
+        state.focusEditor();
+        return;
+      }
+      void closeFileEdit();
+    }, 0);
   });
-  textarea.addEventListener("keydown", onFileEditorKeyDown);
-  /* 点哪儿都算收工：只认自己还挂着的那次编辑，免得把后来新开的框顺手关了 */
-  textarea.addEventListener("blur", () => {
-    if (fileEditor === state) void closeFileEdit();
-  });
+  /* 编辑时滚到哪儿也记一份：退出编辑回到浏览态，接着这儿看 */
+  let readTimer = 0;
+  editEl.addEventListener(
+    "scroll",
+    () => {
+      if (readTimer) return;
+      readTimer = window.setTimeout(() => {
+        readTimer = 0;
+        const span = editEl.scrollHeight - editEl.clientHeight;
+        const frac = span > 4 ? Math.min(1, Math.max(0, editEl.scrollTop / span)) : 0;
+        if (Math.abs((Number(item.readFrac) || 0) - frac) < 0.0005) return;
+        item.readFrac = frac;
+        scheduleItemsSave();
+      }, 240);
+    },
+    { passive: true },
+  );
   select(id);
-  textarea.focus({ preventScroll: true });
-  textarea.setSelectionRange(0, 0);
+  state.focusEditor();
+  if (!state.rich) textarea.setSelectionRange(0, 0);
+  /* 别一进编辑就把人读到的位置清掉：滚动条按块上记的比例放回原处，
+     光标也挪到当前视口的第一行（而不是永远落在第一行） */
+  restoreEditorPosition(editEl, state);
   updateSelection();
 }
 
@@ -363,16 +520,37 @@ export function onFileEditorKeyDown(e) {
     e.preventDefault();
     e.stopPropagation();
     closeFileEdit();
-  } else if (e.key === "Tab") {
-    /* 代码和配置文件里 Tab 是缩进，不能让它跳去页面上别的控件 */
+  } else if (e.key === "Tab" && fileEditor?.rich) {
+    /* 富文本编辑区里 Tab 是缩进，不能让它跳去页面上别的控件 */
+    e.preventDefault();
+    document.execCommand("insertText", false, "  ");
+  } else if (e.key === "Tab" && !fileEditor?.markdown) {
     e.preventDefault();
     e.target.setRangeText("  ", e.target.selectionStart, e.target.selectionEnd, "end");
   }
 }
 
-export function fileDraftDirty(state) {
-  return state.textarea.value !== state.body.text;
+/* 换行符、末尾空行都不算改动：CRLF 文件读进来是 \r\n，编辑区里 innerText
+   一律给 \n，不归一化的话「打开再关掉」每次都被判成改过，白写一遍整份文件
+   （1.6MB 的书稿每开关一次就重写一次），末尾空行还会一点点被吃掉。 */
+function textForCompare(text) {
+  return String(text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n+$/, "");
 }
+
+/* 编辑区读完就把末尾的空行吞掉了，写回时按源文件结尾的换行补回来：
+   否则每次编辑都少一行，改几次文件末尾就变样了。 */
+function keepOriginalTail(text, source) {
+  const tail = (String(source ?? "").match(/\n+$/) || [""])[0];
+  return String(text ?? "").replace(/\n+$/, "") + tail;
+}
+
+export function fileDraftDirty(state) {
+  return textForCompare(state.getText()) !== textForCompare(state.body.text);
+}
+
+const itemRichHtml = (item) => item?.richHtml || "";
 
 export async function closeFileEdit() {
   const state = fileEditor;
@@ -381,13 +559,16 @@ export async function closeFileEdit() {
   state.closing = true;
   if (fileDraftDirty(state) && !(await persistFileEdit(state))) {
     state.closing = false;
-    if (fileEditor === state) state.textarea.focus({ preventScroll: true });
+    if (fileEditor === state) state.focusEditor();
     return false;
   }
   if (fileEditor !== state) return false;
   fileEditor = null;
   closeFileEditorBox(state);
-  if (state.refreshed && findItem(state.itemId)) refreshFileBlock(findItem(state.itemId));
+  /* 只改了字级样式、文字没动时不会写盘（state.refreshed 仍是 false），
+     但预览卡还是进来前那张纯文本，必须重建才能看到新样式。 */
+  const richChanged = state.rich && (itemRichHtml(state.item) !== state.initialRichHtml);
+  if ((state.refreshed || richChanged) && findItem(state.itemId)) refreshFileBlock(findItem(state.itemId));
   else updateSelection();
   return true;
 }
@@ -398,14 +579,28 @@ export function flushFileEditor() {
   const state = fileEditor;
   if (!state) return;
   fileEditor = null;
+  disposeFileToolbar(state);
   if (fileDraftDirty(state)) void persistFileEdit(state);
 }
 
+/* 顶部 Markdown 工具栏是全局宿主，退出/切画布时只摘自己那一条 */
+function disposeFileToolbar(state) {
+  if (state.rich) releaseCanvasTextSelection();
+  state.editor?.destroy();
+  state.editor = null;
+  if (state.rich) closeTextToolbar();
+  if (state.toolbar) unmountEditorToolbar(state.toolbar);
+  state.toolbar = null;
+}
+
 export function closeFileEditorBox(state) {
+  disposeFileToolbar(state);
   state.box.remove();
   state.el.querySelectorAll(".canvas-file-editor").forEach((node) => node.remove());
   state.el.classList.remove("is-editing");
   state.preview.hidden = false;
+  /* 编辑时可能滚到了别处：回浏览态接着那儿看，别退回进编辑前的位置 */
+  restoreReadProgress(state.preview, state.item);
   const toggle = state.el.querySelector(".canvas-file-toggle");
   if (toggle) setFileToggleMode(toggle, false);
 }
@@ -413,7 +608,9 @@ export function closeFileEditorBox(state) {
 /* 写回源文件。返回 false 表示这次没写成（出错或用户选了不覆盖），调用方据此决定留不留编辑框。 */
 export async function persistFileEdit(state) {
   if (state.saving) return false;
-  const text = state.textarea.value;
+  /* 写盘的永远是纯文本：富文本模式取 innerText，样式只在 item.richHtml 里，不进文件。
+     编辑区会把末尾空行吃掉，写回时按源文件原来的末尾换行补上，免得每改一次少一行 */
+  const text = keepOriginalTail(state.getText(), state.body.text);
   state.saving = true;
   try {
     let result = await store.writeBackCanvasFile(state.canvasId, state.itemId, text, state.body, false);

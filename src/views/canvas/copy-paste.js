@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：copy-paste */
 
 import { AUDIO_EXTS, BATCH_GAP, EBOOK_EXTS, GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, IMAGE_EXTS, VIDEO_EXTS, active, addAudioBlock, addDroppedFile, addEbookBlock, addItemElement, addVideoBlock, applyCamera, applyGenDefaultsToItem, askInsertMode, boundsOfItem, clientToWorld, collectPictureImageSrcs, commitEditing, containerBoxOf, current, edgeLabelEditor, editingId, fitImageSize, flushItems, imageCache, insertPoint, insideBox, isContainer, itemBounds, lastPointer, makeGen, makeImage, makeText, modalOpen, newId, normalizeItem, ownedMembers, pasteAudio, pasteImage, placeBlock, remapPictureImageSrcs, replaceSelection, scheduleCameraSave, scheduleItemsSave, select, selectedIds, showError, store, syncSelectedClasses, ui, updateSelection, worldToStage } from "../canvas.js";
+import { clampXToPage } from "./page-width.js";
 
 /* ---------- 复制 / 粘贴块 ----------
    Ctrl+C 存下这批块的一份快照（连它来自哪个画布一起记），Ctrl+V 落一批全新的块。
@@ -144,6 +145,13 @@ export async function landBlock(item, fromId, sourceId) {
     } catch {
       imageCache.set(item.src, null);
     }
+  }
+  /* Markdown 文件块：贴图图床 notes/<块id>/ 和正文里的图片路径跟着新块走，
+     否则删掉原块后副本里的图全裂 */
+  if (item.type === "file" && item.text) {
+    await store
+      .duplicateFileAssets(fromId, sourceId, canvasId, item.id, item.src)
+      .catch(() => {});
   }
   return true;
 }
@@ -340,6 +348,7 @@ export function addTextAtPointer(text) {
   if (editingId || edgeLabelEditor) commitEditing();
   const point = pastePoint();
   const item = makeText(point.x, point.y);
+  clampXToPage(item);
   item.text = text;
   current.items.push(item);
   const el = addItemElement(item);

@@ -190,12 +190,17 @@ export function beginMarquee(event, clickId) {
 export function updateMarquee(dragState, clientX, clientY) {
   if (!marqueeEl) return;
   dragState.last = { x: clientX, y: clientY };
-  /* 起点按世界坐标换算成当前屏幕位置：视野被自动平移后框会跟着一起走 */
-  const start = worldToStage(dragState.startWorld.x, dragState.startWorld.y);
-  const left = Math.min(start.x, clientX);
-  const top = Math.min(start.y, clientY);
-  const width = Math.abs(clientX - start.x);
-  const height = Math.abs(clientY - start.y);
+  /* 起点按世界坐标换算成当前屏幕位置：视野被自动平移后框会跟着一起走。
+     worldToStage 给的是「舞台内坐标」，而框是 position:fixed 挂在 body 上、按视口定位，
+     所以要把舞台相对视口的那点偏移补回去（左边有面板树时这一下差出去两百多像素） */
+  const stageRect = ui.stage.getBoundingClientRect();
+  const anchor = worldToStage(dragState.startWorld.x, dragState.startWorld.y);
+  const startX = anchor.x + stageRect.left;
+  const startY = anchor.y + stageRect.top;
+  const left = Math.min(startX, clientX);
+  const top = Math.min(startY, clientY);
+  const width = Math.abs(clientX - startX);
+  const height = Math.abs(clientY - startY);
   marqueeEl.hidden = false;
   marqueeEl.style.left = `${left}px`;
   marqueeEl.style.top = `${top}px`;

@@ -2,7 +2,7 @@
 
 import { GEN_MODES, ratio } from "../canvas-items.js";
 import { GEN_CFG_MAX } from "../canvas-items.js";
-import { GEN_STEPS_MAX, GEN_TEXT_MAX, agentHighlight, agentRequireItem, agentRequireSpace, agentRevealBlock, agentSummary, clamp, closeFileEdit, commitEditing, current, dropVideoRun, editingId, filePreviewCache, findItem, genBusyId, genEngine, genInputItems, genInputPng, genModeFor, genRunMasks, genRunOf, isFileEditable, itemEls, numOr, openImageExternally, patchVideoRun, persistGen, persistNote, placeGenImage, previewKey, refreshFileBlock, refreshVideoPanel, renderNoteBody, revealTarget, runOrStopGen, scheduleItemsSave, showError, snapGenSize, stopGen, stopVideo, store, syncItemElement, videoBusyId, videoRunOf } from "../canvas.js";
+import { GEN_STEPS_MAX, GEN_TEXT_MAX, agentHighlight, agentRequireItem, agentRequireSpace, agentRevealBlock, agentSummary, clamp, closeFileEdit, commitEditing, current, dropVideoRun, editingId, filePreviewCache, findItem, genBusyId, genInputItems, genInputPng, genModeFor, genRunMasks, genRunOf, isFileEditable, itemEls, numOr, openImageExternally, patchVideoRun, persistGen, persistNote, placeGenImage, previewKey, refreshFileBlock, refreshVideoPanel, renderNoteBody, revealTarget, runOrStopGen, scheduleItemsSave, showError, snapGenSize, stopGen, stopVideo, store, syncItemElement, videoBusyId, videoRunOf } from "../canvas.js";
 
 /* ---------- 生图面板（agent） ----------
    引擎一次只吃一张，所以「现在能不能开始」看的不是这一块，而是 genBusyId() 那一个 id。
@@ -55,14 +55,6 @@ export function applyGenFields(item, spec = {}) {
     item.mode = want;
     touched = true;
   }
-  if (spec.model !== undefined) {
-    const want = String(spec.model).trim().toLowerCase();
-    if (!["", "qwen21", "h3image"].includes(want)) {
-      throw new Error("model 只认 qwen21 / h3image，空串是跟随设置里的当前模型");
-    }
-    item.model = want;
-    touched = true;
-  }
   if (spec.strength !== undefined) {
     const want = Number(spec.strength);
     if (!Number.isFinite(want)) throw new Error("strength 得是个 0~1 的数");
@@ -76,37 +68,14 @@ export async function agentGenStatus() {
   agentRequireSpace();
   const engine = await store.genStatus();
   return {
-    loaded: Boolean(engine.loaded),
+    busy: Boolean(engine.busy),
     busyBlock: genBusyId() || null,
-    family: engine.family || "",
-    familyLabel: engine.familyLabel || "",
-    provider: engine.provider || "local",
+    provider: "api",
     apiModel: engine.apiModel || "",
     apiProblem: engine.apiProblem || null,
-    modelsDir: engine.modelsDir || "",
-    missing: Array.isArray(engine.missing) ? engine.missing : [],
-    dit: engine.dit || "",
-    encoder: engine.encoder || "",
-    idleSeconds: engine.idleSeconds || 0,
+    parallel: engine.parallel || 1,
+    running: Array.isArray(engine.running) ? engine.running : [],
     panels: current.items.filter((item) => item.type === "gen").map(agentSummary),
-  };
-}
-
-/* 看/切当前生图模型族。切换会放掉已载入的权重，下一次出图按新族重新载入。 */
-export async function agentGenFamily(family) {
-  agentRequireSpace();
-  const want = typeof family === "string" ? family.trim() : "";
-  const info = want ? await store.genFamilySet(want) : await store.genModels();
-  return {
-    family: info.family || "",
-    familyLabel: info.familyLabel || "",
-    modes: Array.isArray(info.modes) ? info.modes : [],
-    maxSide: info.maxSide || 0,
-    modelsDir: info.modelsDir || "",
-    currentDit: info.currentDit || "",
-    currentEncoder: info.currentEncoder || "",
-    missing: Array.isArray(info.missing) ? info.missing : [],
-    advice: info.advice || "",
   };
 }
 
@@ -125,13 +94,8 @@ export async function agentGenRun(id, patch = {}, mask = "") {
   const item = agentGenOf(id);
   /* 锁拦改不拦看，但这一趟既改字段又发任务：先看锁，不许把提示词写进一块锁着的面板 */
   /* 锁只锁坐标：出图、改参数、落块这些照常走 */
-  if (!item.prompt?.trim() && genModeFor(item, genInputItems(item).length) !== "upscale") {
+  if (!item.prompt?.trim()) {
     throw new Error("提示词是空的");
-  }
-  const busy = genBusyId();
-  const usingApi = genEngine.provider === "api";
-  if (!usingApi && busy && busy !== item.id) {
-    throw new Error(`引擎正被生图面板 ${busy} 占着，一次只出一张`);
   }
   if (mask) genRunMasks.set(item.id, String(mask));
   else genRunMasks.delete(item.id);
@@ -151,7 +115,7 @@ export async function agentGenRun(id, patch = {}, mask = "") {
   const nowRun = genRunOf(item.id);
   const running = nowRun.phase === "loading" || nowRun.phase === "running";
   if (running) runOrStopGen(item.id);
-  else if (usingApi || !busy) runOrStopGen(item.id);
+  else runOrStopGen(item.id);
   agentHighlight([item.id], 1600);
   if (patch.wait === false) return { ...agentSummary(item), waited: false };
   const seconds = Math.min(600, Math.max(1, numOr(patch.timeout, 300)));

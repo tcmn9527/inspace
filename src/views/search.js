@@ -31,7 +31,6 @@ const TYPE_LABEL = {
   line: "直线",
   arrow: "箭头",
   picture: "画面",
-  scene: "场景",
   gen: "生图面板",
   product: "材料卡",
   quote: "清单",
@@ -103,14 +102,10 @@ function describeBlock(item) {
   if (item.type === "page") {
     return { title: item.title || "提案页", body: `P${item.order || "?"} · ${item.ratio}` };
   }
-  /* 画面里垫的位图、3D 场景里用的 GLB：搜文件名也要能找到这两类面板 */
+  /* 画面里垫的位图：搜文件名也要能找到这类面板 */
   if (item.type === "picture") {
     const files = collectPictureImageSrcs(item.cmds, item.symbols).map((entry) => fileNameOf(entry.src)).filter(Boolean);
     return { title: name || "画面", body: [...new Set(files)].join(" ") };
-  }
-  if (item.type === "scene") {
-    const models = (item.parts || []).filter((part) => part.op === "model").map((part) => fileNameOf(part.src));
-    return { title: name || "场景", body: [...new Set(models)].filter(Boolean).join(" ") };
   }
   return { title: name || TYPE_LABEL[item.type] || item.type, body: name };
 }

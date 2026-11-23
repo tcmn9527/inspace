@@ -72,8 +72,7 @@
   pointer-events: none;
 }
 
-.canvas-plan-footprint,
-.canvas-plan-camera {
+.canvas-plan-footprint {
   pointer-events: auto;
   cursor: pointer;
 }
@@ -111,20 +110,6 @@
   stroke: color-mix(in srgb, var(--surface) 90%, transparent);
   stroke-width: 3;
   pointer-events: none;
-}
-
-.canvas-plan-camera-cone {
-  fill: color-mix(in srgb, var(--accent) 28%, transparent);
-  stroke: var(--accent);
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-
-.canvas-plan-camera-dot {
-  fill: var(--accent);
-  stroke: var(--surface);
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
 }
 
 .canvas-plan-cal-dot {

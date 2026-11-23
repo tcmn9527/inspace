@@ -39,20 +39,7 @@
       "nsis",
       "msi"
     ],
-    "resources": {
-      "resources/cuda/cudart64_12.dll": "cudart64_12.dll",
-      "resources/cuda/cublas64_12.dll": "cublas64_12.dll",
-      "resources/cuda/cublasLt64_12.dll": "cublasLt64_12.dll",
-      "resources/cuda/cudnn64_9.dll": "cudnn64_9.dll",
-      "resources/cuda/cudnn_engines_precompiled64_9.dll": "cudnn_engines_precompiled64_9.dll",
-      "resources/cuda/cudnn_engines_runtime_compiled64_9.dll": "cudnn_engines_runtime_compiled64_9.dll",
-      "resources/cuda/cudnn_graph64_9.dll": "cudnn_graph64_9.dll",
-      "resources/cuda/cudnn_heuristic64_9.dll": "cudnn_heuristic64_9.dll",
-      "resources/cuda/cudnn_ops64_9.dll": "cudnn_ops64_9.dll",
-      "resources/cuda/onnxruntime_providers_cuda.dll": "onnxruntime_providers_cuda.dll",
-      "resources/cuda/onnxruntime_providers_shared.dll": "onnxruntime_providers_shared.dll",
-      "resources/worker/h3d_tex_worker.exe": "h3d_tex_worker.exe"
-    },
+    "resources": {},
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

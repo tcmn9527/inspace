@@ -1,7 +1,7 @@
 /* 从 canvas.js 拆出：agent-layer */
 
 import { ratio } from "../canvas-items.js";
-import { MAX_SCALE, MIN_SCALE, STORAGE_KEY, active, applyCamera, batching, canvases, clamp, commitEditing, current, edgeLabelEditor, editingId, findItem, flushBlockContents, flushCamera, flushItems, genFeedOf, genRunOf, insertPoint, itemBounds, itemEls, loadList, renameTreeGroup, renderAll, replaceSelection, scenePlacementActive, scheduleCameraSave, selectedIds, setCurrent, showEmpty, store, switchTo, treeCollapsed, treeData, treeGroupList, ui } from "../canvas.js";
+import { MAX_SCALE, MIN_SCALE, STORAGE_KEY, active, applyCamera, batching, canvases, clamp, commitEditing, current, edgeLabelEditor, editingId, findItem, flushBlockContents, flushCamera, flushItems, genFeedOf, genRunOf, insertPoint, itemBounds, itemEls, loadList, renameTreeGroup, renderAll, replaceSelection, scheduleCameraSave, selectedIds, setCurrent, showEmpty, store, switchTo, treeCollapsed, treeData, treeGroupList, ui } from "../canvas.js";
 
 /* ---------- MCP / agent 动作层 ----------
    菜单、工具栏、拖拽里的动作在这里收成一组不带界面的函数：参数是普通对象，
@@ -98,21 +98,6 @@ export function agentSummary(item) {
       radius: item.radius,
     };
   }
-  if (item.type === "scene") {
-    return {
-      ...base,
-      /* 件数报成一个数，和画面块报 cmds 条数同一个口径：整份 parts 塞进摘要会把 space_scene 撑爆 */
-      parts: Array.isArray(item.parts) ? item.parts.length : 0,
-      surfaces: item.surfaces,
-      placement: scenePlacementActive(item),
-      camera: item.camera || null,
-      light: item.light || null,
-      groundColor: item.groundColor || "",
-      borderColor: item.borderColor,
-      borderWidth: item.borderWidth,
-      radius: item.radius,
-    };
-  }
   if (item.type === "product") {
     return {
       ...base,
@@ -153,7 +138,6 @@ export function agentSummary(item) {
       imageH: item.imageH,
       calibration: item.calibration,
       footprints: item.footprints,
-      cameras: item.cameras,
       areas: item.areas,
       borderColor: item.borderColor,
       fillColor: item.fillColor,

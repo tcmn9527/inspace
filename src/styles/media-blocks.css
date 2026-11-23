@@ -830,6 +830,19 @@
   color: var(--danger);
 }
 
+/* 编辑 Markdown 时把卡片头收起来：工具栏那一行已经说明在改哪份文件，
+   头再占一行（图标 + 名字 + 体积）就把正文挤没了 */
+.canvas-file-card.is-md-edit .canvas-file-head {
+  display: none;
+}
+
+/* 头收了，编辑框和它之间的那道留白 + 分隔线也一并去掉，工具栏直接贴齐卡片顶边 */
+.canvas-file-card.is-md-edit .canvas-file-editor {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
 /* 文本块的就地编辑：占掉预览那一格，点别处即写回源文件 */
 .canvas-file-editor {
   flex: 1 1 auto;
@@ -1976,4 +1989,18 @@
 
 .canvas-file-preview.is-markdown {
   cursor: auto;
+}
+
+/* 懒挂的文件正文占位：进视野前只画一层斜纹骨架，不解析文件、不建页位图 */
+.canvas-file-wait {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 8px;
+  border-radius: 8px;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--line) 9%, transparent) 0 10px,
+      transparent 10px 20px
+    );
 }

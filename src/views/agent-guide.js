@@ -228,7 +228,7 @@ region 三选一：all 整张画布（默认，看整体构图）、viewport 用
     title: "块",
     body: `## 块（9 个工具）
 
-块类型：text（画布文字）、rect（矩形）、ellipse（椭圆）、line（线）、arrow（箭头）、note（Markdown 笔记卡）、image、audio、video、file（附件/PDF/文本文件卡）、ebook、connector（连线）、picture（矢量画面，见「画面块」一章）、scene（真 3D 场景，字段见 block_create / block_update 的 parts / camera / light）、gen（生图面板，见「生图面板」一章）、product（产品/材料卡，见「产品卡与清单」一章）、quote（清单块，同上一章）。
+块类型：text（画布文字）、rect（矩形）、ellipse（椭圆）、line（线）、arrow（箭头）、note（Markdown 笔记卡）、image、audio、video、file（附件/PDF/文本文件卡）、ebook、connector（连线）、picture（矢量画面，见「画面块」一章）、gen（生图面板，见「生图面板」一章）、product（产品/材料卡，见「产品卡与清单」一章）、quote（清单块，同上一章）。
 
 ### block_get
 单块摘要，不切页之外没有副作用。
@@ -733,126 +733,50 @@ off:true 关掉，画面回到没有光的原样（和没做这功能时逐字�
   {
     id: "gen",
     title: "生图面板",
-    body: `## 生图面板：写一句话出一张图（7 个工具）
+    body: `## 生图面板：写一句话出一张图（5 个工具）
 
 ### 先有一块
-block_create {type:"gen", x, y, w, h, prompt, imageW, imageH, steps, cfg, seed, mode, strength}。
-面板上摆着提示词框和一颗「开始」；尺寸 / 步数 / 贴合度 / 种子 / 那一档 / 改动幅度都没有控件——想调就调块上这几个字段，
-gen_run 和 block_update 都收这九个。默认 1024×1024、30 步、cfg 6、seed -1、mode auto、strength 0.75。
-出图时不另外拼画风前缀，agent 想指定画风直接在 prompt 里写清楚就行。
+block_create {type:"gen", x, y, w, h, prompt, imageW, imageH, mode}。
+面板上摆着提示词框和一颗「开始」，尺寸在「更多设置」里改；步数、CFG、种子这些本地参数已经没有对应字段，别再传。
+默认 1024×1024、mode auto。出图不另外拼画风前缀，想指定画风就在 prompt 里写清楚。
 
 ### gen_run：一条命令出一张
-gen_run {id, prompt} 默认等到出完再回（本机一张约 30 秒）。返回里 phase 回到 idle、seconds 是这一张花了多久，
-src 是这张图在这个画布 images/ 里的相对路径。
-- 头一次跑（或者闲过 45 秒引擎自己放掉权重之后）要从盘上读十来 GB 权重，那一两分钟也算在同一个等待里；
-  timeout 别压太小，默认 300 秒，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问。
-- 本地引擎一次只吃一张。别的面板正占着它会直接报回「引擎正被 xxx 占着」，先 gen_cancel 或者等它完事。
-  走 API 时可以并行：同时最多跑几张在设置 → 图片生成里配（1–10），超过了会报「API 并行已满」。
+gen_run {id, prompt} 默认等到出完再回（远端一张几十秒）。返回里 phase 回到 idle、seconds 是这一张花了多久，src 是这张图在这个画布 images/ 里的相对路径。
+- 并行上限在设置 → 图片生成里配（1–10），满了会报「API 并行已满」，先 gen_cancel 或等一个跑完。
 - 想边跑边干别的就 wait:false 只起一轮，之后看 phase。
-- 同一张要复现就给正数 seed；-1 是每张换一个。
-- 这一步不进批量：一次一张、每张几十秒，排在批量里没有意义。
+- timeout 默认 300 秒、最大 600；到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问。
 
 ### 进料靠连线：图生图与参考图编辑
-**谁用 connector 连到这块面板，谁就是输入图**（方向是上游 → 面板；面板现在也能当连线的两端，圈才画得出来）。
-图片块、生图面板、**画面块（picture）**都能当上游：画面块会按块区域光栅化成 PNG 再喂进去，手绘的笔迹、矢量指令和纸色都会进去（框外的内容不带）。
-一根不接是文生图；接一张当底图重绘，是图生图；接多张一起当参考，是参考图编辑（Qwen-Image 2.1 一路最多吃 10 张）。
-这套推断就是 mode 的 auto 档，块上面板上都会显式报一句「接了 N 张输入图 · 图生图 / 参考图编辑」，别猜。
-- mode 明写才盖得住推断：auto / t2i / i2i / edit。**「只有一张、但它是画风锚点不是底图」必须明写 edit**——
-  不写会被当成底图重绘，锚点只约束画法这条就丢了。只想纯文生图却懒得拆线，就明写 t2i。
-- strength 只在图生图吃：0 几乎原样、1 只剩个大概，默认 0.75。参考图编辑不看它。
-  **别拿低 strength 去调曝光和色调**：实测 0.3 几乎原样返回、0.5 才开始动但会自己加东西（裤腿上凭空多出一个 logo）——
-  明暗正是「贴着原图改」里被保住的那部分，要改色调得回参考图编辑重出。单图这一路很快：864×1152 二十步实测 17 秒。
-- 能当进料的块：图片块（读盘上那份文件）、画面块（矢量先光栅化成 PNG）、另一块面板最近出的那张。
-  **场景块这一版还不吃**（three.js 抓帧是另一件事），连过来会报「这块当不了输入图」。
-- 输入图是每次点「开始」现取的：上游改了、线改了，下一张就跟着变，不用重新建块。
-- 带图比纯文字慢：本机一张参考图约 54 秒，两张约 160 秒（显存吃紧时引擎会自己关掉 prefix 缓存重试，别当成卡死）。
+**谁用 connector 连到这块面板，谁就是输入图**。图片块、生图面板、画面块都能当上游：画面块会按块区域光栅化成 PNG 再喂进去。
+一根不接是文生图；接一张当底图重绘，是图生图；接多张一起当参考，是参考图编辑。
+- mode 明写才盖得住推断：auto / t2i / i2i / edit / inpaint。「只有一张、但它是画风锚点不是底图」必须明写 edit。
+- 远端只发提示词、尺寸和参考图（Images 协议尽量带 mask）：i2i / inpaint 都降级成「参考图 + 提示词」，别承诺「只改一点」。
+- 输入图是每次点「开始」现取的：上游改了、线改了，下一张就跟着变。
+- 一次最多带 16 张参考图，多余的会被截掉。
 
-### 多参考图的词怎么写（实测出来的，别照直觉写）
-接了两张以上，词的写法直接决定成败。照下面这几条来：
-- **指代只认 \`<image1>\` \`<image2>\` 这种标记**，编号就是连线的先后（space_scene 里连线上的 label 是用户自己标的号，能直接对上）。
-  写「图1里那个人」「第一张图」不算指代。实测同 seed、同尺寸、同步数、同 cfg，只把「图1/图2」换成标记，压暗的背景就正回来了。
-- **先说操作，再说清哪张是画布、哪张供材料**，并点名从材料那张取什么。换装、换脸的画布是人物那张，不是衣服或脸那张。
-- **要保留的内容只用一句总括条款点名，别描述它的外观**——描述保留项等于给它下重绘指令。
-  「背景与地面保持不变」守得住；「浅米色花岗岩墙面、银色边框的消防水带箱」会把墙面重绘出色斑。列得越细，跑偏越多。
-- **想保住的东西连提都少提，包括曝光、亮度、色调这类词**。写进词里就等于替用户点名了要编辑的属性：
-  实测从「整张压暗」翻成「发灰泛白、对比塌掉」，把这几句全删掉才回到正常曝光。
-- 反过来，「把<画布>的脸换成<材料>的脸」这种句式容易 under-edit：实测模型整张照抄底图、材料那张根本没进来。
-  让**材料那张当主语**才拉得动——「\`<image1>\` 中那位女子坐在 \`<image2>\` 的沙发上，穿着 \`<image2>\` 那件礼服」；
-  两张都要动的时候 cfg 别往下压，4.5 那版就是照抄了底图，回到 6 才压得住。
-- **暗部被整张顶亮，先加步数，别改词**。双参考换装 864×1152 实测：28 步连着三版（换措辞、在总括条款里点名发色、往负向词塞「头发变灰」）
-  头发都从纯黑翻成灰蓝、墙面发白；同 seed 同词只把步数提到 44，一发就收住——头发回黑、墙面和曝光回到原图，换个 seed 再跑 44 步照样对。
-  这一档是整张重绘，没收敛到位时暗部对模型来说还是「没定下来」，它就往提亮的方向收。代价在时间：44 步实测 113~126 秒，28 步 92~113 秒。
-- 真要贴住原图的明暗和颜色，另一条路是让那张照片当**底图**走图生图：实测 i2i 0.7 出来的头发、墙面、裤子都和原图一个明暗，
-  但这条路没有参考图，衣服全靠文字描述，画不准。要「既保住明暗又照抄实物」得底图和参考图一起喂，这一版引擎还没开这个口子。
-
-### 高清放大：mode 明写 upscale
-另一条不吃扩散的路：纯 Real-ESRGAN x4plus 放大，跟提示词、步数、cfg、seed、块上那对宽高**统统无关**——
-它只把连过来的那一张放大 4 倍（864×1152 → 3456×4608），出来还是存进 images/、还是那块面板的 src。
-- 只吃**一张**连线输入图：没接连报错，连两张也报（放大没有「多张」这个概念）。
-- 这一档不参与 auto 推断，**只能明写** mode:"upscale"；面板上选了它，提示词框会自己收起来。
-- 它不碰那 12 GB 权重，也不看 mmproj：没载模型也能放大，头一次跑不用等一两分钟读盘。
-- 放大倍数是权重自己定的（x4plus 就是 4×），想要小图就出完再缩，别指望传个数改倍率。
-- 快：864×1152 本机实测约 10 秒，512×512 约 1.7 秒（引擎按 512 分块跑，整张一次过要 26 GB 显存、会干净失败）。
-- **别拿它放大带字的图**。实测一张文字为主的长卷（827×1200）放大后笔画根根清楚，但字被「补」错了：
-  「魔愁涧」成了「鹰愁洞」、「白骨精」成了「白骨稿」。ESRGAN 是按纹理补细节，不认字形。
-  海报、截图、扫描件这种要放大，先跟用户说一句这个风险；插画和照片不受影响。
-- 缺文件会直接报回**绝对路径**。那份 .pth 在数据根的 gen/upscale/RealESRGAN_x4plus.pth（67 MB），
-  它跟着数据根走，不在设置窗口「检测模型」那套可换档位里——**别自己去下载或挪**，把报错里那个路径原样报给用户。
+### 高清放大已移除
+upscale 依赖本地放大模型，这一版已随本地引擎一起去掉，gen_run 给这个 mode 会直接报错。要放大就让用户在接口那边放大，或另换一档模式。
 
 ### 出完看一眼
-gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一帧逐步预览。
-词写得对不对、构图偏不偏，在这儿看比读字段可靠；和画面块、场景块一样，改完先看再接着做。
+gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一帧。词写得对不对、构图偏不偏，看比读字段可靠。
 
 ### 要另摆一块才 gen_place
-面板上那张不会自己变成图片块。gen_place {id} 在面板右边落一块独立图片块：是复制不是搬走，
-面板接着显示它那张、也接着能改词重出，两份 PNG 各自独立，删一块不动另一块。
+面板上那张不会自己变成图片块。gen_place {id} 在面板右边落一块独立图片块：是复制不是搬走，两份 PNG 各自独立，删一块不动另一块。
 
-### 走 API：配置在设置窗口
-设置 → 图片生成的顶部可以选「本地模型 / API」。选了 API 并填好接口地址、模型名、Key，出图整条路走远端：
-- gen_status 的 provider 说这一张走 local 还是 api；apiModel 是远端模型名，apiProblem 非空说明配置还缺东西、出图会直接报错。
-- 只发提示词、尺寸和参考图：steps / cfg / seed / negative / model（族）都不生效，别拿这些参数做「能复现」的承诺。
-- i2i / inpaint 降级成「参考图 + 提示词」（Images 协议会尽量带 mask）；upscale 自动走本地放大模型（不受 API 开关影响）。
-- gen_cancel 只是「回来不要这张」，HTTP 请求本身掐不断。
-- API 配置归用户：地址、Key、模型名只让他在设置里改，agent 不代填、也读不到 Key。
+### 状态与取消
+- gen_status：provider 固定 api，apiModel 是远端模型名，apiProblem 非空说明接口地址 / 模型名 / Key 还缺东西、出图会直接报错，parallel 是并行上限，running 是正在跑的块 id；顺带列出每一面生图面板的摘要。
+- gen_cancel {id} 只是「回来不要这张」，HTTP 请求本身掐不断；界面立刻显示已取消，请求回来那张作废丢弃。
 
-### 两族模型：gen_family
-生图引擎里有两族模型，同一时刻只用一族：
-- **qwen21** = Qwen-Image 2.1（默认）：30 步、cfg 6，t2i / i2i / edit / inpaint / upscale 全都支持。
-- **h3image** = MiniMax-H3-Image：33B DiT + 32B 编码器，6 步、cfg 1，只支持 t2i / edit / upscale（i2i 和局部重绘会报回）；
-  1MP 约 5 秒、2MP 约 8 秒、16MP 约 2 分钟（4096 边长，16GB 显卡实测）。
-gen_family 不带参数看当前族、支持的模式、边长上限、目录和缺件；传 qwen21 / h3image 切过去（会放掉已载入的权重，下一张重新读盘）。
-gen_run 的 model 参数也能点名，点名会顺带把当前族切过去。块上的 steps / cfg 写 0 或省略 = 跟着模型走，
-别把 Qwen 的 30 步 / cfg 6 照搬给 H3。两族权重分开放：Qwen 在数据根的 gen/models/，H3 在 gen/h3image/。
-
-### 档位可换：gen_models / gen_models_set
-模型文件夹里可以并存几档 Qwen-Image 2.1 的权重，同一时刻只吃其中一档。gen_models 不带参数，就是设置窗口上那颗「检测模型」：
-回两列可换的文件（dit 画图模型、encoder 文本编码器，都带字节数、小的在前）+ fixed 那两件跟着模型定死的 + 当前档 currentDit / currentEncoder
-+ machine（显卡名、显存、内存总量与空闲、模型目录那个盘还剩多少）+ advice（为什么建议某一档）
-+ needed（建议那一套要放的四个文件：名字、字节数、下载页、在不在盘上，视觉投影标 optional）+ tiers（全部量化档，从小到大，标了建议那一个）。
-gen_models_set {dit|encoder} 只传要动的那个槽位，文件名必须原样取自 gen_models 的列——它不是块上的字段，是全机一份配置。
-- 换完当场落库，并把已载入的权重放掉：下一次出图重新读盘，那一两分钟会落在第一次 gen_run 上。
-- 正在出图时换不了，先 gen_cancel 或等这张跑完。
-- 大档更清晰也更吃内存（权重住内存条，按显存预算现搬上卡），但出图速度由算力决定，别拿体积当质量承诺；改档是为了画质，得用户点头，别自己挑一档就换。
-- advice 那句「这台机器装得下」是拿检测那一刻的空闲内存和该盘剩余算的，用户开着大程序时数字会偏小——别照着它劝人换档。
-- 这两个工具不进批量，也不该顺手改：它们是设置窗口上明摆着的东西。
-
-### 权重不在盘上
-needed 里有缺、或 missing 非空，就是这台机器还没备好模型文件。把 needed 的文件名、字节数和 modelsDir 报给用户，
-让他在设置窗口点「检测模型」看一眼、自己下载了扔进那个文件夹——别自己去下载，也别改路径：
-模型目录归用户（他可能只有一个盘装得下这十几 GB），「换个目录」那颗按钮就是给他按的。
-当前档位选过一个后来被删掉的文件，也是这儿报出来。
-视觉投影（mmproj）那行标着 optional 是真的：纯文生图缺了照跑，**但图生图和参考图编辑要靠它读输入图**，
-真要走带图的档却缺这个文件，报回的话就照 needed 那行说清楚。`,
+### 配置归用户
+接口地址、Key、模型名、并行数都只在设置 → 图片生成里改：agent 不代填、也读不到 Key。要提醒用户去补配置时，就把 apiProblem 那句话原样转述。`,
   },
   {
     id: "video",
     title: "视频生成",
     body: `## 视频生成：文生视频 / 图生视频
 
-### 两个引擎：本机 sd.cpp 或云端 API
-设置 → 视频生成 顶部选「本地模型 / 云端 API」：
-- **本地模型**：本机 sd.cpp 的 MiniMax-H3（T2VA/I2VA），四个文件（DiT、视频 VAE、音频 VAE、编码器）由用户在设置里各选一次。1–20 秒、默认带音频、每条几分钟；和本地生图引擎抢显存，同时只能用一个。首帧就是连线进来的第一张图。
-- **云端 API**：三家协议如下，需要协议、Key 和模型：
+### 只走远端 API
+本地视频模型已经移除，生成一律走设置 → 视频生成里配好的接口，需要协议、Key 和模型。三家协议：
 - **openai**（OpenAI videos 兼容：Sora 2、Azure、聚合网关、vLLM-Omni）：
   提交 POST /videos，带首帧图时 multipart 的 input_reference，轮询 /videos/{id}，/content 下载。
 - **minimax**（海螺）：/v1/video_generation，首帧走 first_frame_image，直接吃 base64 Data URL。
@@ -864,12 +788,12 @@ needed 里有缺、或 missing 非空，就是这台机器还没备好模型文�
   "firstFrame": "<图片块 id 或 PNG base64>", "seconds": 6, "ratio": "16:9" }
 ~~~
 - firstFrame 给块 id（图片块、画面块、已出图的生图面板）或直接给 base64；不给就是文生视频。
-- 云端 API 可以并行跑多条（条数在设置 → 视频生成里配，1–10）；本地引擎一次只跑一条，另一条在跑时提交会直接报错。
+- 可以并行跑多条（条数在设置 → 视频生成里配，1–10），同时在跑的条数超过上限会直接报回。
 - 平台任务通常 1-5 分钟。默认等 600 秒；到点返回 timedOut:true，任务还在平台跑，用 gen_video_status 接着看。
 - 返回的 path 是 gen/videos/ 下的缓存文件绝对路径（截图/预览可以直接用它）。
 
 ### 取消与费用
-- gen_video_cancel 只是本地不再等：任务已经提交到平台，服务端停不掉，**费用照算**。
+- gen_video_cancel 只是这边不再等：任务已经提交到平台，服务端停不掉，**费用照算**。
 - 视频按秒计费，提交前把 seconds 说清楚，别默认拉满。
 
 ### 设备与协议选择
@@ -882,8 +806,8 @@ needed 里有缺、或 missing 非空，就是这台机器还没备好模型文�
 
 ### 一件家具只该有一个实体
 产品卡不是普通图片卡：它把 name、brand、sku、spec、price、qty、source、note、产品图（src）、
-真实尺寸 dims（毫米，w 宽 / d 深 / h 高）和 model（本机 GLB 路径）都存在同一块上。
-后面的户型脚印、3D 家具和清单都会指回这块，改一处其余跟着变。
+真实尺寸 dims（毫米，w 宽 / d 深 / h 高）都存在同一块上。
+后面的户型脚印和清单都会指回这块，改一处其余跟着变。
 
 ### block_create {type:"product"}
 ~~~json
@@ -894,10 +818,10 @@ needed 里有缺、或 missing 非空，就是这台机器还没备好模型文�
 ~~~
 - price 是元；qty 是数量，清单小计 = price × qty。
 - path 是产品图，会拷进画布 images/；不给就显示「无图」。
-- dims / model 现在就能存，P2/P3 接 3D 和户型时直接读。
+- dims 现在就能存，户型脚印直接读它。
 
 ### block_update
-同一批字段都能改：name / brand / sku / spec / price / qty / source / note / model / dims / internal。
+同一批字段都能改：name / brand / sku / spec / price / qty / source / note / dims / internal。
 改 price/qty 不用管清单，清单会自动重算。
 
 ### 清单块 block_create {type:"quote"}
@@ -913,70 +837,20 @@ needed 里有缺、或 missing 非空，就是这台机器还没备好模型文�
 ~~~json
 { "path": "D:\\\\work\\\\...\\\\家具.csv", "x": 120, "y": 720 }
 ~~~
-- 表头中文英文都认：名称/name、品牌/brand、SKU/编号/sku、规格/spec、单价/price、数量/qty、来源/source、备注/note、图片/image、模型/model。
+- 表头中文英文都认：名称/name、品牌/brand、SKU/编号/sku、规格/spec、单价/price、数量/qty、来源/source、备注/note、图片/image。
 - 图片列写相对路径时按 CSV 所在目录找；图片会拷进画布 images/。
 - 返回 { created, skipped, imagesMissing }：名称空的行跳过；图拷不动的行照建卡，只计数。
 - 卡片从 x/y 起 3 列一排往下铺；不给坐标就落在视野里。`,
   },
   {
-    id: "scene",
-    title: "3D 场景与模型",
-    body: `## 3D 场景与模型（5 个工具）
-
-### 模型库
-家具存 .glb（贴图要内嵌）放在数据根 library/models。model_import {path} 把本机 .glb 收进去，model_list 看有哪些；
-产品卡的 model 字段填这里返回的 name（只写文件名，不带路径）。
-
-### 房间壳
-scene_room_shell {id, preset:"living"|"bedroom"|"dining", wallColor?, floorColor?}
-铺地板、背景墙、侧墙、窗（带窗框）、地毯和边柜；单位是厘米（客厅 6.2×5.2m、墙高 2.8m）。
-注意：它会**替换**场景里现有的 parts；已经摆好的家具要重新 place。
-
-### 把产品卡放进场景
-scene_place_product {scene, product, x?, y?, rotate?}
-按产品卡的 dims（毫米）等比缩放模型：w 是主尺度，模型水平居中、底面对齐地面。x/y 是场景地面坐标（厘米），不给就放 (0,0)；rotate 绕落点转。
-模型库里没有这张卡的 model 会直接报错，先用 model_import。
-
-### 材质：把产品卡的图贴到墙 / 地 / 柜上
-scene_apply_material {scene, product, target:"地板", repeat:80}
-target 给件名（地板 / 背景墙 / 侧墙 / 边柜 / 地毯）或 parts 序号；repeat 是每格多少厘米（默认 100）。
-clear:true 去掉贴图回到纯色。模型件不能贴；贴图只认场景块所在画布 images/ 里的图。
-
-### 灯光与机位
-scene_light_preset {id, preset:"day"|"warm"|"night"|"off"}
-scene_camera_preset {id, preset:"front"|"left"|"right"|"top"|"auto"}
-机位按当前内容框算；auto 回到按内容自动框。摆完东西先 scene_screenshot 看一眼，再决定要不要换机位。
-
-### 家具摆放与附着面
-右键场景 →「编辑元素」后，普通左键点选/拖动单件家具；Ctrl 旋转、Shift 整体平移保持不变，Esc 退出编辑元素。
-scene_get {id} 读取完整零件、surfaces、真实模型包围盒和屏幕中心；未加载的 GLB 不能绑定或移动。
-scene_surface_set {id,surface:{id:"floor",kind:"floor",x:0,y:0,z:2,w:600,h:500}} 定义地面，x/y 为中心，z 是承载高度。
-墙面 kind:"wall"，x/y 是宽度中点、z 是底边；rotate:0 的宽轴朝 +x、墙面朝 -y，rotate:90 朝 +x；w 是宽度、h 是高度。
-scene_furniture_bind {id,parts:[3,4,5,6,7],surface:"floor",group:"table"} 把桌面和腿合成一件并贴面；surface:"" 解除。
-scene_furniture_move {id,part:3,du:20,dv:0} 沿附着面移动整组（厘米）：du 沿宽轴，dv 地面沿深轴、墙面向上。
-真实几何整体夹在面内，脚/背贴住面；不能放下整件家具就报错，不缩放、不脱墙、不把单独桌腿拖走。
-scene_placement_mode {id,enabled:true} 切换摆放模式。未绑定 surface 的墙、门窗等保持固定；group 只在该场景内有效。
-附着面按实际可用区域明确设置，不自动识别墙窗/门洞，也不做家具相互碰撞。
-
-### 在画布上直接转
-用户在场景画面里按 Ctrl + 左键拖动旋转视角，按 Shift + 左键拖动整体平移视图，滚轮推拉；普通左键和别的块一样拖整块 / 点选，不碰内部。场景块没有标题 chip。
-转过的视角记在块上，右键「重置视角」回到自动框，「视角」里还有正面 / 左右角 / 俯视。
-agent 改机位仍走 scene_camera_preset；两边改的是同一份 camera 字段。
-
-### 手写模型件
-parts 里也能直接写 {op:"model", x,y,z, src, w,d,h, rotate, scale, name}：
-src 是模型库文件名，w/d/h 是期望的真实尺寸（厘米，按 w 等比缩放，没给 w 就按 h，默认 80cm）。
-能用 scene_place_product 就别手拼——它会顺带检查模型库和产品尺寸。`,
-  },
-  {
     id: "plan",
     title: "户型图",
-    body: `## 户型图与 3D 联动（5 个工具）
+    body: `## 户型图（4 个工具）
 
 ### 建块与定标
 block_create {type:"plan", path:"C:\\\\...\\\\户型图.png"} 把户型图拷进画布，块大小按图片比例自动定。
 plan_calibrate {id, x1, y1, x2, y2, mm}：x1~y2 是图片上两个点的**相对位置（0~1，左上角 0,0）**，mm 是这段真实长度。
-定标之前脚印、面积、机位都不显示——没有比例就没法把毫米放到图上。可以先 space_snapshot 看户型图再估两个点。
+定标之前脚印和面积都不显示——没有比例就没法把毫米放到图上。可以先 space_snapshot 看户型图再估两个点。
 用户可以自己右键「标定比例…」，在图上点两下再填毫米。
 
 ### 家具脚印
@@ -989,14 +863,9 @@ plan_place_product {plan, product, x?, y?, rotate?}
 plan_area {plan, points:[{x,y},…]}
 points 是毫米坐标、按顺序围一圈（至少 3 个），返回 squareMeters。面积画成虚线多边形并标在图上。
 
-### 3D 机位
-plan_place_camera {plan, scene, x?, y?, rotate?, preset?}
-在户型图上放一个机位标记，链接一个场景块；preset 是 front / left / right / top / auto。
-用户点这个标记，场景块会切到该机位并把镜头带过去。x/y 是标记位置（毫米），rotate 是朝向。
-
 ### 看现状
-block_get 一个 plan 会返回 imageW/imageH、calibration、footprints、cameras、areas（都带 id），
-用来算位置、选 id 删除。plan_remove 的 kind 只有 footprint / camera / area。`,
+block_get 一个 plan 会返回 imageW/imageH、calibration、footprints、areas（都带 id），
+用来算位置、选 id 删除。plan_remove 的 kind 只有 footprint / area。`,
   },
   {
     id: "proposal",
@@ -1009,12 +878,6 @@ block_create {type:"page", ratio:"a4"|"a4l"|"16:9"|"4:3", title:"客厅方案", 
 比例：a4 794×1123、a4l 1123×794、16:9 1280×720、4:3 1024×768。
 改页名/页序/比例用 block_update 的 title / order / ratio；改比例会按新比例重设页大小。
 页面排版建议：先按页的 x/y 把页框摆成一排（页间留 200 左右），再往里摆内容。
-
-### 一键搭骨架
-proposal_template {title:"软装提案", x?, y?}
-建出 7 页一排：封面 / 客户需求 / 风格板 / 客厅方案 / 主卧方案 / 餐厅方案 / 材料与报价。
-三个空间页里已经铺好客厅、主卧、餐厅的房间壳场景，最后页带一张清单块；封面和说明页有占位文字。
-它只搭架子不出图，建完再往里填参考图、产品卡、户型和风格变体。
 
 ### 复制整页
 page_duplicate {id}：把这一页和页里的块整份复制到右边，媒体各拷独立副本，连线不复制。
@@ -1032,18 +895,14 @@ page_screenshot {id, maxSide} 按客户版规则整页渲染成 PNG：页框底�
 client_pdf_export {dir, name}：把每页高清渲染成一张，按 order 拼成多页 PDF，写到 dir 下 <name>.pdf。
 dir 必须是已经存在的文件夹。界面上没有这个入口，只能走这个工具。
 
-### 按页导出网页（3D 可转）
-client_web_export {dir, name}：在 dir 下新建 <name> 子文件夹：
-index.html + pages/page-01.png… + scene-viewer.js。
-客户双击 index.html 就能看；页面上场景块那块是可点的虚线热区，点开能拖着转、滚轮缩放。
-场景里的 GLB 模型和材质图都内嵌成 data URL，不依赖模型库和网络，整个文件夹可以直接发走。
-界面上没有这个入口，只能走这个工具。
+### 按页导出网页
+client_web_export {dir, name}：在 dir 下新建 <name> 子文件夹，写 index.html 和 pages/page-01.png…。
+客户双击 index.html 就能翻页看；整个文件夹可以直接发走。界面上没有这个入口，只能走这个工具。
 
 ### 注意
 - 页框尺寸大，画布上排页时留足间距；页名是唯一的拖动把手，页里的块可以正常点选。
 - 整套按页交付只认 page 块；没有页框时这两个导出会报「还没有提案页」。
-- 导出网页的查看器是预打包的 scene-viewer.bundle.js；改了 src/views/export-scene-viewer.js 之后
-  要在开发机上跑 npm run build:viewer 重新打包，否则导出的还是旧查看器。`,
+- 导出网页和 PDF 都按客户版规则摘掉页名、描边和内部块，排完先 page_screenshot 看一眼。`,
   },
   {
     id: "playback",

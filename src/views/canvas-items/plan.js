@@ -1,8 +1,9 @@
 /* canvas-items/plan.js —— 从 canvas-items.js 拆出（导出名不变，入口统一 re-export）。 */
 
-import { CARD_DEFAULT_BORDER_WIDTH, CARD_DEFAULT_RADIUS, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MAX_AREAS, PLAN_MAX_CAMERAS, PLAN_MAX_FOOTPRINTS } from "./constants.js";
-import { PLAN_CAMERA_PRESETS, frac01 } from "./scene-parts.js";
+import { CARD_DEFAULT_BORDER_WIDTH, CARD_DEFAULT_RADIUS, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MAX_AREAS, PLAN_MAX_FOOTPRINTS } from "./constants.js";
 import { newId, num } from "./util.js";
+
+const frac01 = (value) => Math.min(1, Math.max(0, num(value)));
 
 export function normalizePlanCalibration(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -40,26 +41,6 @@ export function normalizePlanFootprints(raw) {
   return out;
 }
 
-export function normalizePlanCameras(raw) {
-  const out = [];
-  for (const one of Array.isArray(raw) ? raw : []) {
-    if (out.length >= PLAN_MAX_CAMERAS) break;
-    if (!one || typeof one !== "object") continue;
-    const scene = typeof one.scene === "string" ? one.scene : "";
-    if (!scene) continue;
-    const preset = PLAN_CAMERA_PRESETS.includes(one.preset) ? one.preset : "front";
-    out.push({
-      id: typeof one.id === "string" && one.id ? one.id : newId(),
-      scene,
-      x: num(one.x),
-      y: num(one.y),
-      rotate: Number.isFinite(Number(one.rotate)) ? ((Number(one.rotate) % 360) + 360) % 360 : 0,
-      preset,
-    });
-  }
-  return out;
-}
-
 export function normalizePlanAreas(raw) {
   const out = [];
   for (const one of Array.isArray(raw) ? raw : []) {
@@ -78,8 +59,6 @@ export function normalizePlanAreas(raw) {
   return out;
 }
 
-/* 场景块：一块真 3D 视口。刚建出来是空的——地面由渲染器垫，相机按内容自动框。 */
-
 export function makePlan(x, y, src, imageW, imageH) {
   return {
     id: newId(),
@@ -94,7 +73,6 @@ export function makePlan(x, y, src, imageW, imageH) {
     imageH: Math.max(0, Number(imageH) || 0),
     calibration: null,
     footprints: [],
-    cameras: [],
     areas: [],
     borderColor: "",
     fillColor: "",

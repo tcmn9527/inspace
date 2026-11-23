@@ -505,74 +505,6 @@ pub fn canvas_delete_picture(
     Ok(())
 }
 
-// ---------- 场景块里的东西 ----------
-
-/// 一块场景最多收多少件，口径跟前端那条上限一致。
-const MAX_SCENE_PARTS: usize = 2000;
-
-/// 只收 parts 一样：件数掐到上限、非对象的条目丢掉。
-/// 单件长什么样不在这里查——前端每读一次都会自己严格过一遍（认不了的整件丢），
-/// 这儿挡的只是坏文件把盘和内存一起撑爆。
-fn scene_of(raw: &Value) -> Value {
-    let list: Vec<Value> = raw
-        .get("parts")
-        .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter(|part| part.is_object())
-                .take(MAX_SCENE_PARTS)
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
-    json!({ "parts": list, "updatedAt": now_ms() })
-}
-
-/// 这块场景的东西文件；还没落过盘返回 null，由前端拿块上残留的那份补写一次。
-#[tauri::command]
-pub fn canvas_read_scene(
-    id: String,
-    item_id: String,
-    state: tauri::State<'_, CanvasState>,
-) -> Result<Option<Value>, String> {
-    let dir = resolve_dir(&state, &id)?;
-    let path = scene_file(&dir, &item_id)?;
-    read_json(&path).map(|value| value.map(|raw| scene_of(&raw)))
-}
-
-#[tauri::command]
-pub fn canvas_write_scene(
-    id: String,
-    item_id: String,
-    parts: Value,
-    state: tauri::State<'_, CanvasState>,
-) -> Result<Value, String> {
-    let dir = resolve_dir(&state, &id)?;
-    let path = scene_file(&dir, &item_id)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建场景目录失败：{e}"))?;
-    }
-    let value = scene_of(&json!({ "parts": parts }));
-    write_json_compact(&path, &value)?;
-    Ok(value)
-}
-
-/// 删掉一块场景：它自己那份东西文件进系统回收站，摆好的院子不留在盘上没人认领。
-#[tauri::command]
-pub fn canvas_delete_scene(
-    id: String,
-    item_id: String,
-    state: tauri::State<'_, CanvasState>,
-) -> Result<(), String> {
-    let dir = resolve_dir(&state, &id)?;
-    let path = scene_file(&dir, &item_id)?;
-    if path.is_file() {
-        recycle_path(&path).map_err(|e| format!("删除场景失败：{e}"))?;
-    }
-    prune_empty(&dir.join(SCENE_DIR));
-    Ok(())
-}
-
 // ---------- 生图面板的内容 ----------
 
 /// 一块面板的提示词最长多少字：比一句提示词宽裕，但绝不让一份文件变成文章。
@@ -716,7 +648,6 @@ pub fn canvas_reveal_block(
     let path = match found.get("type").and_then(Value::as_str).unwrap_or_default() {
         "note" => note_text_file(&dir, &item_id)?,
         "picture" => picture_file(&dir, &item_id)?,
-        "scene" => scene_file(&dir, &item_id)?,
         _ => return Err("这块没有自己的文件".to_string()),
     };
     reveal_path(&path);

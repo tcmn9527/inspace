@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：alt-measure */
 
-import { CONNECTOR_MAX_POINTS, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, RESIZE_MIN, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, active, addItemElement, applyCamera, assignMeasureHeld, bendInsertIndex, boundsOfItem, capturePagePin, clientToWorld, connectHit, connectorGeometry, current, drag, drawConnectPreview, drawSnapGuides, dropTool, editingId, findItem, finishConnect, finishConnectEnd, finishMarquee, finishPaint, fitGenPrompt, itemBounds, itemEls, loneSelected, makeBox, makeLine, makePicture, makeScene, makeText, measureFrame, measureHeld, nearestPathPoint, onPaintPointerMove, pinEbookPage, reassignContainerOwners, refreshConnectors, refreshMinimap, releaseEbookPage, removeItemFromDom, scheduleCameraSave, scheduleItemsSave, select, setConnectTarget, setDrag, setHoverId, setMeasureFrame, setTool, snapLineAngle, snapOffset, snapResize, startTextEdit, stretchEbookPage, syncConnector, syncItemElement, tool, ui, updateMarquee, updatePorts, updateSelection, worldToStage } from "../canvas.js";
+import { CONNECTOR_MAX_POINTS, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, RESIZE_MIN, TEXT_DEFAULT_WIDTH, active, addItemElement, applyCamera, assignMeasureHeld, bendInsertIndex, boundsOfItem, capturePagePin, clientToWorld, connectHit, connectorGeometry, current, drag, drawConnectPreview, drawSnapGuides, dropTool, editingId, findItem, finishConnect, finishConnectEnd, finishMarquee, finishPaint, fitGenPrompt, itemBounds, itemEls, loneSelected, makeBox, makeLine, makePicture, makeText, measureFrame, measureHeld, nearestPathPoint, onPaintPointerMove, pinEbookPage, reassignContainerOwners, refreshConnectors, refreshMinimap, releaseEbookPage, removeItemFromDom, scheduleCameraSave, scheduleItemsSave, select, setConnectTarget, setDrag, setHoverId, setMeasureFrame, setTool, snapLineAngle, snapOffset, snapResize, startTextEdit, stretchEbookPage, syncConnector, syncItemElement, tool, ui, updateMarquee, updatePorts, updateSelection, worldToStage } from "../canvas.js";
 import { clampGroupDx, clampXToPage } from "./page-width.js";
 
 /* ---------- Alt 测距 ---------- */
@@ -141,7 +141,6 @@ export function startDraw(e) {
   let item = null;
   if (tool === "rect" || tool === "ellipse") item = makeBox(tool, start.x, start.y, start.x, start.y);
   else if (tool === "picture") item = makePicture(start.x, start.y, 0, 0);
-  else if (tool === "scene") item = makeScene(start.x, start.y, 0, 0);
   else if (tool === "line" || tool === "arrow") item = makeLine(tool, start.x, start.y, start.x, start.y);
   else if (tool === "text") item = makeText(start.x, start.y, 40);
   if (!item) {
@@ -381,8 +380,7 @@ export function onWindowPointerMove(e) {
     if (
       item.type === "rect" ||
       item.type === "ellipse" ||
-      item.type === "picture" ||
-      item.type === "scene"
+      item.type === "picture"
     ) {
       item.x = Math.min(drag.start.x, point.x);
       item.y = Math.min(drag.start.y, point.y);
@@ -578,13 +576,6 @@ export function settlePointerUp(e) {
     if (item.type === "picture") {
       item.w = Math.max(PICTURE_MIN_WIDTH, item.w);
       item.h = Math.max(PICTURE_MIN_HEIGHT, item.h);
-      syncItemElement(itemEls.get(item.id), item);
-    }
-    /* 场景块同理：拖出多大都先给一块能看的视口，太小的地板交给这里，
-       不交给上面的 tooSmall——那条是「根本没拖动就别留」的判据，不是尺寸地板 */
-    if (item.type === "scene") {
-      item.w = Math.max(SCENE_MIN_WIDTH, item.w);
-      item.h = Math.max(SCENE_MIN_HEIGHT, item.h);
       syncItemElement(itemEls.get(item.id), item);
     }
     /* 生图面板同理：地板是给上面那块取景窗留的，再小就没法看正在长的图 */

@@ -1,11 +1,9 @@
 /* cargo 之前的构建环境注入。
 
-   生图引擎是 C++（stable-diffusion.cpp），它的 build.rs 写死要 Ninja + cl.exe，
-   bindgen 又要有 libclang.dll 才跑得动。这几样 VS 2022 全都带着，但都不在 PATH 里：
-     cl.exe   → 要先 call vcvars64.bat，连 INCLUDE/LIB 一起导入才能用
-     cmake    → Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin
-     ninja    → Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja
-     libclang → 本机没装 LLVM，放仓库的 tools\libclang\bin
+   Rust 这边有两个依赖要现场编 C：bundled SQLite（rusqlite）和少量 C 代码，
+   cargo 调 link.exe 也得有 MSVC 的环境。这些都在 VS 2022 里，但不在 PATH 里：
+     cl.exe / link.exe → 要先 call vcvars64.bat，连 INCLUDE/LIB 一起导入才能用
+     cmake / ninja     → Common7IDECommonExtensionsMicrosoftCMake 下
 
    所以 npm run dev / build 先过这个脚本。找不到 VS 时原样放行，不拦日常开发：
    环境本来就对的外壳（比如开发者命令行）直接跑就行。
@@ -143,28 +141,6 @@ function main(argv) {
       ]);
     }
   }
-
-  // bindgen 靠这个找 libclang，缺了它 build.rs 里那句 generate().unwrap() 直接炸
-  const clangBin = path.join(ROOT, "tools", "libclang", "bin");
-  if (fs.existsSync(path.join(clangBin, "libclang.dll"))) {
-    env.LIBCLANG_PATH = clangBin;
-    log(`libclang：${clangBin}`);
-  } else if (!env.LIBCLANG_PATH) {
-    log(`警告：${clangBin} 下没有 libclang.dll，编译 C++ 绑定会失败。`);
-  }
-
-  // tch/torch-sys 编译期要找到 libtorch（运行期同样从数据根找）；没设时按数据根默认位探测
-  if (!env.LIBTORCH) {
-    const candidates = [path.join("D:\\work\\gzt_data\\gen\\h3d\\libtorch"), path.join(ROOT, "tools", "libtorch")];
-    const found = candidates.find((p) => fs.existsSync(path.join(p, "lib", "torch_cuda.dll")));
-    if (found) {
-      env.LIBTORCH = found;
-      log(`libtorch：${found}`);
-    }
-  }
-
-  // 4080 SUPER 是 sm_89；不给的话 CMake 按 ggml 的默认架构编，跑不满新卡
-  if (!env.CUDA_COMPUTE_CAP) env.CUDA_COMPUTE_CAP = "89";
 
   const [cmd, ...rest] = argv;
   if (!cmd) {

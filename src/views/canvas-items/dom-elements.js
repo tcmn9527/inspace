@@ -54,19 +54,6 @@ export function createItemElement(item, mediaSrc, options = {}) {
     svg.setAttribute("class", "canvas-picture-svg");
     card.append(svg);
     el.append(card);
-  } else if (item.type === "scene") {
-    /* 里面先只摆一句话：three.js 是点开才拉的，拉到之前这块就是「加载中」。
-       canvas-scene-view 是渲染器挂 <canvas> 的宿主，卡片自身负责裁剪。 */
-    const card = document.createElement("div");
-    card.className = "canvas-scene-card";
-    const view = document.createElement("div");
-    view.className = "canvas-scene-view";
-    const hint = document.createElement("p");
-    hint.className = "canvas-scene-hint";
-    hint.textContent = "场景加载中…";
-    view.append(hint);
-    card.append(view);
-    el.append(card);
   } else if (item.type === "gen") {
     /* 上面是取景窗、下面是提示词和一颗开始。出图要几十秒，这一上半截就是给「等」留的。 */
     const card = document.createElement("div");
@@ -123,19 +110,8 @@ export function createItemElement(item, mediaSrc, options = {}) {
         Object.assign(control, attrs);
         return control;
       };
-      const select = (name, entries, wide = false) => {
-        const control = document.createElement("select");
-        control.className = "canvas-gen-more-input";
-        control.dataset.genField = name;
-        for (const [value, text] of entries) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = text;
-          control.append(option);
-        }
-        row(name === "model" ? "模型" : "模式", control, wide);
-      };
-      select("model", [["qwen21", "Qwen-Image 2.1"], ["h3image", "MiniMax-H3-Image"]], true);
+      /* 这一版只走 API：步数 / CFG / 种子 / 负向 / 改动幅度 / 模型族在远端都没有对应字段，
+         面板上不再摆这些行，只留尺寸。 */
       const width = field("input", "imageW", { inputMode: "numeric", spellcheck: false });
       const height = field("input", "imageH", { inputMode: "numeric", spellcheck: false });
       const size = document.createElement("div");
@@ -149,28 +125,6 @@ export function createItemElement(item, mediaSrc, options = {}) {
       sizePreset.title = "选一个常用尺寸（手机壁纸、电脑壁纸等），也可以直接改左右两个数";
       size.append(width, times, height, sizePreset);
       row("尺寸", size, true);
-      row("步数", field("input", "steps", { inputMode: "numeric" }));
-      row("CFG", field("input", "cfg", { inputMode: "decimal" }));
-      const seedInput = field("input", "seed", { inputMode: "numeric" });
-      seedInput.title = "-1=随机，固定种子=复原提示词和参数都相同时的图";
-      row("种子", seedInput);
-      const seedTip = document.createElement("p");
-      seedTip.className = "canvas-gen-more-tip";
-      seedTip.textContent = "-1=随机，固定种子=复原提示词和参数都相同时的图";
-      more.append(seedTip);
-      row("改动幅度", field("input", "strength", { inputMode: "decimal" }));
-      const negative = field("textarea", "negative", { rows: 2, spellcheck: false });
-      negative.placeholder = "不想要的东西（可选）";
-      row("负向", negative, true);
-      /* 走 API 时这些本地参数没有对应字段：整行撤掉，只留尺寸。
-         在哪些行上生效由 paintGenMore 决定，这里先打上标记。 */
-      for (const name of ["model", "steps", "cfg", "seed", "strength", "negative"]) {
-        more
-          .querySelector(`[data-gen-field="${name}"]`)
-          ?.closest(".canvas-gen-more-row")
-          ?.classList.add("is-local-only");
-      }
-      seedTip.classList.add("is-local-only");
       const apiNote = document.createElement("p");
       apiNote.className = "canvas-gen-more-api";
       apiNote.hidden = true;
@@ -188,16 +142,11 @@ export function createItemElement(item, mediaSrc, options = {}) {
     clear.className = "canvas-gen-clear";
     clear.textContent = "清除";
     clear.title = "把涂过的遮罩清空，重新涂";
-    const refine = document.createElement("button");
-    refine.type = "button";
-    refine.className = "canvas-gen-refine";
-    refine.textContent = "补细节";
-    refine.title = "放大后再按提示词低强度重绘一遍，把纹理长回来";
     const moreToggle = document.createElement("button");
     moreToggle.type = "button";
     moreToggle.className = "canvas-gen-more-toggle";
     moreToggle.textContent = "更多设置";
-    moreToggle.title = "展开尺寸、步数、CFG、种子、模式等参数";
+    moreToggle.title = "展开出图尺寸（宽 × 高）";
     const reset = document.createElement("button");
     reset.type = "button";
     reset.className = "canvas-gen-more-reset";
@@ -215,7 +164,7 @@ export function createItemElement(item, mediaSrc, options = {}) {
     /* 左侧一组参数按钮、右侧开始/落块，中间用弹性空位隔开 */
     const spacer = document.createElement("span");
     spacer.className = "canvas-gen-spacer";
-    actions.append(brush, clear, refine, moreToggle, reset, spacer, run, place);
+    actions.append(brush, clear, moreToggle, reset, spacer, run, place);
     bar.append(controls, feed, promptWrap, more, actions);
     card.append(stage, bar);
     el.append(card);
@@ -306,7 +255,15 @@ export function createItemElement(item, mediaSrc, options = {}) {
     card.append(stage, bar);
     el.append(card);
   } else if (item.type === "file") {
-    el.append(createFileCard(item, options));
+    const card = createFileCard(item, options);
+    /* 重的正文是懒挂的：把挂载/卸载钩子提到块元素上，裁剪那一层拿到的是 el，
+       不提到这里 refreshCulling 就永远找不到它（卡片只是 el 的子节点） */
+    if (card.__mountBody) {
+      el.__mountBody = card.__mountBody;
+      el.__unmountBody = card.__unmountBody;
+      el.__isMounted = card.__isMounted;
+    }
+    el.append(card);
   } else if (item.type === "ebook") {
     el.append(createEbookCard(item, options));
   } else if (item.type === "product") {

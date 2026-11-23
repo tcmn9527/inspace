@@ -41,6 +41,32 @@ export function forgetPdf(url) {
   documents.delete(url);
 }
 
+/* 正文被卸载时要真把文档销毁：只删缓存项的话，pdf.js 的工作线程还攥着整份
+   解析结果和页数据不放（785 本书巡一遍能涨到几个 G）。用引用计数是因为同一份
+   文件可能在画布里挂了好几处，最后一个走的人才许销毁。 */
+const holds = new Map();
+
+export function holdPdf(url) {
+  holds.set(url, (holds.get(url) || 0) + 1);
+}
+
+export function releasePdf(url) {
+  const left = (holds.get(url) || 1) - 1;
+  if (left > 0) {
+    holds.set(url, left);
+    return;
+  }
+  holds.delete(url);
+  const pending = documents.get(url);
+  if (!pending) return;
+  documents.delete(url);
+  pending
+    .then((doc) => doc.destroy?.())
+    .catch(() => {
+      /* 本来就没读成功：缓存项已经删了，没有要销毁的东西 */
+    });
+}
+
 /* 只问一页有多大，不画。页链要先拿到每页宽高比才撑得准滚动条，
    而 getViewport 只要那一页的字典，读几十 KB 就够，比渲染便宜一个量级。 */
 export async function pdfPageSize(url, page) {

@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：media-fallback */
 
-import { addItemElement, audioCache, audioExtFor, audioFix, copyTask, current, fileToDataUrl, fitImageSize, formatSize, imageCache, imageSize, itemEls, makeAudio, makeImage, openVideoHelp, pastePoint, persistGen, persistNote, persistPicture, persistScene, refreshQuotes, scheduleItemsSave, select, setAudioFix, setCopyTask, showError, stageCenterWorld, store, ui, updateSelection, videoCache } from "../canvas.js";
+import { addItemElement, audioCache, audioExtFor, audioFix, copyTask, current, fileToDataUrl, fitImageSize, formatSize, imageCache, imageSize, itemEls, makeAudio, makeImage, openVideoHelp, pastePoint, persistGen, persistNote, persistPicture, refreshQuotes, scheduleItemsSave, select, setAudioFix, setCopyTask, showError, stageCenterWorld, store, ui, updateSelection, videoCache } from "../canvas.js";
 import { clampXToPage } from "./page-width.js";
 
 /* ---------- 播不出来时的兜底 ---------- */
@@ -211,10 +211,9 @@ export function placeBlock(item) {
   if (item.type === "product") refreshQuotes();
   select(item.id);
   scheduleItemsSave();
-  /* 笔记/画面/场景从建下来那一刻就有自己那份文件，内容以后只认文件 */
+  /* 笔记/画面从建下来那一刻就有自己那份文件，内容以后只认文件 */
   if (item.type === "note") persistNote(item);
   if (item.type === "picture") persistPicture(item);
-  if (item.type === "scene") persistScene(item);
   if (item.type === "gen") persistGen(item);
   return item;
 }

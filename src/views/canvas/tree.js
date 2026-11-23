@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：tree */
 
-import { LOCK_BADGE_SVG, active, agentDeleteSpace, agentHighlight, agentRevealBlock, commitEditing, confirmDialog, current, edgeLabelEditor, editingId, enterScenePart, exitSceneEdit, exportTreeSpace, findItem, flushBlockContents, flushCamera, flushItems, genInputItems, genModeFor, importIntoGroup, insideBox, isContainer, itemBounds, itemEls, itemMenuEntries, loadList, openMenu, ownedByContainer, promptDialog, scenePartBaseLabel, sceneView, scheduleCulling, scheduleItemsSave, select, selectedIds, setLockedMany, setSceneFurnitureSelection, setScenePlacementMode, showError, startTreeRename, store, switchTo, treeRenaming } from "../canvas.js";
+import { LOCK_BADGE_SVG, active, agentDeleteSpace, agentHighlight, agentRevealBlock, commitEditing, confirmDialog, current, edgeLabelEditor, editingId, exportTreeSpace, findItem, flushBlockContents, flushCamera, flushItems, genInputItems, genModeFor, importIntoGroup, insideBox, isContainer, itemBounds, itemEls, itemMenuEntries, loadList, openMenu, ownedByContainer, promptDialog, scheduleCulling, scheduleItemsSave, select, selectedIds, setLockedMany, showError, startTreeRename, store, switchTo, treeRenaming } from "../canvas.js";
 import { pageWidthMenuFlow } from "./page-width.js";
 
 /* ---------- 左侧画布树 ---------- */
@@ -407,7 +407,6 @@ export const PANEL_TYPE_LABEL = {
   arrow: "箭头",
   note: "笔记",
   picture: "画面",
-  scene: "3D 场景",
   gen: "生图面板",
   genvideo: "视频生成",
   image: "图片",
@@ -427,7 +426,6 @@ export const GEN_MODE_TREE_LABEL = {
   i2i: "图生图",
   edit: "参考图编辑",
   inpaint: "局部重绘",
-  upscale: "高清放大",
 };
 
 /* 树上一律「编号 + 类型」；重命名过的用自定义名顶替类型那截 */
@@ -555,17 +553,14 @@ export function renderPanelTree(body) {
   }
   const renderPanelRow = (item, depth, seen) => {
     const isCont = item.type === "rect" && isContainer(item);
-    const isScene = item.type === "scene";
     const row = document.createElement("div");
     row.className = "space-tree-row";
     row.dataset.kind = "panel";
     row.dataset.id = item.id;
-    row.style.paddingLeft = `${6 + depth * 14 + (isCont || isScene ? 0 : 17)}px`;
-    /* 场景里选中了某个元素时，焦点在元素上，面板行不再亮 */
-    const sceneParts = isScene ? sceneView(item)?.__sceneSelection?.indices || [] : [];
-    if (selectedIds.has(item.id) && !sceneParts.length) row.classList.add("is-selected");
+    row.style.paddingLeft = `${6 + depth * 14 + (isCont ? 0 : 17)}px`;
+    if (selectedIds.has(item.id)) row.classList.add("is-selected");
     const expanded = !treePanelCollapsed.has(item.id);
-    if (isCont || isScene) {
+    if (isCont) {
       const chevron = document.createElement("span");
       chevron.className = `space-tree-chevron${expanded ? " is-open" : ""}`;
       chevron.innerHTML = TREE_CHEVRON;
@@ -597,8 +592,6 @@ export function renderPanelTree(body) {
     }
     row.addEventListener("click", () => {
       select(item.id);
-      /* 从元素切回面板：工具条也跟着回到场景态，编辑时的最大化一并还原 */
-      if (isScene && sceneView(item)) exitSceneEdit(item);
       agentRevealBlock(item.id);
       /* 从面板树点选：给画布上那块打一圈 1 秒的光带，锁定块没有常规选中标记，
          靠这一下知道点的是谁；直接在画布上选不走这里，就没有这效果 */
@@ -616,7 +609,7 @@ export function renderPanelTree(body) {
         renderTree();
         return;
       }
-      if (!isCont && !isScene) return;
+      if (!isCont) return;
       event.preventDefault();
       event.stopPropagation();
       if (treePanelCollapsed.has(now.id)) treePanelCollapsed.delete(now.id);
@@ -640,29 +633,6 @@ export function renderPanelTree(body) {
     if (isCont && expanded && !seen.has(item.id)) {
       seen.add(item.id);
       for (const kid of kidsOf.get(item.id) || []) renderPanelRow(kid, depth + 1, seen);
-    }
-    if (isScene && expanded) {
-      const labelCount = new Map();
-      (item.parts || []).forEach((part, index) => {
-        const base = scenePartBaseLabel(part);
-        const count = (labelCount.get(base) || 0) + 1;
-        labelCount.set(base, count);
-        const partRow = document.createElement("div");
-        partRow.className = "space-tree-row";
-        partRow.dataset.kind = "scene-part";
-        partRow.dataset.id = item.id;
-        partRow.dataset.index = String(index);
-        partRow.style.paddingLeft = `${6 + (depth + 1) * 14 + 17}px`;
-        const partSelection = sceneView(item)?.__sceneSelection?.indices || [];
-        if (partSelection.includes(index)) partRow.classList.add("is-selected");
-        const partLabel = document.createElement("span");
-        partLabel.className = "space-tree-label";
-        partLabel.textContent = count > 1 ? `${base} ${count}` : base;
-        partLabel.title = partLabel.textContent;
-        partRow.append(partLabel);
-        partRow.addEventListener("click", () => enterScenePart(item, index));
-        body.append(partRow);
-      });
     }
   };
   const seen = new Set();

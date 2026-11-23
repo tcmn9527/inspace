@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：floorplan */
 
-import { active, agentRequireItem, agentSummary, current, findItem, itemEls, newId, planPixelsPerMm, promptDialog, revealItem, scheduleItemsSave, select, setSceneCameraPreset, showError, showToast, syncItemElement } from "../canvas.js";
+import { active, agentRequireItem, agentSummary, current, findItem, itemEls, newId, planPixelsPerMm, promptDialog, revealItem, scheduleItemsSave, select, showError, showToast, syncItemElement } from "../canvas.js";
 import * as store from "../canvas-store.js";
 
 /* ---------- 户型块 ---------- */
@@ -101,13 +101,7 @@ export function attachPlanBlock(el, item) {
     (event) => {
       if (planCalibration) return;
       const footprint = event.target.closest?.(".canvas-plan-footprint");
-      if (!footprint) {
-        if (event.target.closest?.(".canvas-plan-camera")) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-        return;
-      }
+      if (!footprint) return;
       event.preventDefault();
       event.stopPropagation();
       if (item.locked) return;
@@ -149,24 +143,6 @@ export function attachPlanBlock(el, item) {
     true,
   );
 
-  /* 点机位：把链接的场景切到对应机位并跟过去 */
-  card.addEventListener("click", (event) => {
-    if (planCalibration) return;
-    const camera = event.target.closest?.(".canvas-plan-camera");
-    if (!camera) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const marker = item.cameras.find((one) => one.id === camera.getAttribute("data-camera"));
-    if (!marker) return;
-    const scene = findItem(marker.scene);
-    if (!scene || scene.type !== "scene") {
-      showError("这个机位链接的场景块不在了");
-      return;
-    }
-    setSceneCameraPreset(scene, marker.preset);
-    select(scene.id);
-    revealItem(scene);
-  });
 }
 
 export function planDefaultPoint(plan) {
@@ -211,25 +187,6 @@ export function planPlaceProduct(product, plan, options = {}) {
   return { ...agentSummary(plan), footprint };
 }
 
-export function planPlaceCamera(plan, scene, options = {}) {
-  if (!plan || plan.type !== "plan") throw new Error("要放机位的是一块户型图");
-  if (!plan.calibration) throw new Error("这张户型图还没定标，放不了机位");
-  const center = planDefaultPoint(plan);
-  const marker = {
-    id: newId(),
-    scene: scene.id,
-    x: Number.isFinite(Number(options.x)) ? Number(options.x) : center.x,
-    y: Number.isFinite(Number(options.y)) ? Number(options.y) : center.y,
-    rotate: Number.isFinite(Number(options.rotate)) ? ((Number(options.rotate) % 360) + 360) % 360 : 0,
-    preset: ["front", "left", "right", "top", "auto"].includes(options.preset) ? options.preset : "front",
-  };
-  plan.cameras.push(marker);
-  const el = itemEls.get(plan.id);
-  if (el) syncItemElement(el, plan);
-  scheduleItemsSave();
-  return { ...agentSummary(plan), camera: marker };
-}
-
 export function planAddArea(plan, points) {
   if (!plan || plan.type !== "plan") throw new Error("要量面积的是一块户型图");
   if (!plan.calibration) throw new Error("这张户型图还没定标，量不了面积");
@@ -249,8 +206,8 @@ export function planAddArea(plan, points) {
 }
 
 export function planRemove(plan, kind, itemId) {
-  const list = kind === "footprint" ? plan.footprints : kind === "camera" ? plan.cameras : kind === "area" ? plan.areas : null;
-  if (!list) throw new Error("kind 只有 footprint / camera / area");
+  const list = kind === "footprint" ? plan.footprints : kind === "area" ? plan.areas : null;
+  if (!list) throw new Error("kind 只有 footprint / area");
   const index = list.findIndex((one) => one.id === itemId);
   if (index < 0) throw new Error("没找到这一项");
   const [removed] = list.splice(index, 1);
@@ -292,13 +249,6 @@ export function agentPlanPlaceProduct(spec = {}) {
   const product = agentRequireItem(spec.product);
   if (product.type !== "product") throw new Error("product 要传产品卡");
   return planPlaceProduct(product, plan, { x: spec.x, y: spec.y, rotate: spec.rotate });
-}
-
-export function agentPlanPlaceCamera(spec = {}) {
-  const plan = agentRequireItem(spec.plan);
-  const scene = agentRequireItem(spec.scene);
-  if (scene.type !== "scene") throw new Error("scene 要传场景块");
-  return planPlaceCamera(plan, scene, { x: spec.x, y: spec.y, rotate: spec.rotate, preset: spec.preset });
 }
 
 export function agentPlanArea(spec = {}) {

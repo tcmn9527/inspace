@@ -184,8 +184,7 @@ export async function grabRegionImage(item) {
 export async function dropRegionImage(id) {
   if (!current || exporting) return null;
   const item = findItem(id);
-  /* 矩形和 3D 场景都能落图：场景是 WebGL 画布，靠屏幕抓取拿到真实渲染帧 */
-  if (!item || (item.type !== "rect" && item.type !== "scene")) return null;
+  if (!item || item.type !== "rect") return null;
   const el = itemEls.get(id);
   if (!el) return null;
   const box = itemBounds(item, el);
@@ -200,12 +199,6 @@ export async function dropRegionImage(id) {
     rect.top >= 0 &&
     rect.right <= window.innerWidth &&
     rect.bottom <= window.innerHeight;
-  /* 场景离屏导不出 WebGL 画面：不在视野里就明说，别生成一张黑图 */
-  if (!visible && item.type === "scene") {
-    showToast("场景要先完整露在视野里才能落图");
-    return null;
-  }
-
   setExporting(true);
   showToast("正在按屏幕画面生成图片…");
   select(null);

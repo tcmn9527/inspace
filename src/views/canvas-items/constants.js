@@ -79,19 +79,6 @@ export const PICTURE_STROKE_DEFAULT_WIDTH = 6;
 export const PICTURE_STROKE_MIN_STEP = 1.2;
 /* 橡皮判定再往外让这么多：笔迹细的时候指着它旁边一点也该擦得掉 */
 export const PICTURE_ERASER_TOLERANCE = 4;
-/* 场景块：一块真 3D 视口。块自身的宽高只是观察窗，里面的坐标是「地上的」——
-   x/y 落在地面（y 越大越远），h 是立起来多高，z 是底面离地多高。
-   单位仍是块内画面像素，和画面块同一套，摆东西不用换脑子。 */
-export const SCENE_MIN_WIDTH = 240;
-export const SCENE_MIN_HEIGHT = 180;
-export const SCENE_DEFAULT_WIDTH = 720;
-export const SCENE_DEFAULT_HEIGHT = 480;
-/* 件数上限：three.js 一个 Mesh 一次 draw call，堆到几千个就靠合并实例，不是靠堆 Mesh */
-export const SCENE_MAX_PARTS = 2000;
-export const SCENE_MAX_SIZE = 20000;
-/* 一件东西的轮廓点数上限：挤成棱柱要三角剖分，一个圆取到百来个点就够了，
-   再多只是把三角剖分一起拖慢 */
-export const SCENE_MAX_POLY_POINTS = 200;
 /* 生图面板：一块本地出图的取景窗。出图一张要 30 秒，所以这块的重点是「等得明白」——
    面板上只摆提示词框和一颗开始，其余参数走默认，agent 想改直接写块字段。 */
 export const GEN_MIN_WIDTH = 320;
@@ -127,15 +114,14 @@ export const GEN_VIDEO_SECONDS_DEFAULT = 6;
 
 /* 出图那一档：auto 是「看连线自己定」——没接图就文生图，接一张当底图，接多张当参考。
    明写 t2i / i2i / edit 才能盖掉这个推断（画风锚点那种「只有一张但它是参考图」就得明写）。
-   upscale 不参与推断：它不扩散、不读提示词，只有明选才有。 */
-export const GEN_MODES = ["auto", "t2i", "i2i", "edit", "upscale", "inpaint"];
+   本地高清放大（upscale）已随本地引擎移除，不再是一个可选的档。 */
+export const GEN_MODES = ["auto", "t2i", "i2i", "edit", "inpaint"];
 export const GEN_MODE_DEFAULT = "auto";
 export const GEN_MODE_LABELS = {
   auto: "自动",
   t2i: "文生图",
   i2i: "图生图",
   edit: "参考图编辑",
-  upscale: "高清放大",
   inpaint: "局部重绘",
 };
 /* 图生图改多少：0 原样、1 全改。默认跟上游 sd_img_gen_params_init 的 0.75 一致 */
@@ -152,7 +138,7 @@ export const FILE_MIN_WIDTH = 160;
 export const FILE_MIN_HEIGHT = 56;
 export const NOTE_MIN_WIDTH = 160;
 export const NOTE_MIN_HEIGHT = 120;
-/* 产品/材料卡：一件家具在画布上的名片。户型脚印、3D 模型和清单都指回这一块的字段，
+/* 产品/材料卡：一件家具在画布上的名片。户型脚印和清单都指回这一块的字段，
    所以它不是一张普通图片卡——名字、品牌、SKU、规格、单价这些都得能单独改。 */
 export const PRODUCT_DEFAULT_WIDTH = 300;
 export const PRODUCT_DEFAULT_HEIGHT = 132;
@@ -163,14 +149,13 @@ export const QUOTE_DEFAULT_WIDTH = 620;
 export const QUOTE_DEFAULT_HEIGHT = 320;
 export const QUOTE_MIN_WIDTH = 380;
 export const QUOTE_MIN_HEIGHT = 160;
-/* 户型块：一张户型图 + 真实比例 + 家具脚印 + 面积 + 3D 机位标记。
+/* 户型块：一张户型图 + 真实比例 + 家具脚印 + 面积。
    坐标分三层：图片像素（图片原始尺寸）、毫米（真实世界）、块内像素（显示时按块尺寸拉伸）。 */
 export const PLAN_DEFAULT_WIDTH = 820;
 export const PLAN_DEFAULT_HEIGHT = 620;
 export const PLAN_MIN_WIDTH = 320;
 export const PLAN_MIN_HEIGHT = 240;
 export const PLAN_MAX_FOOTPRINTS = 400;
-export const PLAN_MAX_CAMERAS = 80;
 export const PLAN_MAX_AREAS = 40;
 /* 提案页框：一块就是一张客户要看的页。尺寸按 96dpi 的纸面给，导出时整页抓图 */
 export const PAGE_RATIOS = {

@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：render */
 
-import { attachGenPanel, attachPictureTools, attachPlanBlock, attachProductCard, attachQuoteCard, attachSceneControls, attachVideoPanel, audioCache, connectorGeometry, createConnectorElement, createItemElement, current, disposeScene, docxUrlCache, ebookKey, ebookTocCache, filePreviewCache, flushFileEditor, hydrateNoteImages, imageCache, isContainer, itemBounds, itemEls, mediaMissing, noteEditor, openVideoProblem, pdfUrlCache, pinConnectorSides, pptxUrlCache, previewKey, previewPath, productItems, refreshCulling, refreshGenFeeds, refreshMinimap, refreshQuoteCard, renderMissing, renderTree, replaceSelection, scheduleCulling, scheduleItemsSave, selectedIds, setNoteEditor, setPreviewPath, store, syncConnectorElement, syncItemElement, treePanelCollapsed, treeSavePrefs, treeUi, ui, updateSelection, videoCache, xlsxUrlCache } from "../canvas.js";
+import { attachGenPanel, attachPictureTools, attachPlanBlock, attachProductCard, attachQuoteCard, attachVideoPanel, audioCache, connectorGeometry, createConnectorElement, createItemElement, current, docxUrlCache, ebookKey, ebookTocCache, filePreviewCache, flushFileEditor, hydrateNoteImages, imageCache, isContainer, itemBounds, itemEls, mediaMissing, noteEditor, openVideoProblem, pdfUrlCache, pinConnectorSides, pptxUrlCache, previewKey, previewPath, productItems, refreshCulling, refreshGenFeeds, refreshMinimap, refreshQuoteCard, renderMissing, renderTree, replaceSelection, scheduleCulling, scheduleItemsSave, selectedIds, setNoteEditor, setPreviewPath, store, syncConnectorElement, syncItemElement, treePanelCollapsed, treeSavePrefs, treeUi, ui, updateSelection, videoCache, xlsxUrlCache } from "../canvas.js";
 
 /* ---------- 渲染 ---------- */
 
@@ -162,7 +162,6 @@ export function addItemElement(item) {
     refreshQuoteCard(el, item, productItems());
   }
   if (item.type === "plan") attachPlanBlock(el, item);
-  if (item.type === "scene") attachSceneControls(el, item);
   scheduleCulling();
   return el;
 }
@@ -178,8 +177,9 @@ export function nextLayerZ() {
 }
 
 export function renderAll() {
-  /* 场景块的 WebGL 上下文挂在即将被丢掉的那棵 DOM 上，不主动释放会一路攒到浏览器的上限 */
-  for (const view of ui.world.querySelectorAll(".canvas-scene-view")) disposeScene(view);
+  /* 文件卡里懒挂的 PDF/Office 正文也要先卸掉：光删 DOM 的话 pdf.js 的文档和
+     工作线程会跟着旧元素一起变成孤儿（切画布时最明显） */
+  for (const el of ui.world.querySelectorAll(".canvas-item")) el.__unmountBody?.();
   ui.world.textContent = "";
   ui.edgeTransform.textContent = "";
   setPreviewPath(null);

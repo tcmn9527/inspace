@@ -52,28 +52,17 @@ export function genBusyId() {
 
 /* 取景窗里那句话：正常态最多一行小字，出问题或在等才多说。 */
 function hintText(run, item, mode) {
-  /* 放大这一路引擎不报进度，一张整跑完才回来，所以只有「在等」这一句 */
-  const isUpscale = mode === "upscale";
-  const upscaleRefine = isUpscale && Boolean(item.refine);
-  if (run.phase === "loading") return isUpscale ? "放大中…" : "载入权重…";
+  /* 远端没有步进：loading 是「请求发出去了」，running 是「在等接口回来」 */
+  if (run.phase === "loading") return "提交中…";
   if (run.phase === "running") {
-    /* 补细节是一块一块补的，报片数比报「放大中」有用 */
-    if (isUpscale) return upscaleRefine ? `补细节 ${run.step} / ${run.steps} 片` : "放大中…";
-    /* 走 API 没有步进，0/0 就是「在等远端」 */
     if (!run.steps) return "生成中…";
-    /* 大模型第一次出图前要按张量把权重搬进显存，引擎报的是「第几个张量」，
-       几百上千的总数不是采样步数；这一段纯 CPU/IO，别让人误以为在出图 */
-    if (run.steps > 100) return `载入权重 ${run.step} / ${run.steps}`;
     return `第 ${run.step} / ${run.steps} 步`;
   }
   if (run.phase === "failed") return run.error || "出图失败";
   if (run.phase === "canceled") return "已取消";
   /* 秒数只在刚出完这一张时报；重开画布接回来的那张没跑过，别报个 0.0 秒 */
   if (run.imageUrl && run.seconds) return `${run.seconds.toFixed(1)} 秒`;
-  /* 放大不读提示词，那句「写下提示词」在这儿是瞎指 */
-  if (isUpscale && !upscaleRefine) return "";
   if (run.imageUrl || run.previewUrl || item.prompt) return "";
-  if (upscaleRefine) return "点开始，放大后自动把细节补一遍";
   /* 局部重绘：底图到位了先让人涂，一句顶用的话比「写下提示词」实在 */
   if (mode === "inpaint") {
     return item.prompt ? "在预览上涂出要重绘的地方，点开始" : "连一张图进来，涂出要重绘的地方";
@@ -81,9 +70,11 @@ function hintText(run, item, mode) {
   return "写下提示词，点开始";
 }
 
-/* 这块这一张会走哪一档；没算进料就退回块上存的那份（upscale 只能明选，所以存的就是它） */
+/* 这块这一张会走哪一档；没算进料就退回块上存的那份。
+   老块上可能还留着 upscale（本地放大已移除），当成 auto 重新推断，别让它卡死。 */
 function genModeOf(item, info) {
-  return info?.mode || (item.mode && item.mode !== "auto" ? item.mode : "");
+  const stored = item.mode && item.mode !== "auto" && item.mode !== "upscale" ? item.mode : "";
+  return info?.mode || stored;
 }
 
 export function syncGen(el, item, feed, options = {}) {
@@ -110,18 +101,12 @@ export function syncGen(el, item, feed, options = {}) {
     /* 进料那一行：接了图才说话；明写了要图却一根线都没接，也说一句（不然点了才报错） */
     if (feedLine) {
       const text = info.count
-        ? mode === "upscale"
-          ? info.count === 1
-            ? "连着 1 张输入图 · 出 4× 大的那张"
-            : `高清放大只吃一张图，现在连了 ${info.count} 张`
-          : mode === "t2i"
-            ? `连着 ${info.count} 张输入图，可文生图不喂图：想喂就换档位，或选「自动」`
-            : `接了 ${info.count} 张输入图 · ${info.label}`
-        : mode === "upscale"
-          ? "高清放大 · 连一张图进来"
-          : mode !== "t2i"
-            ? `${info.label} · 还没把图连进来`
-            : "";
+        ? mode === "t2i"
+          ? `连着 ${info.count} 张输入图，可文生图不喂图：想喂就换档位，或选「自动」`
+          : `接了 ${info.count} 张输入图 · ${info.label}`
+        : mode !== "t2i"
+          ? `${info.label} · 还没把图连进来`
+          : "";
       feedLine.hidden = !text;
       feedLine.textContent = text;
     }
@@ -157,19 +142,11 @@ export function syncGen(el, item, feed, options = {}) {
   hint.textContent = text;
   hint.classList.toggle("is-error", run.phase === "failed");
 
-  /* 参数行：放大这一档没有可看的参数，整行撤掉 */
-  if (controls) controls.hidden = mode === "upscale";
-  /* 放大不读提示词，补细节也走内置那句；提示框整档都不摆 */
-  const refineOn = mode === "upscale" && Boolean(item.refine);
+  /* 参数行与提示框一直都在：这一版只走 API，没有「整档不读提示词」的分支 */
+  if (controls) controls.hidden = false;
   const promptWrap = el.querySelector(".canvas-gen-prompt-wrap");
-  if (promptWrap) promptWrap.hidden = mode === "upscale";
-  prompt.hidden = mode === "upscale";
-  /* 补细节开关只在放大那档出现 */
-  const refineButton = el.querySelector(".canvas-gen-refine");
-  if (refineButton) {
-    refineButton.hidden = mode !== "upscale";
-    refineButton.classList.toggle("is-active", mode === "upscale" && Boolean(item.refine));
-  }
+  if (promptWrap) promptWrap.hidden = false;
+  prompt.hidden = false;
   /* 正在打字的时候不拿块上的值去盖光标 */
   if (document.activeElement !== prompt && prompt.value !== item.prompt) {
     prompt.value = item.prompt || "";

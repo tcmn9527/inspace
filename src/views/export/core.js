@@ -29,7 +29,7 @@ export const TILE = 4096;
 /* 选中框、端口、吸附辅助线这些只是操作时的记号，不该出现在导出的图里。
    .canvas-port 是连线两端那几颗圈，选中时才画，静态图里就是一点脏东西 */
 export const OVERLAY_SELECTOR =
-  ".canvas-sel-box, .canvas-port-box, .canvas-port, .canvas-guide, .canvas-handle, .canvas-scene-selection";
+  ".canvas-sel-box, .canvas-port-box, .canvas-port, .canvas-guide, .canvas-handle";
 
 /* 卡片里那些滚动条在静态图里看着像画坏了；导出画布又没有「滚动」这回事 */
 export const EXPORT_CSS = `

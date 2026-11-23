@@ -2,38 +2,33 @@
 
 import { GEN_MIN_HEIGHT, GEN_MODE_LABELS, GEN_PLACE_GAP, GEN_TEXT_MAX, applyGenFields, applyGenMaskMode, attachGenMask, current, dropGenRun, exporter, findItem, fitGenPrompt, fitImageSize, genBusyId, genMaskBases, genMaskCanvasOf, genMaskModes, genRunMasks, genRunOf, imageCache, imageSize, itemEls, makeImage, onGenRunChange, openMenu, patchGenRun, patchVideoRun, persistGen, placeBlock, refreshConnectors, refreshGenMaskBase, refreshVideoPanel, resetGenMask, scheduleItemsSave, select, showError, showToast, srcInUse, store, syncGen, syncItemElement, toPngDataUrl, updatePorts, updateSelection, videoRunOf } from "../canvas.js";
 
-/* ---------- 生图面板的参数默认值（每模型一套） ---------- */
+/* ---------- 生图面板的参数默认值 ---------- */
 
 export const genDefaultsCache = new Map();
-export let genFamily = "qwen21";
-/* 生图引擎走哪条路：local 用本地权重，api 发远端。API 模式下本地参数不生效，
-   面板上要撤掉它们；尺寸仍然有用。 */
-export let genEngine = { provider: "local", apiModel: "" };
+/* 这一版只剩远端 API：模型族的概念没了，留一个常量给老调用兜底 */
+export let genFamily = "api";
+/* 面板顶部那行提示要知道远端模型名 */
+export let genEngine = { provider: "api", apiModel: "" };
 
-export async function loadGenDefaults(family) {
-  const value = await store.genDefaults(family).catch(() => null);
-  if (value) genDefaultsCache.set(family, value);
+export async function loadGenDefaults() {
+  const value = await store.genDefaults().catch(() => null);
+  if (value) genDefaultsCache.set(genFamily, value);
   return value;
 }
 
 export async function refreshGenDefaults() {
   const status = await store.genStatus().catch(() => null);
-  if (status?.family) genFamily = status.family;
-  if (status?.provider) {
-    genEngine = { provider: status.provider, apiModel: status.apiModel || "" };
-  }
+  if (status) genEngine = { provider: "api", apiModel: status.apiModel || "" };
   if (status?.defaults) genDefaultsCache.set(genFamily, status.defaults);
-  const other = genFamily === "qwen21" ? "h3image" : "qwen21";
-  loadGenDefaults(other);
-  /* 引擎换了（本地 ↔ API）：并行规则跟着换，把面板的开始按钮重排一遍 */
+  /* 引擎状态变了：面板的开始按钮和顶部提示都重排一遍 */
+  refreshGenFeeds();
   refreshGenRunButtons();
 }
 
-/* 新建面板：把当前模型那套默认参数带上，用户不用每块重新设。 */
+/* 新建面板：把当前那套默认参数带上，用户不用每块重新设。 */
 export function applyGenDefaultsToItem(item) {
-  const family = genFamily;
-  const value = genDefaultsCache.get(family);
-  item.model = family;
+  const value = genDefaultsCache.get(genFamily);
+  item.model = genFamily;
   if (!value) return item;
   item.imageW = value.width;
   item.imageH = value.height;
@@ -52,7 +47,7 @@ export let genDefaultsTimer = 0;
 export function saveGenDefaults(item) {
   clearTimeout(genDefaultsTimer);
   genDefaultsTimer = setTimeout(() => {
-    const family = item.model === "h3image" || item.model === "qwen21" ? item.model : genFamily;
+    const family = genFamily;
     const fallback = genDefaultsCache.get(family) || {};
     const value = {
       width: item.imageW,
@@ -71,63 +66,26 @@ export function saveGenDefaults(item) {
 }
 
 /* 面板里显示的实际生效值：0 是「跟模型走」，用该模型默认补齐。 */
-export function genEffective(item, field, fallback) {
-  const value = item[field];
-  if (field === "steps" || field === "cfg") return value > 0 ? value : fallback;
-  return value;
-}
-
 export function paintGenMore(item, el) {
   const more = el.querySelector(".canvas-gen-more");
   if (!more) return;
-  /* 走 API：本地参数（模型档位、步数、CFG、种子、负向、改动幅度）整行撤掉，
-     只留尺寸；顶部一行说清这一张走的是哪个 API 模型。 */
-  const usingApi = genEngine.provider === "api";
-  more.classList.toggle("is-api", usingApi);
+  /* 这一版只走 API：本地参数（步数、CFG、种子、负向、改动幅度）整行都不在面板上，
+     只留尺寸，顶部一行说清这一张走的是哪个远端模型。 */
   const apiNote = more.querySelector(".canvas-gen-more-api");
   if (apiNote) {
-    apiNote.hidden = !usingApi;
-    apiNote.textContent = usingApi
-      ? `走 API${genEngine.apiModel ? `（${genEngine.apiModel}）` : ""}：只发提示词、尺寸和参考图`
-      : "";
+    apiNote.hidden = false;
+    apiNote.textContent = genEngine.apiModel
+      ? `走 API（${genEngine.apiModel}）：只发提示词、尺寸和参考图`
+      : "走 API：只发提示词、尺寸和参考图";
   }
-  const family = item.model === "h3image" || item.model === "qwen21" ? item.model : genFamily;
-  const fallback = genDefaultsCache.get(family) || {};
-  const set = (field, value) => {
+  for (const [field, value] of [
+    ["imageW", item.imageW],
+    ["imageH", item.imageH],
+  ]) {
     const control = more.querySelector(`[data-gen-field="${field}"]`);
-    if (!control || document.activeElement === control) return;
-    if (control.type === "checkbox") control.checked = Boolean(value);
-    else control.value = value ?? "";
-  };
-  set("model", family);
-  set("imageW", item.imageW);
-  set("imageH", item.imageH);
-  set("steps", genEffective(item, "steps", fallback.steps ?? 30));
-  set("cfg", genEffective(item, "cfg", fallback.cfg ?? 6));
-  set("seed", item.seed);
-  set("strength", item.strength);
-  set("negative", item.negative || "");
-  /* 改动幅度只对图生图/局部重绘有意义：其它模式（含 H3 的全部模式）这一行不摆 */
-  const effectiveMode = genModeFor(item, genInputItems(item).length);
-  const strengthRow = more.querySelector('[data-gen-field="strength"]')?.closest(".canvas-gen-more-row");
-  if (strengthRow) {
-    strengthRow.hidden = effectiveMode !== "i2i" && effectiveMode !== "inpaint";
+    if (!control || document.activeElement === control) continue;
+    control.value = value ?? "";
   }
-  /* 高清放大只吃「输入图 + 放大权重」：模型、尺寸、步数、CFG、种子、负向都不参与，
-     摆在这里只会让人以为调了有用。整行撤掉，连「更多设置」入口一起撤。 */
-  const upscale = effectiveMode === "upscale";
-  for (const field of ["model", "imageW", "imageH", "steps", "cfg", "seed", "negative"]) {
-    const row = more.querySelector(`[data-gen-field="${field}"]`)?.closest(".canvas-gen-more-row");
-    if (row) row.hidden = upscale;
-  }
-  const seedTip = more.querySelector(".canvas-gen-more-tip");
-  if (seedTip) seedTip.hidden = upscale;
-  const moreToggle = el.querySelector(".canvas-gen-more-toggle");
-  if (moreToggle) moreToggle.hidden = upscale;
-  /* 补细节只在「高清放大」这一档有意义（放大后按提示词重绘一遍）。
-     文生图、编辑、局部重绘都不读这个开关，H3 的放大也不支持重绘，都不显示。 */
-  const refineButton = el.querySelector(".canvas-gen-refine");
-  if (refineButton) refineButton.hidden = !upscale || family === "h3image";
 }
 
 /* 常用尺寸：宽高都是 32 的倍数；超出当前模型边长上限的项在菜单里自动过滤 */
@@ -195,45 +153,7 @@ export function applySizePreset(item, preset) {
   saveGenDefaults(item);
 }
 
-/* 面板里换模型：块上那套参数跟着换成目标模型的默认值。 */
-export async function switchGenFamily(item, family) {
-  let value = genDefaultsCache.get(family);
-  if (!value) value = await loadGenDefaults(family);
-  const patch = { model: family };
-  if (value) {
-    patch.imageW = value.width;
-    patch.imageH = value.height;
-    patch.steps = value.steps;
-    patch.cfg = value.cfg;
-    patch.seed = value.seed;
-    patch.mode = value.mode;
-    patch.strength = value.strength;
-    patch.negative = value.negative || "";
-    patch.refine = Boolean(value.refine);
-  }
-  if (!applyGenFields(item, patch)) return;
-  persistGen(item);
-  const el = itemEls.get(item.id);
-  if (el) syncItemElement(el, item);
-  scheduleItemsSave();
-  refreshGenPanel(item.id);
-}
-
-export let genFamilyWatchBound = false;
-export function watchGenFamily() {
-  if (genFamilyWatchBound) return;
-  const listen = window.__TAURI__?.event?.listen;
-  if (typeof listen !== "function") return;
-  genFamilyWatchBound = true;
-  listen("inspace:gen-family", (event) => {
-    const next = event.payload?.family;
-    if (next !== "qwen21" && next !== "h3image") return;
-    genFamily = next;
-    if (!genDefaultsCache.has(next)) loadGenDefaults(next);
-  }).catch(() => {});
-}
-
-/* 设置里切了「本地 / API」：重读状态，再把每块面板的档位行和更多设置刷一遍。 */
+/* 设置里改了接口配置：重读状态，再把每块面板的提示和开始按钮刷一遍。 */
 export let genApiWatchBound = false;
 export function watchGenApi() {
   if (genApiWatchBound) return;
@@ -307,17 +227,7 @@ export function attachGenPanel(el, item) {
     if (canvas) resetGenMask(canvas);
     showToast("遮罩已清空");
   });
-  /* 高清放大的「补细节」开关：开了就在放大之后按提示词低强度重绘一遍 */
-  const refineButton = el.querySelector(".canvas-gen-refine");
-  refineButton?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const target = findItem(item.id);
-    if (!target) return;
-    target.refine = !target.refine;
-    scheduleItemsSave();
-    refreshGenPanel(target.id);
-  });
-  /* 更多设置：展开/收起、改参数、换模型、恢复默认 */
+  /* 更多设置：展开/收起、改尺寸、恢复默认 */
   const more = el.querySelector(".canvas-gen-more");
   const moreToggle = el.querySelector(".canvas-gen-more-toggle");
   if (more && moreToggle) {
@@ -362,10 +272,6 @@ export function attachGenPanel(el, item) {
       const target = findItem(item.id);
       if (!target) return;
       const field = control.dataset.genField;
-      if (field === "model") {
-        switchGenFamily(target, control.value);
-        return;
-      }
       const value = control.type === "checkbox" ? control.checked : control.value;
       if (!applyGenFields(target, { [field]: value })) return;
       persistGen(target);
@@ -387,7 +293,7 @@ export function attachGenPanel(el, item) {
       event.stopPropagation();
       const target = findItem(item.id);
       if (!target) return;
-      const family = target.model === "h3image" || target.model === "qwen21" ? target.model : genFamily;
+      const family = genFamily;
       const value = await store.genDefaultsReset(family).catch((error) => {
         showError(error);
         return null;
@@ -417,8 +323,7 @@ export function attachGenPanel(el, item) {
       event.stopPropagation();
       const target = findItem(item.id);
       if (!target) return;
-      const family = target.model === "h3image" || target.model === "qwen21" ? target.model : genFamily;
-      const maxSide = family === "h3image" ? 4096 : 2048;
+      const maxSide = 4096;
       const entries = GEN_SIZE_PRESETS.map((group) => ({
         label: group.label,
         children: group.items
@@ -526,14 +431,15 @@ export function genInputItems(item) {
 }
 
 export function genModeFor(item, count) {
-  const stated = item.mode && item.mode !== "auto" ? item.mode : "";
+  /* upscale 依赖本地放大模型，已随本地引擎移除：老块上还留着它时按 auto 重新推断 */
+  const stated = item.mode && item.mode !== "auto" && item.mode !== "upscale" ? item.mode : "";
   if (stated) return stated;
   if (!count) return "t2i";
   return count === 1 ? "i2i" : "edit";
 }
 
 /* 一块东西画成引擎能吃的 PNG。图片块和面板自己那张都在 images/ 里，读字节就行；
-   画面块是矢量，走导出那套光栅化。场景块这一版还不吃——three.js 抓帧是另一件事。 */
+   画面块是矢量，走导出那套光栅化。 */
 export async function genInputPng(item) {
   const space = current?.meta?.id;
   if (!space) throw new Error("没有打开的画布");
@@ -563,7 +469,7 @@ export function runOrStopGen(id) {
   /* 本地引擎一次一张由后端拒绝；API 通道按设置并行，这里不拦 */
   /* 放大这一档不读提示词，那句「先写一句提示词」在这儿是拦错人 */
   const mode = genModeFor(item, genInputItems(item).length);
-  if (mode !== "upscale" && !(item.prompt || "").trim()) {
+  if (!(item.prompt || "").trim()) {
     showError("先写一句提示词");
     return;
   }
@@ -606,16 +512,9 @@ export async function startGenRun(item) {
       block: id,
       prompt: (item.prompt || "").trim(),
       mask,
-      refine: mode === "upscale" ? Boolean(item.refine) : false,
-      negative: item.negative || "",
       width: item.imageW,
       height: item.imageH,
-      steps: item.steps,
-      cfg: item.cfg,
-      seed: item.seed,
       mode,
-      family: item.model || undefined,
-      strength: item.strength,
       images,
     };
   } catch (error) {

@@ -14,17 +14,18 @@
  * 数据落在后端给的画布文件夹里：图元是 items.json，图片在 images/。 */
 import { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, AUDIO_MIN_HEIGHT, AUDIO_MIN_WIDTH, BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CONNECTOR_MAX_POINTS, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, EBOOK_MIN_HEIGHT, EBOOK_MIN_WIDTH, FILE_MIN_HEIGHT, FILE_MIN_WIDTH, GEN_CFG_MAX, GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_MODES, GEN_MODE_LABELS, GEN_STEPS_MAX, GEN_TEXT_MAX, GEN_VIDEO_MIN_HEIGHT, GEN_VIDEO_MIN_WIDTH, NOTE_DEFAULT_HEIGHT } from "./canvas-items.js";
 import { NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_ERASER_TOLERANCE, PICTURE_MAX_CMDS, PICTURE_MAX_EXPANDED, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PICTURE_STROKE_MIN_STEP, PICTURE_STROKE_WIDTH_MAX, PICTURE_STROKE_WIDTH_MIN, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT } from "./canvas-items.js";
-import { QUOTE_MIN_WIDTH, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, VIDEO_MIN_HEIGHT, VIDEO_MIN_WIDTH, absolutePathOf, capturePagePin, collectPictureImageSrcs, connectorGeometry, connectorLabelPoint, createConnectorElement, createItemElement, fileBlockSize, fitImageSize, formatSize, itemBounds, setFileToggleMode, makeAudio, makeBox, makeConnector, makeEbook } from "./canvas-items.js";
-import { makeFile, makeGen, makeImage, makeLine, makeNote, makePage, makePicture, makePlan, makeProduct, makeQuote, makeScene, makeText, makeVideo, makeVideoGen, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmd, normalizePictureCmds, normalizePictureSymbols, normalizeSceneCamera, normalizeSceneParts, normalizeSceneSurfaces } from "./canvas-items.js";
+import { QUOTE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, VIDEO_MIN_HEIGHT, VIDEO_MIN_WIDTH, absolutePathOf, capturePagePin, collectPictureImageSrcs, connectorGeometry, connectorLabelPoint, createConnectorElement, createItemElement, fileBlockSize, fitImageSize, formatSize, itemBounds, setFileToggleMode, makeAudio, makeBox, makeConnector, makeEbook } from "./canvas-items.js";
+import { makeFile, makeGen, makeImage, makeLine, makeNote, makePage, makePicture, makePlan, makeProduct, makeQuote, makeText, makeVideo, makeVideoGen, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmd, normalizePictureCmds, normalizePictureSymbols } from "./canvas-items.js";
 import { pictureCmdHit, pictureImageSrc, pictureLayerCensus, pictureTopLayers, pinConnectorSides, pinEbookPage, planPixelsPerMm, refreshQuoteCard, releaseEbookPage, remapPictureImageSrcs, renderMissing, renderPictureCmd, routeConnectorPreview, setPictureMedia, snapGenSize, stretchEbookPage, syncConnectorElement, syncItemElement, toPersisted, videoControlOf } from "./canvas-items.js";
 import * as store from "./canvas-store.js";
-export { exitSceneEdit };
-export { AUDIO_MIN_HEIGHT, AUDIO_MIN_WIDTH, EBOOK_MIN_HEIGHT, EBOOK_MIN_WIDTH, FILE_MIN_HEIGHT, FILE_MIN_WIDTH, GEN_VIDEO_MIN_HEIGHT, GEN_VIDEO_MIN_WIDTH, PICTURE_BRUSH_SPEED, PICTURE_ERASER_TOLERANCE, PICTURE_STROKE_MIN_STEP, PICTURE_STROKE_WIDTH_MAX, PICTURE_STROKE_WIDTH_MIN, PICTURE_UNDO_LIMIT, VIDEO_MIN_HEIGHT, VIDEO_MIN_WIDTH, addSceneModel, agentBlock, agentCameraState, agentCreateBlock, agentCreateConnector, agentCreateSpace, agentDeleteBlock, agentDuplicateBlock, agentEbookGoto };
-export { agentEbookToc, agentFileRead, agentFileWrite, agentFitView, agentFocusBlock, agentGenCancel, agentGenFamily, agentGenPlace, agentGenRun, agentGenStatus, agentGenVideo, agentGenVideoCancel, agentGenVideoStatus, agentGroupCreate, agentGroupDelete, agentGroupRename, agentMediaControl, agentMediaState, agentNoteRead, agentNoteWrite, agentOpenImage, agentPageDuplicate, agentPageSnapshot, agentPdfGoto, agentPdfState };
-export { agentPictureDraw, agentPictureGet, agentPictureLayers, agentPictureLight, agentPlanArea, agentPlanCalibrate, agentPlanPlaceCamera, agentPlanPlaceProduct, agentPlanRemove, agentProposalTemplate, agentResetZoom, agentRevealFile, agentScene, agentSceneApplyMaterial, agentSceneCameraPreset, agentSceneFurnitureBind, agentSceneFurnitureMove, agentSceneGet, agentSceneLightPreset, agentScenePlaceProduct, agentSceneRoomShell, agentSceneSurfaceSet, agentSelectBlocks, agentSetCamera, agentSetLayer };
-export { agentSpaceCopy, agentSpaceList, agentSpaceTree, agentUpdateBlock, applyFurniture, applyZoomInput, bindZoomHold, bufferToBase64, closeMenu, exportClientPdfTo, exportClientWebTo, exportRootName, finishEdgeLabelEdit, genFamily, hasScrollableAncestor, importProductsFromCsv, initMinimap, initSearch, initSpaceTree, isMenuOpen, loadBlockContents, normalizePictureCmd, onBendHandleDoubleClick, onKeyDown, onPaste };
-export { onStageContextMenu, onStageDoubleClick, onStagePointerDown, onWindowPointerMove, onWindowPointerUp, openExportMenu, openToolMenu, pictureCmdHit, pictureEditorOf, planPlaceCamera, planPlaceProduct, planRemove, probeCache, rebuildContainerOwners, refreshGenDefaults, refreshLinkedNotes, refreshTitlebarPath, refreshTree, renderPictureCmd, selectZoomDigits, setCosmosSeed, setMarqueeCursor, setPictureMedia, setSceneAssetProvider, setupFileDrop };
-export { setupGenEvents, setupVideoCopyEvents, setupVideoEvents, startConnect, startResize, watchGenApi, watchGenFamily, zoomAt, zoomLabel };
+import { LOCK_BADGE_SVG, addOverlayBox, loneSelected, refreshTitlebarPath, updateSelection } from "./canvas/selection.js";
+
+export { AUDIO_MIN_HEIGHT, AUDIO_MIN_WIDTH, EBOOK_MIN_HEIGHT, EBOOK_MIN_WIDTH, FILE_MIN_HEIGHT, FILE_MIN_WIDTH, GEN_VIDEO_MIN_HEIGHT, GEN_VIDEO_MIN_WIDTH, PICTURE_BRUSH_SPEED, PICTURE_ERASER_TOLERANCE, PICTURE_STROKE_MIN_STEP, PICTURE_STROKE_WIDTH_MAX, PICTURE_STROKE_WIDTH_MIN, PICTURE_UNDO_LIMIT, VIDEO_MIN_HEIGHT, VIDEO_MIN_WIDTH, agentBlock, agentCameraState, agentCreateBlock, agentCreateConnector, agentCreateSpace, agentDeleteBlock, agentDuplicateBlock, agentEbookGoto };
+export { agentEbookToc, agentFileRead, agentFileWrite, agentFitView, agentFocusBlock, agentGenCancel, agentGenPlace, agentGenRun, agentGenStatus, agentGenVideo, agentGenVideoCancel, agentGenVideoStatus, agentGroupCreate, agentGroupDelete, agentGroupRename, agentMediaControl, agentMediaState, agentNoteRead, agentNoteWrite, agentOpenImage, agentPageDuplicate, agentPageSnapshot, agentPdfGoto, agentPdfState };
+export { agentPictureDraw, agentPictureGet, agentPictureLayers, agentPictureLight, agentPlanArea, agentPlanCalibrate, agentPlanPlaceProduct, agentPlanRemove, agentResetZoom, agentRevealFile, agentScene, agentSelectBlocks, agentSetCamera, agentSetLayer };
+export { agentSpaceCopy, agentSpaceList, agentSpaceTree, agentUpdateBlock, applyZoomInput, bindZoomHold, closeMenu, exportClientPdfTo, exportClientWebTo, exportRootName, finishEdgeLabelEdit, genFamily, hasScrollableAncestor, importProductsFromCsv, initMinimap, initSearch, initSpaceTree, isMenuOpen, loadBlockContents, normalizePictureCmd, onBendHandleDoubleClick, onKeyDown, onPaste };
+export { onStageContextMenu, onStageDoubleClick, onStagePointerDown, onWindowPointerMove, onWindowPointerUp, openExportMenu, openToolMenu, pictureCmdHit, pictureEditorOf, planPlaceProduct, planRemove, probeCache, rebuildContainerOwners, refreshGenDefaults, refreshLinkedNotes, refreshTitlebarPath, refreshTree, renderPictureCmd, selectZoomDigits, setCosmosSeed, setMarqueeCursor, setPictureMedia, setupFileDrop };
+export { setupGenEvents, setupVideoCopyEvents, setupVideoEvents, startConnect, startResize, watchGenApi, zoomAt, zoomLabel };
 import { agentAnimateCamera, agentBlock, agentCameraState, agentCreateSpace, agentDeleteSpace, agentFindSpace, agentFitView, agentFocusBlock, agentGroupCreate, agentGroupDelete, agentGroupRename, agentHighlight, agentOpenSpace, agentPlacePoint, agentRenameSpace, agentRequireItem, agentRequireSpace, agentRevealBlock, agentScene, agentSpaceCopy, agentSpaceList, agentSpaceTree, agentStopCameraAnim, agentSummary, applyProductFields } from "./canvas/agent-layer.js";
 import { numOr } from "./canvas/agent-layer.js";
 import { onWindowPointerMove, onWindowPointerUp, scheduleMeasurements, setMeasureHeld, settlePointerUp, startDraw, startResize } from "./canvas/alt-measure.js";
@@ -32,18 +33,18 @@ import { agentResetZoom, agentSetCamera } from "./canvas/camera.js";
 import { bendInsertIndex, nearestPathPoint, onBendHandleDoubleClick, onStageContextMenu, onStageDoubleClick, openImageExternally, setConnectorBend } from "./canvas/connector-points.js";
 import { connectHit, drawConnectPreview, finishConnect, finishConnectEnd, setConnectTarget, setHoverId, startConnect, updatePorts } from "./canvas/connectors.js";
 import { containerBoxOf, drawSnapGuides, insideBox, isContainer, moveMembers, nudgeSelected, ownedByContainer, ownedMembers, reassignContainerOwners, rebuildContainerOwners, snapLineAngle, snapOffset, snapResize, toggleContainer } from "./canvas/containers.js";
-import { flushBlockContents, genTimers, loadBlockContents, noteTimers, persistGen, persistNote, persistPicture, persistScene, pictureTimers, sceneTimers } from "./canvas/content-files.js";
+import { flushBlockContents, genTimers, loadBlockContents, noteTimers, persistGen, persistNote, persistPicture, pictureTimers } from "./canvas/content-files.js";
 import { activeBodySelectionText, applyColor, compareImagesEntry, copyBodySelectionText, deleteItems, itemMenuEntries, moveLayer, openBlankMenu, openItemMenu, removeItemFromDom, setFontSize, setLocked, setLockedMany, setTextAlign } from "./canvas/context-menu.js";
 import { addImageBlock, audioExtFor, baseName, copyItems, fileExt, fileToDataUrl, imageSize, insertFileFromPicker, insertGenPanel, insertPaths, landBlock, onPaste, pasteCopiedBlocks, pastePoint, revealItem, stageCenterWorld } from "./canvas/copy-paste.js";
-import { agentCreateBlock, agentCreateConnector, agentDeleteBlock, agentDuplicateBlock, agentPageDuplicate, agentPageSnapshot, agentProposalTemplate, agentSelectBlocks, agentSetLayer, agentUpdateBlock, exportClientPdfTo, exportClientWebTo, exportRootName, renamePageFlow, setPageOrderFlow, setPageRatio } from "./canvas/delivery.js";
+import { agentCreateBlock, agentCreateConnector, agentDeleteBlock, agentDuplicateBlock, agentPageDuplicate, agentPageSnapshot, agentSelectBlocks, agentSetLayer, agentUpdateBlock, exportClientPdfTo, exportClientWebTo, exportRootName, renamePageFlow, setPageOrderFlow, setPageRatio } from "./canvas/delivery.js";
 import { exporter, exporting, openExportMenu, showToast } from "./canvas/export.js";
 import { agentImportFile, agentPictureDraw, agentPictureGet, agentPictureLayers, agentPictureLight, createTextFile, fileTypeMenuItems, loadFileTypes, mergePictureSymbols, pictureWashed, rejectFatalDrop, resolvePictureImages } from "./canvas/files-content.js";
-import { agentPlanArea, agentPlanCalibrate, agentPlanPlaceCamera, agentPlanPlaceProduct, agentPlanRemove, attachPlanBlock, cancelPlanCalibration, placeProductOnPlanFlow, planCalibration, planPlaceCamera, planPlaceProduct, planRemove, startPlanCalibration } from "./canvas/floorplan.js";
-import { agentFileRead, agentFileWrite, agentGenCancel, agentGenFamily, agentGenPlace, agentGenRun, agentGenStatus, agentGenVideo, agentGenVideoCancel, agentGenVideoStatus, agentNoteRead, agentNoteWrite, agentOpenImage, agentRevealFile, applyGenFields } from "./canvas/gen-agent.js";
-import { applyGenDefaultsToItem, attachGenPanel, genEngine, genFamily, genFeedOf, genInputItems, genInputPng, genModeFor, placeGenImage, refreshGenDefaults, refreshGenFeeds, refreshGenPanel, runOrStopGen, setupGenEvents, setupVideoEvents, stopGen, watchGenApi, watchGenFamily } from "./canvas/gen-defaults.js";
+import { agentPlanArea, agentPlanCalibrate, agentPlanPlaceProduct, agentPlanRemove, attachPlanBlock, cancelPlanCalibration, placeProductOnPlanFlow, planCalibration, planPlaceProduct, planRemove, startPlanCalibration } from "./canvas/floorplan.js";
+import { agentFileRead, agentFileWrite, agentGenCancel, agentGenPlace, agentGenRun, agentGenStatus, agentGenVideo, agentGenVideoCancel, agentGenVideoStatus, agentNoteRead, agentNoteWrite, agentOpenImage, agentRevealFile, applyGenFields } from "./canvas/gen-agent.js";
+import { applyGenDefaultsToItem, attachGenPanel, genEngine, genFamily, genFeedOf, genInputItems, genInputPng, genModeFor, placeGenImage, refreshGenDefaults, refreshGenFeeds, refreshGenPanel, runOrStopGen, setupGenEvents, setupVideoEvents, stopGen, watchGenApi } from "./canvas/gen-defaults.js";
 import { exportTreeSpace, importIntoGroup, renameTreeGroup, startTreeRename } from "./canvas/inspace.js";
 import { onStagePointerDown, stageTargetAt } from "./canvas/interactions.js";
-import { addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addVideoBlock, askInsertMode, attachProductCard, attachQuoteCard, attachSceneControls, bytesToBase64, changeProductImage, exportQuote, importCsvFromQuote, importProductsFromCsv, moveSceneFurnitureParts, productItems, refreshQuotes, revealFileBlock, revealTarget, sceneFurnitureGroup, scenePlacementActive, setScenePlacementMode } from "./canvas/inventory.js";
+import { addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addVideoBlock, askInsertMode, attachProductCard, attachQuoteCard, bytesToBase64, changeProductImage, exportQuote, importCsvFromQuote, importProductsFromCsv, productItems, refreshQuotes, revealFileBlock, revealTarget } from "./canvas/inventory.js";
 import { flushCamera, flushItems, onKeyDown, scheduleCameraSave, scheduleItemsSave, setupFileDrop, showError } from "./canvas/keys-save.js";
 import { sanitizePageWidth } from "./canvas/page-width-core.js";
 import { alignSelected, distributeSelected, tidySelected } from "./canvas/layout.js";
@@ -54,9 +55,6 @@ import { closeFileEdit, commitNoteEditing, fileEditor, flushFileEditor, hydrateN
 import { PICTURE_BRUSH_SPEED, PICTURE_UNDO_LIMIT, attachPictureTools, dropRegionImage, exportPictureImage, paintingTarget, pictureEditorOf, pictureEditors, pictureMenuEntries, refreshPictureChrome, setPictureEditing } from "./canvas/paint.js";
 import { agentEbookGoto, agentEbookToc, agentMediaControl, agentMediaState, agentPdfGoto, agentPdfState } from "./canvas/pdf-media.js";
 import { addItemElement, boundsOfItem, findItem, refreshConnectors, renderAll, revealSelectionInTree, select, selectAll, syncConnector, syncSelectedClasses } from "./canvas/render.js";
-import { LOCK_BADGE_SVG, addOverlayBox, enterSceneEdit, enterScenePart, exitSceneEdit, fitEditingScene, loneSelected, refreshSceneToolbar, refreshTitlebarPath, scenePartBaseLabel, scenePatch, updateSelection } from "./canvas/scene-toolbar.js";
-import { FURNITURE_COLORS, SCENE_LIGHT_PRESETS, addSceneFloor, addSceneModel, addSceneModelFlow, agentSceneApplyMaterial, agentSceneCameraPreset, agentSceneFurnitureBind, agentSceneFurnitureMove, agentSceneGet, agentSceneLightPreset, agentScenePlaceProduct, agentSceneRoomShell, agentSceneSurfaceSet, applyFurniture, bufferToBase64, createFurnitureFlow, exportSceneFlow, newSceneForProduct, pickProductModel, placeProductInSceneFlow, roomShellParts, roomShellSurfaces, sceneLightOf, sceneSurfacesOf } from "./canvas/scene-tools.js";
-import { sceneView, setSceneCameraPreset } from "./canvas/scene-tools.js";
 import { resetCanvasTextSelection } from "./canvas/editor-toolbar.js";
 import { commitEditing, startTextEdit } from "./canvas/text-edit.js";
 import { applyCamera, applyZoomInput, beginMarquee, bindZoomHold, clientToWorld, dropTool, finishMarquee, hasScrollableAncestor, openToolMenu, refreshCulling, resetZoom, scheduleCulling, selectZoomDigits, setMarqueeCursor, setTool, toolMenuEntries, updateMarquee, withAllVisible, worldToStage, zoomAt, zoomLabel } from "./canvas/tools-camera.js";
@@ -72,36 +70,32 @@ import { renderMarkdown } from "./markdown.js";
 import { closeMenu, isMenuOpen, openMenu } from "./menu.js";
 import { blurMinimapFocus, initMinimap, isMinimapFocused, refreshMinimap } from "./minimap.js";
 import { toPngDataUrl } from "./raster.js";
-import { beginSceneFurnitureDrag, contentBox, disposeScene, exportPartsGLB, exportSceneGLB, onSceneFurnitureSelection, renderModelThumbnail, sceneCameraState, sceneFurnitureDragDelta, sceneFurnitureInspect, sceneFurnitureMoveDelta, scenePick, setSceneAssetProvider, setSceneCameraScale, setSceneFurnitureSelection } from "./scene3d.js";
 import { initSearch } from "./search.js";
 import { openVideoHelp } from "./video-help.js";
 import { dropVideoRun, patchVideoRun, syncVideoPanel, videoBusyId, videoRunOf } from "./videopanel.js";
-export { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, BATCH_GAP, BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CLOSE_X_SVG, CONNECTOR_MAX_POINTS, DEFAULT_QUALITY, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, FURNITURE_COLORS, GEN_CFG_MAX, GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_MODES, GEN_MODE_LABELS, GEN_PLACE_GAP, GEN_STEPS_MAX, GEN_TEXT_MAX, LOCK_BADGE_SVG, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT };
-export { NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MAX_EXPANDED, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUALITY, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, SCENE_LIGHT_PRESETS, SCENE_MIN_HEIGHT };
-export { SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, absolutePathOf, activeBodySelectionText, addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addImageBlock, addItemElement, addOverlayBox, addSceneFloor, addSceneModelFlow, addVideoBlock, agentAnimateCamera, agentDeleteSpace, agentFindSpace, agentHighlight, agentImportFile, agentOpenSpace, agentPlacePoint, agentRenameSpace, agentRequireItem , createTextFile, fileTypeMenuItems, loadFileTypes };
-export { agentRequireSpace, agentRevealBlock, agentStopCameraAnim, agentSummary, alignSelected, applyCamera, applyColor, applyGenDefaultsToItem, applyGenFields, applyGenMaskMode, applyProductFields, askInsertMode, attachGenMask, attachGenPanel, attachPictureTools, attachPlanBlock, attachProductCard, attachQuoteCard, attachSceneControls, attachVideoPanel, audioExtFor, baseName, beginMarquee, beginSceneFurnitureDrag, bendInsertIndex };
-export { blurMinimapFocus, boundsOfItem, bytesToBase64, cancelPlanCalibration, capturePagePin, changeProductImage, choiceDialog, clientToWorld, closeColorPicker, closeFileEdit, collectPictureImageSrcs, commitEdgeLabelEdit, commitEditing, commitNoteEditing, compareImagesEntry, confirmDialog, connectHit, connectorGeometry, connectorLabelPoint, containerBoxOf, contentBox, copyBodySelectionText, copyIntoCanvas, copyItems, createConnectorElement };
-export { createExporter, createFurnitureFlow, createItemElement, createMarkdownEditor, deleteItems, disposeScene, distributeSelected, drawConnectPreview, drawSnapGuides, dropGenRun, dropRegionImage, dropTool, dropVideoRun, enterScenePart, exportPartsGLB, exportPictureImage, exportQuote, exportSceneFlow, exportSceneGLB, exportTreeSpace, exporter, exporting, fileBlockSize, fileEditor, fileExt , setFileToggleMode };
+export { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, BATCH_GAP, BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CLOSE_X_SVG, CONNECTOR_MAX_POINTS, DEFAULT_QUALITY, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, GEN_CFG_MAX, GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_MODES, GEN_MODE_LABELS, GEN_PLACE_GAP, GEN_STEPS_MAX, GEN_TEXT_MAX, LOCK_BADGE_SVG, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT };
+export { NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MAX_EXPANDED, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUALITY, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH };
+export { TEXT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, absolutePathOf, activeBodySelectionText, addAudioBlock, addDroppedFile, addEbookBlock, addFileBlock, addImageBlock, addItemElement, addOverlayBox, addVideoBlock, agentAnimateCamera, agentDeleteSpace, agentFindSpace, agentHighlight, agentImportFile, agentOpenSpace, agentPlacePoint, agentRenameSpace, agentRequireItem, createTextFile, fileTypeMenuItems, loadFileTypes };
+export { agentRequireSpace, agentRevealBlock, agentStopCameraAnim, agentSummary, alignSelected, applyCamera, applyColor, applyGenDefaultsToItem, applyGenFields, applyGenMaskMode, applyProductFields, askInsertMode, attachGenMask, attachGenPanel, attachPictureTools, attachPlanBlock, attachProductCard, attachQuoteCard, attachVideoPanel, audioExtFor, baseName, beginMarquee, bendInsertIndex };
+export { blurMinimapFocus, boundsOfItem, bytesToBase64, cancelPlanCalibration, capturePagePin, changeProductImage, choiceDialog, clientToWorld, closeColorPicker, closeFileEdit, collectPictureImageSrcs, commitEdgeLabelEdit, commitEditing, commitNoteEditing, compareImagesEntry, confirmDialog, connectHit, connectorGeometry, connectorLabelPoint, containerBoxOf, copyBodySelectionText, copyIntoCanvas, copyItems, createConnectorElement };
+export { createExporter, createItemElement, createMarkdownEditor, deleteItems, distributeSelected, drawConnectPreview, drawSnapGuides, dropGenRun, dropRegionImage, dropTool, dropVideoRun, exportPictureImage, exportQuote, exportTreeSpace, exporter, exporting, fileBlockSize, fileEditor, fileExt, setFileToggleMode };
 export { fileToDataUrl, findItem, finishConnect, finishConnectEnd, finishMarquee, fitGenPrompt, fitImageSize, flushBlockContents, flushCamera, flushFileEditor, flushItems, formatSize, genBusyId, genEngine, genFeedOf, genInputItems, genInputPng, genMaskBases, genMaskCanvasOf, genMaskModes, genModeFor, genRunMasks, genRunOf, genTimers, hydrateNoteImages };
 export { imageSize, importCsvFromQuote, importIntoGroup, insertFileFromPicker, insertGenPanel, insertPaths, insertPoint, insertVideoPanel, insideBox, isContainer, isFileEditable, isMinimapFocused, itemBounds, itemMenuEntries, landBlock, loneSelected, makeAudio, makeBox, makeConnector, makeEbook, makeFile, makeGen, makeImage, makeLine, makeNote };
-export { makePage, makePicture, makePlan, makeProduct, makeQuote, makeScene, makeText, makeVideo, makeVideoGen, mergePictureSymbols, moveLayer, moveMembers, moveSceneFurnitureParts, nearestPathPoint, newId, newSceneForProduct, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmds, normalizePictureSymbols, normalizeSceneCamera, normalizeSceneParts, normalizeSceneSurfaces };
-export { noteTimers, nudgeSelected, numOr, onGenRunChange, onSceneFurnitureSelection, openBlankMenu, openColorPicker, openImageCompare, openImageExternally, openItemMenu, openMenu, openVideoHelp, openVideoProblem, ownedByContainer, ownedMembers, paintingTarget, panelTreeLabel, pasteAudio, pasteCopiedBlocks, pasteImage, pastePoint, patchGenRun, patchVideoRun, persistGen, persistNote };
-export { persistPicture, persistScene, pickProductModel, pictureEditors, pictureImageSrc, pictureLayerCensus, pictureMenuEntries, pictureTimers, pictureTopLayers, pictureWashed, pinConnectorSides, pinEbookPage, placeBlock, placeGenImage, placeProductInSceneFlow, placeProductOnPlanFlow, planCalibration, planPixelsPerMm, positionEdgeLabelEditor, productItems, progressDialog, promptDialog, reassignContainerOwners, refreshConnectors, refreshCulling };
-export { refreshFileBlock, refreshGenFeeds, refreshGenMaskBase, refreshGenPanel, refreshMinimap, refreshPictureChrome, refreshQuoteCard, refreshQuotes, refreshSceneToolbar, refreshVideoPanel, rejectFatalDrop, releaseEbookPage, remapPictureImageSrcs, removeItemFromDom, renamePageFlow, renameTreeGroup, renderAll, renderMarkdown, renderMissing, renderModelThumbnail, renderNoteBody, renderTree, resetGenMask, resetZoom, resolvePictureImages };
-export { revealFileBlock, revealItem, revealSelectionInTree, revealTarget, roomShellParts, roomShellSurfaces, routeConnectorPreview, runOrStopGen, sceneCameraState, sceneFurnitureDragDelta, sceneFurnitureGroup, sceneFurnitureInspect, sceneFurnitureMoveDelta, sceneLightOf, scenePartBaseLabel, scenePatch, scenePick, scenePlacementActive, sceneSurfacesOf, sceneTimers, sceneView, scheduleCameraSave, scheduleCulling, scheduleItemsSave, scheduleMeasurements };
-export { select, selectAll, setConnectTarget, setConnectorBend, setCosmosCamera, setFontSize, setHoverId, setLocked, setLockedMany, setMeasureHeld, setPageOrderFlow, setPageRatio, setPictureEditing, setSceneCameraPreset, setSceneCameraScale, setSceneFurnitureSelection, setScenePlacementMode, setTextAlign, setTool, showError, showToast, snapGenSize, snapLineAngle, snapOffset, snapResize };
+export { makePage, makePicture, makePlan, makeProduct, makeQuote, makeText, makeVideo, makeVideoGen, mergePictureSymbols, moveLayer, moveMembers, nearestPathPoint, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmds, normalizePictureSymbols };
+export { noteTimers, nudgeSelected, numOr, onGenRunChange, openBlankMenu, openColorPicker, openImageCompare, openImageExternally, openItemMenu, openMenu, openVideoHelp, openVideoProblem, ownedByContainer, ownedMembers, paintingTarget, panelTreeLabel, pasteAudio, pasteCopiedBlocks, pasteImage, pastePoint, patchGenRun, patchVideoRun, persistGen, persistNote };
+export { persistPicture, pictureEditors, pictureImageSrc, pictureLayerCensus, pictureMenuEntries, pictureTimers, pictureTopLayers, pictureWashed, pinConnectorSides, pinEbookPage, placeBlock, placeGenImage, placeProductOnPlanFlow, planCalibration, planPixelsPerMm, positionEdgeLabelEditor, productItems, progressDialog, promptDialog, reassignContainerOwners, refreshConnectors, refreshCulling };
+export { refreshFileBlock, refreshGenFeeds, refreshGenMaskBase, refreshGenPanel, refreshMinimap, refreshPictureChrome, refreshQuoteCard, refreshQuotes, refreshVideoPanel, rejectFatalDrop, releaseEbookPage, remapPictureImageSrcs, removeItemFromDom, renamePageFlow, renameTreeGroup, renderAll, renderMarkdown, renderMissing, renderNoteBody, renderTree, resetGenMask, resetZoom, resolvePictureImages };
+export { revealFileBlock, revealItem, revealSelectionInTree, revealTarget, routeConnectorPreview, runOrStopGen, scheduleCameraSave, scheduleCulling, scheduleItemsSave, scheduleMeasurements };
+export { select, selectAll, setConnectTarget, setConnectorBend, setCosmosCamera, setFontSize, setHoverId, setLocked, setLockedMany, setMeasureHeld, setPageOrderFlow, setPageRatio, setPictureEditing, setTextAlign, setTool, showError, showToast, snapGenSize, snapLineAngle, snapOffset, snapResize };
 export { srcInUse, stageCenterWorld, stageTargetAt, startDraw, startEdgeLabelEdit, startFileEdit, startNoteEdit, startPlanCalibration, startTextEdit, startTreeRename, stopGen, stopVideo, store, stretchEbookPage, syncConnector, syncConnectorElement, syncGen, syncItemElement, syncSelectedClasses, syncVideoPanel, tidySelected, toPersisted, toPngDataUrl, toggleContainer, toolMenuEntries };
 export { treeCollapsed, treeData, treeGroupList, treePanelCollapsed, treeSavePrefs, treeUi, updateMarquee, updatePorts, updateSelection, videoBusyId, videoControlOf, videoRunOf, withAllVisible, worldToStage };
-
-
-
 
 const { invoke } = window.__TAURI__.core;
 
 export const MIN_SCALE = 0.25;
 export const MAX_SCALE = 4;
-/* 每次缩放走 2 个百分点：1 点太慢，从 100% 挪到别处要点十几下 */
-const ZOOM_STEP = 0.02;
+/* 每次缩放走 5 个百分点（按钮、长按连发、Ctrl+滚轮都按这个来） */
+const ZOOM_STEP = 0.05;
 /* 长按缩放键：先走一步，按住超过这段才开始连发，之后按这个节拍继续走 */
 export const ZOOM_HOLD_DELAY = 340;
 export const ZOOM_HOLD_INTERVAL = 60;
@@ -146,7 +140,6 @@ export const RESIZE_MIN = {
   ebook: { w: EBOOK_MIN_WIDTH, h: EBOOK_MIN_HEIGHT },
   note: { w: NOTE_MIN_WIDTH, h: NOTE_MIN_HEIGHT },
   picture: { w: PICTURE_MIN_WIDTH, h: PICTURE_MIN_HEIGHT },
-  scene: { w: SCENE_MIN_WIDTH, h: SCENE_MIN_HEIGHT },
   gen: { w: GEN_MIN_WIDTH, h: GEN_MIN_HEIGHT },
   genvideo: { w: GEN_VIDEO_MIN_WIDTH, h: GEN_VIDEO_MIN_HEIGHT },
 };
@@ -180,10 +173,6 @@ export let imageCache = new Map();
    切画布时 imageCache 整个换掉，所以塞的是一个现查的函数、不是那张表本身。 */
 setPictureMedia((src) => imageCache.get(src) || "");
 /* 场景里贴的材质图也按当前画布取地址：换画布后同一个 images/xxx 不会串到上一个画布 */
-setSceneAssetProvider(async (src) => {
-  if (!current) throw new Error("没有打开的画布");
-  return store.imageUrl(current.meta.id, src, false);
-});
 export let audioCache = new Map();
 /* 视频只缓存 asset 地址（一串字符），不缓存任何字节 */
 export let videoCache = new Map();
@@ -256,7 +245,6 @@ export function setEdgeLabelEditor(value) { edgeLabelEditor = value; }
 export function setCurrent(value) { current = value; }
 export function setEditingId(value) { editingId = value; }
 export function setNoteEditor(value) { noteEditor = value; }
-
 
 /* ---------- 初始化 ---------- */
 
@@ -437,8 +425,7 @@ export function initCanvas() {
      窗口一窄左边/右边就会漏出没上色的一条；鸟瞰窗的视窗框也吃视野尺寸。
      光重算还不够——整幅内容死贴着旧窗口的左上角不动，看着就像画布没跟上窗口，
      所以先按尺寸差的一半挪相机，让视野中心那个世界点还留在窗口中心，再让
-     applyCamera 去收固定宽度的约束。沉浸式场景编辑时块是钉在视口上的，
-     相机挪完还要请它按新视口重新铺一次。 */
+     applyCamera 去收固定宽度的约束。 */
   let stageSize = null;
   let stageSyncFrame = 0;
   const syncStageSize = () => {
@@ -457,7 +444,6 @@ export function initCanvas() {
     current.camera.y += dh / 2;
     applyCamera();
     refreshMinimap();
-    fitEditingScene();
     scheduleCameraSave();
   };
   /* 一次拖动窗口边缘会连着来几十个 resize，一帧只算一次就够 */
@@ -481,8 +467,7 @@ export function initCanvas() {
     },
   });
 
-  /* 生图面板的模型默认参数：启动读一次，设置窗口切模型时再刷 */
-  watchGenFamily();
+  /* 生图面板的默认参数：启动读一次，设置窗口改了接口配置再刷 */
   watchGenApi();
   refreshGenDefaults();
 
@@ -575,8 +560,6 @@ export function leaveCanvas() {
   pictureEditors.clear();
   pictureTimers.forEach((timer) => clearTimeout(timer));
   pictureTimers.clear();
-  sceneTimers.forEach((timer) => clearTimeout(timer));
-  sceneTimers.clear();
 }
 
 /* ---------- 画布列表 / 新建 / 切换 ---------- */
@@ -642,7 +625,6 @@ export async function switchTo(id) {
     /* 块的容器归属按新画布重算：重叠的框先到先得 */
     rebuildContainerOwners();
     refreshTitlebarPath();
-    refreshSceneToolbar();
     /* 源 .md 读不到的笔记块整块换成丢文件卡，不再拿最后一次缓存的正文糊弄用户 */
     for (const item of staleNotes) {
       renderMissing(itemEls.get(item.id), item, current.meta.path || "");
@@ -846,23 +828,6 @@ export function showEmpty() {
   updateChrome();
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* ---------- 块内那层笔画栈 ---------- */
 
 function pushPictureStep(id, step) {
@@ -1052,17 +1017,6 @@ export function finishPaint(finished) {
   }
   pictureAfterChange(finished.id);
 }
-
-
-
-
-
-
-
-
-
-
-
 
 /* ---------- 汇总出口 ---------- */
 
@@ -1476,90 +1430,11 @@ export const canvasAgent = {
   cameraResetZoom: agentResetZoom,
   cameraSet: agentSetCamera,
   scene: agentScene,
-  sceneGet: agentSceneGet,
-  sceneSurfaceSet: agentSceneSurfaceSet,
-  sceneFurnitureBind: agentSceneFurnitureBind,
-  sceneFurnitureMove: agentSceneFurnitureMove,
-  scenePlacementMode: ({ id, enabled }) => setScenePlacementMode(agentRequireItem(id), Boolean(enabled)),
-  sceneRoomShell: agentSceneRoomShell,
-  sceneLightPreset: agentSceneLightPreset,
-  sceneCameraPreset: agentSceneCameraPreset,
-  scenePlaceProduct: agentScenePlaceProduct,
-  sceneApplyMaterial: agentSceneApplyMaterial,
-  sceneAddModel: async (sceneId, name) => {
-    const scene = agentRequireItem(sceneId);
-    if (scene.type !== "scene") throw new Error("scene 要传场景块");
-    const result = await addSceneModel(scene, String(name || "").trim());
-    if (!result) throw new Error("模型没加进场景");
-    return result;
-  },
-  sceneCreateFurniture: async (sceneId, spec = {}) => {
-    const scene = agentRequireItem(sceneId);
-    if (scene.type !== "scene") throw new Error("scene 要传场景块");
-    const KIND = {
-      cabinet: { w: 160, d: 45, h: 80, cabinet: true },
-      table: { w: 140, d: 70, h: 75, cabinet: false },
-      box: { w: 100, d: 100, h: 100, cabinet: false },
-      cylinder: { w: 80, d: 80, h: 120, cabinet: false },
-      sphere: { w: 100, d: 100, h: 100, cabinet: false },
-      cone: { w: 100, d: 100, h: 120, cabinet: false },
-      torus: { w: 100, d: 100, h: 30, cabinet: false },
-      capsule: { w: 60, d: 60, h: 120, cabinet: false },
-    };
-    const kind = KIND[spec.kind] ? spec.kind : "cabinet";
-    const preset = KIND[kind];
-    const color = /^#[0-9a-fA-F]{6}$/.test(String(spec.color || "")) ? String(spec.color) : "#b98a5e";
-    const built = {
-      kind,
-      w: Math.min(320, Math.max(40, Math.round(numOr(spec.w, preset.w)))),
-      d: Math.min(120, Math.max(20, Math.round(numOr(spec.d, preset.d)))),
-      h: Math.min(240, Math.max(20, Math.round(numOr(spec.h, preset.h)))),
-      color,
-      doors: preset.cabinet ? Math.min(4, Math.max(0, Math.round(numOr(spec.doors, 2)))) : 0,
-      leg: preset.cabinet ? Math.min(15, Math.max(0, Math.round(numOr(spec.leg, 10)))) : 0,
-      save: spec.save === true,
-    };
-    return applyFurniture(scene, built);
-  },
-  modelGenerate: async (spec = {}) => {
-    const got = normalizeSceneParts(spec.parts || []);
-    if (got.dropped.length) throw new Error(got.dropped[0].why);
-    if (!got.parts.length) throw new Error("parts 是空的：至少给一件几何");
-    if (got.parts.some((part) => part.op === "model")) {
-      throw new Error("parts 里不能放 model 引用件；要用网格请写 mesh");
-    }
-    const buffer = await exportPartsGLB(got.parts);
-    const base = String(spec.name || "模型").trim().slice(0, 60) || "模型";
-    if (spec.out) {
-      const path = await store.exportSaveFile(`${base}.glb`, bufferToBase64(buffer), spec.out);
-      return { name: `${base}.glb`, path: path || "" };
-    }
-    const file = await store.modelLibrarySave(base, bufferToBase64(buffer));
-    let placed = null;
-    if (spec.scene) {
-      const scene = agentRequireItem(spec.scene);
-      if (scene.type !== "scene") throw new Error("scene 要传场景块");
-      placed = await addSceneModel(scene, file.name);
-    }
-    return { name: file.name, placed };
-  },
-  sceneExportGlb: async (id, out) => {
-    const item = agentRequireItem(id);
-    if (item.type !== "scene") throw new Error("id 要传场景块");
-    if (!out) throw new Error("out 要给保存的绝对路径（.glb），MCP 里弹不了文件框");
-    const buffer = await exportSceneGLB(sceneView(item));
-    const base = current?.meta.name || "场景";
-    const name = `${base}${item.seq ? `-#${item.seq}` : ""}.glb`;
-    const path = await store.exportSaveFile(name, bufferToBase64(buffer), out);
-    return { path: path || "", block: item.id };
-  },
   planCalibrate: agentPlanCalibrate,
   planPlaceProduct: agentPlanPlaceProduct,
-  planPlaceCamera: agentPlanPlaceCamera,
   planArea: agentPlanArea,
   planRemove: agentPlanRemove,
   pageSnapshot: agentPageSnapshot,
-  proposalTemplate: agentProposalTemplate,
   pageDuplicate: agentPageDuplicate,
   exportCanvas: async (format, options = {}) => {
     const kinds = ["wechat", "html", "png", "pdf", "toutiao"];
@@ -1666,24 +1541,12 @@ export const canvasAgent = {
   pictureLight: agentPictureLight,
   genStatus: agentGenStatus,
   genRun: agentGenRun,
-  genFamily: agentGenFamily,
   genCancel: agentGenCancel,
   genPlace: agentGenPlace,
   genVideo: agentGenVideo,
   genVideoStatus: agentGenVideoStatus,
   genVideoCancel: agentGenVideoCancel,
-  genVideoLocal: async (dir) => {
-    if (dir === undefined) return store.genVideoLocalGet();
-    const current = await store.genVideoLocalGet();
-    return store.genVideoLocalSet({
-      ...(current?.config || {}),
-      dir: String(dir || ""),
-    });
-  },
   openSettings: (page) => invoke("open_settings_window", page ? { page } : {}),
-  genDegrid: (id, srcs) => store.genDegrid(id, srcs),
-  genDeviceGet: () => store.genDeviceGet(),
-  genDeviceSet: (device) => store.genDeviceSet(device),
   noteRead: agentNoteRead,
   noteWrite: agentNoteWrite,
   fileRead: agentFileRead,

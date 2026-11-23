@@ -39,10 +39,7 @@ export const openCanvasImage = (id, itemId) =>
 export const saveCanvasImageAs = (id, itemId) =>
   invoke("canvas_image_save_as", { id, itemId });
 /* 旧图原地去网格：不重出构图，直接清掉解码棋盘 */
-export const genDegrid = (id, srcs) => invoke("gen_degrid", { id, srcs });
-export const genDeviceGet = () => invoke("gen_device_get");
-export const genDeviceSet = (device) => invoke("gen_device_set", { device });
-/* 通用导出保存：弹保存框（或直接写 target），把前端生成的文件（如场景 GLB）落盘 */
+/* 通用导出保存：弹保存框（或直接写 target），把前端生成的文件落盘 */
 export const exportSaveFile = (fileName, dataBase64, target) =>
   invoke("canvas_export_file", {
     fileName,
@@ -51,9 +48,6 @@ export const exportSaveFile = (fileName, dataBase64, target) =>
     target: target || null,
     data: dataBase64,
   });
-/* 参数化家具导出：把前端生成的 GLB 直接存进模型库，返回 {name,size,modified} */
-export const modelLibrarySave = (name, dataBase64) =>
-  invoke("model_library_save", { name, data: dataBase64 });
 /* 删图：文件当场进系统回收站，引用态的原图不碰。 */
 export const deleteCanvasImage = (id, src, linked) =>
   invoke("canvas_delete_image", { id, src, linked: Boolean(linked) });
@@ -148,12 +142,6 @@ export const readPicture = (id, itemId) => invoke("canvas_read_picture", { id, i
 export const writePicture = (id, itemId, cmds, symbols) =>
   invoke("canvas_write_picture", { id, itemId, cmds, symbols: symbols || {} });
 export const deletePicture = (id, itemId) => invoke("canvas_delete_picture", { id, itemId });
-/* 场景块里的东西一块一份，住在 <画布>/scenes/<块id>.json：
-   一件东西动辄上百个坐标点，塞进 items.json 会把整个画布的读写和每份快照一起拖慢。 */
-export const readScene = (id, itemId) => invoke("canvas_read_scene", { id, itemId });
-export const writeScene = (id, itemId, parts) =>
-  invoke("canvas_write_scene", { id, itemId, parts: parts || [] });
-export const deleteScene = (id, itemId) => invoke("canvas_delete_scene", { id, itemId });
 /* 生图面板的提示词和参数，一块一份，住在 <画布>/genpanels/<块id>.json。
    出的那张图不在这里——它落在 images/ 里，路径记在块上，和图片块同一套规矩。 */
 export const readGen = (id, itemId) => invoke("canvas_read_gen", { id, itemId });
@@ -161,8 +149,6 @@ export const writeGen = (id, itemId, content) => invoke("canvas_write_gen", { id
 export const deleteGen = (id, itemId) => invoke("canvas_delete_gen", { id, itemId });
 /* 出图引擎：一次只出一张，进度和成品走事件（gen-progress / gen-preview / gen-done / gen-failed） */
 export const genStatus = () => invoke("gen_status");
-export const genModels = () => invoke("gen_models");
-export const genFamilySet = (family) => invoke("gen_family_set", { family });
 export const genDefaults = (family) => invoke("gen_defaults", { family: family || null });
 export const genDefaultsSet = (defaults, family) =>
   invoke("gen_defaults_set", { defaults, family: family || null });
@@ -175,8 +161,6 @@ export const genVideoStart = (req) => invoke("gen_video_start", { req });
 export const genVideoCancel = (block) => invoke("gen_video_cancel", block ? { block } : {});
 export const genVideoStatus = () => invoke("gen_video_status");
 export const genVideoApiGet = () => invoke("gen_video_api_get");
-export const genVideoLocalGet = () => invoke("gen_video_local_get");
-export const genVideoLocalSet = (config) => invoke("gen_video_local_set", { config });
 export const genVideoModels = (config) => invoke("gen_video_models", { config });
 /* 复制块时把源块那份文件再拷一份进目标画布，返回新的相对路径；
    引用态那块也照样收：从它记的原文件路径拷，粘出来的块从此自己带一份 */
@@ -203,13 +187,6 @@ export const exportWrite = (dir, name, ext, data) =>
   invoke("canvas_export_write", { dir, name, ext, data });
 /* 跨画布搜索：后端把所有画布的 items.json 扫一遍，只认块里的文字 */
 export const searchSpace = (query) => invoke("canvas_search", { query });
-/* 3D 模型库：library/models/ 下的 .glb；产品卡只记文件名，场景块按名字取地址 */
-export const modelLibraryDir = () => invoke("model_library_dir");
-export const modelLibraryList = () => invoke("model_library_list");
-export const modelLibraryReveal = () => invoke("model_library_reveal");
-export const modelLibraryUrl = async (name) =>
-  convertFileSrc(await invoke("model_library_url", { name }));
-export const modelLibraryImport = (path) => invoke("model_library_import", { path: path || null });
 /* 客户版网页是一整个目录：按相对路径写文件（父目录自动建），写完可以打开那个文件夹 */
 export const exportWritePath = (dir, rel, data) =>
   invoke("canvas_export_write_path", { dir, rel, data });

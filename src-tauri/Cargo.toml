@@ -15,22 +15,10 @@ edition = "2024"
 name = "inspace_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[features]
-# 关掉就没 CUDA，纯 CPU 也能出图（慢一个数量级）。开发机一律默认开。
-default = ["cuda"]
-cuda = []
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-# 生图引擎的 C++ 侧：CMake 现编上游源码，bindgen 现场生成绑定
-cmake = "0.1"
-bindgen = "0.71"
 
 [dependencies]
-half = "2"
-npyz = "0.8"
-ort = { version = "=2.0.0-rc.10", default-features = false, features = ["download-binaries", "half", "cuda", "std"] }
-# 纹理二期：libtorch（TorchScript）推理；LIBTORCH 环境变量指向 gen/h3d/libtorch
 # protocol-asset：把磁盘上的视频变成 <video> 能按 Range 读的地址，
 # 20GB 的片子也只占几十 MB 解码缓冲，不用把整份读进内存。
 tauri = { version = "2", features = ["protocol-asset"] }
@@ -58,10 +46,7 @@ quick-xml = "0.42"
 # bundled：自带 SQLite 源码，不依赖系统 SQLite。
 # 关掉默认特性（cache/hashlink/wasm 等），只留用得到的那部分。
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
-# 生图面板的引擎：不用 crates.io 的 diffusion-rs（它封的源码载不动 Qwen-Image 2.1 权重），
-# 源码由 scripts/prepare-sdcpp.mjs 取到 tools/sdcpp，build.rs 现场编成静态库链进来。
-# cuda 特性关掉就是纯 CPU。
-# 只开 png：出图和逐步预览都要把 RGBA 编成 PNG 推给前端。
+# 生图结果和截图都要把像素编成 PNG 推给前端。
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # 落图抓屏：直接读窗口客户区像素，屏幕上 ClearType 渲染的文本才和原面板完全一致。
 windows = { version = "0.62", features = [
@@ -71,8 +56,6 @@ windows = { version = "0.62", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
-xatlas-rs-v2 = "0.1.4"
-meshopt = "0.7.0"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
@@ -86,7 +69,3 @@ strip = true
 # 接 AcceleratorKeyPressed，才能既保留其它浏览器快捷键、又拿到 F10。
 [target."cfg(windows)".dependencies]
 webview2-com = "0.39"
-
-# xatlas 的 C++ 内核经 cc 编译，debug profile 下 OPT_LEVEL=0 会让 36 万面展开慢到不可用
-[profile.dev.package.xatlas-rs-v2]
-opt-level = 3

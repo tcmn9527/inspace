@@ -16,7 +16,7 @@ use serde_json::Value;
 use tauri::{Emitter, Manager};
 
 use crate::db::{self, DbState};
-use crate::imagegen::{GenRequest, Mode, Out};
+use crate::gen_core::{GenRequest, Mode, Out};
 
 const CONFIG_KEY: &str = "gen_api_config";
 const TIMEOUT: Duration = Duration::from_secs(300);
@@ -26,7 +26,8 @@ const BODY_LIMIT: u64 = 64 * 1024 * 1024;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiConfig {
-    /// 用户选了 API 引擎。配置不全时不生效，出图会退回本地并报缺什么。
+    /// 老配置的开关位。这一版只有 API 一条路，出图不再看它，
+    /// 留着只是为了旧 JSON 能原样反序列化。
     #[serde(default)]
     pub enabled: bool,
     /// images / chat
@@ -131,7 +132,7 @@ pub fn gen_api_get(app: tauri::AppHandle) -> ApiConfig {
 #[tauri::command]
 pub fn gen_api_set(
     app: tauri::AppHandle,
-    state: tauri::State<crate::imagegen::GenState>,
+    state: tauri::State<crate::gen_core::GenState>,
     config: ApiConfig,
 ) -> Result<ApiConfig, String> {
     let mut next = config;
@@ -234,7 +235,7 @@ fn collect_model_names(value: &Value) -> Vec<String> {
 pub fn generate(config: &ApiConfig, req: &GenRequest, canceled: &std::sync::atomic::AtomicBool) -> Result<Out, String> {
     let mode = Mode::pick(req.mode.as_deref(), req.images.len());
     if mode == Mode::Upscale {
-        return Err("走 API 时不支持「高清放大」：它依赖本地放大模型。换回本地引擎，或换一档模式".to_string());
+        return Err("不支持「高清放大」：它依赖本地放大模型，这一版已随本地引擎移除，换一档模式".to_string());
     }
     if canceled.load(std::sync::atomic::Ordering::Relaxed) {
         return Err("已取消".to_string());

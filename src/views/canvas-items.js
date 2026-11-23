@@ -4,7 +4,6 @@
 export * from "./canvas-items/constants.js";
 export * from "./canvas-items/util.js";
 export * from "./canvas-items/picture.js";
-export * from "./canvas-items/scene-parts.js";
 export * from "./canvas-items/plan.js";
 export * from "./canvas-items/makes.js";
 export * from "./canvas-items/gen-makes.js";

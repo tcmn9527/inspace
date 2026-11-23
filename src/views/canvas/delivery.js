@@ -4,7 +4,7 @@ import { BORDER_MAX_WIDTH, ratio } from "../canvas-items.js";
 import { toggleContainer } from "./containers.js";
 import { clampXToPage } from "./page-width.js";
 import { BORDER_DEFAULT_WIDTH } from "../canvas-items.js";
-import { GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_TEXT_MAX, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, addItemElement, agentFindSpace, agentImportFile, agentOpenSpace, agentPlacePoint, agentRequireItem, agentRequireSpace, agentSummary, applyColor, applyGenDefaultsToItem, applyGenFields, applyProductFields, boundsOfItem, bytesToBase64, clamp, commitEditing, connectorGeometry, current, deleteItems, edgeLabelEditor, editingId, exporter, findItem, fitGenPrompt, flushBlockContents, flushItems, hydrateNoteImages, imageCache, imageSize, itemBounds, itemEls, landBlock, makeBox, makeConnector, makeGen, makeLine, makeNote, makePage, makePicture, makePlan, makeProduct, makeQuote, makeScene, makeText, makeVideoGen, mergePictureSymbols, moveLayer, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmds, normalizePictureSymbols, normalizeSceneCamera, normalizeSceneParts, numOr, persistGen, persistNote, persistPicture, persistScene, pictureWashed, pinConnectorSides, placeBlock, promptDialog, refreshConnectors, refreshGenPanel, refreshPictureChrome, refreshQuotes, refreshTree, refreshVideoPanel, rejectFatalDrop, renderMarkdown, replaceSelection, resolvePictureImages, roomShellParts, roomShellSurfaces, sceneLightOf, sceneSurfacesOf, sceneView, scheduleItemsSave, select, selectedIds, setFontSize, setSceneFurnitureSelection, setTextAlign, stageCenterWorld, store, syncConnectorElement, syncItemElement, syncSelectedClasses, updateSelection } from "../canvas.js";
+import { GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_TEXT_MAX, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, addItemElement, agentFindSpace, agentImportFile, agentOpenSpace, agentPlacePoint, agentRequireItem, agentRequireSpace, agentSummary, applyColor, applyGenDefaultsToItem, applyGenFields, applyProductFields, boundsOfItem, bytesToBase64, clamp, commitEditing, connectorGeometry, current, deleteItems, edgeLabelEditor, editingId, exporter, findItem, fitGenPrompt, flushBlockContents, flushItems, hydrateNoteImages, imageCache, imageSize, itemBounds, itemEls, landBlock, makeBox, makeConnector, makeGen, makeLine, makeNote, makePage, makePicture, makePlan, makeProduct, makeQuote, makeText, makeVideoGen, mergePictureSymbols, moveLayer, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmds, normalizePictureSymbols, numOr, persistGen, persistNote, persistPicture, pictureWashed, pinConnectorSides, placeBlock, promptDialog, refreshConnectors, refreshGenPanel, refreshPictureChrome, refreshQuotes, refreshTree, refreshVideoPanel, rejectFatalDrop, renderMarkdown, replaceSelection, resolvePictureImages, scheduleItemsSave, select, selectedIds, setFontSize, setTextAlign, stageCenterWorld, store, syncConnectorElement, syncItemElement, syncSelectedClasses, updateSelection } from "../canvas.js";
 
 /* ---------- 提案页与客户版交付 ---------- */
 
@@ -135,76 +135,12 @@ export function imageMimeOf(src) {
   );
 }
 
-/* 页面上的场景块：位置换算成页内百分比，模型和材质图都塞成 data URL，
-   客户拿到的文件夹不依赖模型库、不依赖网络 */
-export async function buildClientScenes(pages, canvasId) {
-  const scenes = [];
-  const modelCache = new Map();
-  const texCache = new Map();
-  for (const [pageIndex, page] of pages.entries()) {
-    for (const item of current.items) {
-      if (item.type !== "scene" || item.internal) continue;
-      const bounds = boundsOfItem(item.id) || itemBounds(item, null);
-      if (!bounds) continue;
-      const cx = bounds.x + bounds.w / 2;
-      const cy = bounds.y + bounds.h / 2;
-      if (cx < page.x || cx > page.x + page.w || cy < page.y || cy > page.y + page.h) continue;
-      const models = {};
-      for (const part of item.parts || []) {
-        if (part.op !== "model" || !part.src || models[part.src] !== undefined) continue;
-        try {
-          if (!modelCache.has(part.src)) {
-            modelCache.set(part.src, await fetchDataUrl(await store.modelLibraryUrl(part.src), "model/gltf-binary"));
-          }
-          models[part.src] = await modelCache.get(part.src);
-        } catch {
-          models[part.src] = "";
-        }
-      }
-      const textures = {};
-      for (const part of item.parts || []) {
-        if (!part.tex || textures[part.tex] !== undefined) continue;
-        try {
-          if (!texCache.has(part.tex)) {
-            texCache.set(
-              part.tex,
-              await fetchDataUrl(await store.imageUrl(canvasId, part.tex, false), imageMimeOf(part.tex)),
-            );
-          }
-          textures[part.tex] = await texCache.get(part.tex);
-        } catch {
-          textures[part.tex] = "";
-        }
-      }
-      scenes.push({
-        page: pageIndex,
-        rect: {
-          x: (item.x - page.x) / page.w,
-          y: (item.y - page.y) / page.h,
-          w: item.w / page.w,
-          h: item.h / page.h,
-        },
-        w: item.w,
-        h: item.h,
-        parts: (item.parts || []).map((part) => ({ ...part })),
-        camera: item.camera || null,
-        light: item.light || null,
-        groundColor: item.groundColor || "",
-        models,
-        textures,
-      });
-    }
-  }
-  return scenes;
-}
-
-export function clientPageHtml(title, pages, scenes, pageImages) {
+export function clientPageHtml(title, pages, pageImages) {
   const figures = pages
     .map(
       (page, index) => `  <section class="page" aria-label="${exportHtmlEscape(page.title)}">
     <span class="page-title">P${page.order || index + 1} · ${exportHtmlEscape(page.title)}</span>
     <img src="${pageImages[index]}" alt="${exportHtmlEscape(page.title)}">
-    <div class="hotspots"></div>
   </section>`,
     )
     .join("\n");
@@ -218,20 +154,9 @@ h1 { margin: 0 0 8px; font-size: 30px; font-weight: 650; letter-spacing: 0.02em;
 .page { position: relative; background: #fff; box-shadow: 0 20px 56px rgba(30, 26, 20, 0.14); }
 .page img { display: block; width: 100%; height: auto; }
 .page-title { position: absolute; left: 0; bottom: 100%; margin-bottom: 9px; color: #8a8378; font-size: 12px; letter-spacing: 0.03em; }
-.hotspots { position: absolute; inset: 0; }
-.scene-hotspot { position: absolute; padding: 0; border: 1.5px dashed rgba(66, 108, 178, 0.6); border-radius: 8px; background: transparent; cursor: pointer; }
-.scene-hotspot:hover { border-color: rgba(48, 92, 168, 0.95); background: rgba(66, 108, 178, 0.06); }
-.scene-hotspot-label { position: absolute; right: 8px; bottom: 8px; padding: 4px 11px; border-radius: 999px; background: rgba(38, 57, 86, 0.88); color: #fff; font-size: 12px; letter-spacing: 0.04em; }
-body.viewer-open { overflow: hidden; }
-.viewer-mask { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(12, 16, 22, 0.74); }
-.viewer-stage { position: relative; width: min(1240px, 92vw); height: min(780px, 84vh); overflow: hidden; border-radius: 12px; background: #111; box-shadow: 0 32px 90px rgba(0, 0, 0, 0.55); }
-.viewer-stage canvas { display: block; width: 100%; height: 100%; cursor: grab; }
-.viewer-close { position: fixed; top: 22px; right: 26px; width: 40px; height: 40px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 22px; line-height: 1; cursor: pointer; }
-.viewer-close:hover { background: rgba(255, 255, 255, 0.28); }
-.viewer-hint { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); margin: 0; color: rgba(255, 255, 255, 0.72); font-size: 12px; letter-spacing: 0.04em; }
 @media print {
   body { background: #fff; }
-  header, .hotspots { display: none !important; }
+  header { display: none !important; }
   .pages { max-width: none; margin: 0; padding: 0; gap: 0; }
   .page { box-shadow: none; break-after: page; }
   .page-title { display: none; }
@@ -249,20 +174,17 @@ ${css}
 <body>
 <header>
   <h1>${exportHtmlEscape(title)}</h1>
-  <p class="meta">共 ${pages.length} 页 · 虚线框住的场景可以点开，用鼠标拖着看 3D</p>
+  <p class="meta">共 ${pages.length} 页</p>
 </header>
 <main class="pages">
 ${figures}
 </main>
-<script type="application/json" id="scene-data">${exportJsonForHtml({ scenes })}</script>
-<script src="./scene-viewer.js" defer></script>
 </body>
 </html>
 `;
 }
 
-/* 客户版网页：一个文件夹，双击 index.html 就能看；3D 场景是真能转的，
-   模型和材质图都内嵌成 data URL，不依赖模型库和网络。 */
+/* 客户版网页：一个文件夹，双击 index.html 就能一页页看。 */
 /* 把客户版网页写进指定文件夹（不弹选择框，agent 也走这条路） */
 export async function exportClientWebTo(dir, root) {
   if (!current) throw new Error("先打开一个画布");
@@ -278,7 +200,6 @@ export async function exportClientWebTo(dir, root) {
 
   const restore = hideConnectorsTemporarily(hidden.connectors);
   const pageImages = [];
-  let scenes = [];
   try {
     for (let index = 0; index < pages.length; index += 1) {
       const page = pages[index];
@@ -293,18 +214,14 @@ export async function exportClientWebTo(dir, root) {
       await writeBase64(rel, shot.data);
       pageImages.push(rel);
     }
-    if (!current || current.meta.id !== canvasId) throw new Error("导出时画布被切走了");
-    scenes = await buildClientScenes(pages, canvasId);
   } finally {
     restore();
   }
   if (!current || current.meta.id !== canvasId) throw new Error("导出时画布被切走了");
 
-  const viewer = await fetchTextAsset("/vendor/web-viewer/scene-viewer.bundle.js");
-  const html = clientPageHtml(current.meta.name, pages, scenes, pageImages);
-  await writeText("scene-viewer.js", viewer);
+  const html = clientPageHtml(current.meta.name, pages, pageImages);
   await writeText("index.html", html);
-  return { root, pages: pages.length, scenes: scenes.length };
+  return { root, pages: pages.length };
 }
 
 /* 按页 PDF 写进指定文件夹（agent 用） */
@@ -377,68 +294,6 @@ export function addTemplateText(page, x, y, w, text, { size = 14, color = "" } =
   item.fillColor = "";
   item.color = color;
   return placeBlock(item);
-}
-
-/* 一键搭软装提案的骨架：7 页，空间页里已经铺好房间壳，最后页带清单 */
-export function agentProposalTemplate(spec = {}) {
-  agentRequireSpace();
-  const title = String(spec.title || "软装提案");
-  const pageW = PAGE_RATIOS.a4.w;
-  const pageH = PAGE_RATIOS.a4.h;
-  const gap = 160;
-  const topics = [
-    { key: "cover", title: "封面" },
-    { key: "brief", title: "客户需求" },
-    { key: "style", title: "风格板" },
-    { key: "living", title: "客厅方案", scene: "living" },
-    { key: "bedroom", title: "主卧方案", scene: "bedroom" },
-    { key: "dining", title: "餐厅方案", scene: "dining" },
-    { key: "quote", title: "材料与报价" },
-  ];
-  const totalW = topics.length * pageW + (topics.length - 1) * gap;
-  const center = stageCenterWorld();
-  const startX = Number.isFinite(Number(spec.x)) ? Number(spec.x) : center.x - totalW / 2;
-  const startY = Number.isFinite(Number(spec.y)) ? Number(spec.y) : center.y - pageH / 2;
-  const created = { pages: [], scenes: [], quote: null };
-  topics.forEach((topic, index) => {
-    const page = makePage(startX + index * (pageW + gap), startY, "a4", topic.title, index + 1);
-    placeBlock(page);
-    created.pages.push({ id: page.id, title: topic.title, order: index + 1 });
-    const left = 80;
-    const contentW = pageW - left * 2;
-    if (topic.key === "cover") {
-      addTemplateText(page, left, 140, contentW, `${title}\n客户提案`, { size: 34 });
-      addTemplateText(page, left, 270, contentW, "客户名称 / 日期 / 设计师", { size: 14, color: "#8a8378" });
-    } else if (topic.key === "brief") {
-      addTemplateText(page, left, 90, contentW, "客户需求", { size: 26 });
-      addTemplateText(page, left, 170, contentW, "• 风格偏好：…\n• 预算：…\n• 常住人口：…\n• 重点空间：…\n• 喜欢与不喜欢的参考：…", { size: 15 });
-    } else if (topic.key === "style") {
-      addTemplateText(page, left, 90, contentW, "风格板", { size: 26 });
-      addTemplateText(page, left, 170, contentW, "把参考图、配色和材质拖到这里；也可以让 agent 按 brief 先出 2–3 套方向。", { size: 15, color: "#8a8378" });
-    } else if (topic.scene) {
-      addTemplateText(page, left, 90, contentW, topic.title, { size: 26 });
-      const scene = makeScene(page.x + left, page.y + 170, contentW, 470);
-      const got = normalizeSceneParts(roomShellParts(topic.scene));
-      if (got.dropped.length) throw new Error(got.dropped[0].why);
-      scene.parts = got.parts;
-      scene.surfaces = roomShellSurfaces(got.parts);
-      scene.light = sceneLightOf("day");
-      placeBlock(scene);
-      persistScene(scene);
-      created.scenes.push({ id: scene.id, page: page.id, preset: topic.scene });
-      addTemplateText(page, left, 680, contentW, "把产品卡放进场景：右键产品卡 →「放进 3D 场景」；也可以右键产品卡 →「放到户型图」。", { size: 13, color: "#8a8378" });
-    } else if (topic.key === "quote") {
-      addTemplateText(page, left, 90, contentW, "材料与报价", { size: 26 });
-      const quote = makeQuote(page.x + left, page.y + 170, "软装清单");
-      quote.w = contentW;
-      quote.h = 520;
-      placeBlock(quote);
-      created.quote = quote.id;
-      addTemplateText(page, left, 730, contentW, "右键清单「从 CSV 导入产品…」；也可以把产品卡放到这一页，金额自动汇总。", { size: 13, color: "#8a8378" });
-    }
-  });
-  scheduleItemsSave();
-  return { title, pages: created.pages, scenes: created.scenes, quote: created.quote };
 }
 
 /* 复制整页做风格变体：新页在右边，页里的块各拷一份独立媒体 */
@@ -564,30 +419,6 @@ export async function agentCreateBlock(spec = {}) {
     rejectFatalDrop(dropped);
     const placed = placeBlock(item);
     return dropped.length ? { ...agentSummary(placed), dropped } : agentSummary(placed);
-  }
-
-  if (type === "scene") {
-    const w = Math.max(SCENE_MIN_WIDTH, numOr(spec.w, SCENE_DEFAULT_WIDTH));
-    const h = Math.max(SCENE_MIN_HEIGHT, numOr(spec.h, SCENE_DEFAULT_HEIGHT));
-    const at = agentPlacePoint(w, h, spec);
-    const item = withLock(makeScene(at.x, at.y, w, h));
-    if (spec.groundColor) item.groundColor = String(spec.groundColor);
-    if (spec.borderColor !== undefined) item.borderColor = String(spec.borderColor || "");
-    if (spec.borderWidth !== undefined) {
-      item.borderWidth = clamp(Math.round(numOr(spec.borderWidth, item.borderWidth)), 0, BORDER_MAX_WIDTH);
-    }
-    if (spec.radius !== undefined) item.radius = Math.max(0, Math.round(numOr(spec.radius, item.radius)));
-    const parts = normalizeSceneParts(spec.parts);
-    item.parts = parts.parts;
-    const light = normalizeLight(spec.light);
-    if (light.why) throw new Error(light.why);
-    item.light = light.light;
-    item.camera = normalizeSceneCamera(spec.camera);
-    if (spec.surfaces !== undefined) item.surfaces = sceneSurfacesOf(spec.surfaces);
-    /* 一件东西写歪（尺寸不是正数、op 不认）整件丢掉并说清是第几件——
-       静默少一栋楼，agent 下一轮根本不知道自己写错了 */
-    rejectFatalDrop(parts.dropped);
-    return agentSummary(placeBlock(item));
   }
 
   if (type === "gen") {
@@ -934,7 +765,7 @@ export function agentSetLayer(id, direction) {
 }
 
 /* 边框宽度/圆角按块类型认：连线和不带边框外观的音视频、电子书不接 */
-export const BORDER_WIDTH_KINDS = new Set(["text", "rect", "ellipse", "image", "note", "file", "picture", "scene", "gen", "product", "quote", "plan"]);
+export const BORDER_WIDTH_KINDS = new Set(["text", "rect", "ellipse", "image", "note", "file", "picture", "gen", "product", "quote", "plan"]);
 
 export async function agentUpdateBlock(id, patch = {}) {
   const item = agentRequireItem(id);
@@ -1069,31 +900,6 @@ export async function agentUpdateBlock(id, patch = {}) {
   }
   /* 一套光也是块上的属性：指令里存的永远是固有色，改光不许动任何一条指令 */
   if (item.type === "picture" && patch.light !== undefined) {
-    const got = normalizeLight(patch.light);
-    if (got.why) throw new Error(got.why);
-    item.light = got.light;
-  }
-  /* 场景块的三样：里面的东西、机位、地面色。光那一套字段和画面块共用同一个约定。 */
-  if (item.type === "scene" && patch.surfaces !== undefined) {
-    item.surfaces = sceneSurfacesOf(patch.surfaces);
-    setSceneFurnitureSelection(sceneView(item), []);
-  }
-  if (item.type === "scene" && patch.parts !== undefined) {
-    setSceneFurnitureSelection(sceneView(item), []);
-    const got = normalizeSceneParts(patch.parts);
-    rejectFatalDrop(got.dropped);
-    item.parts = got.parts;
-    /* 东西不归 items.json 管，改了就单独落那份文件 */
-    persistScene(item);
-  }
-  if (item.type === "scene" && patch.camera !== undefined) {
-    /* 写成 null 就是「机位没定过」，下一次按内容重新框 */
-    item.camera = normalizeSceneCamera(patch.camera);
-  }
-  if (item.type === "scene" && patch.groundColor !== undefined) {
-    item.groundColor = String(patch.groundColor || "");
-  }
-  if (item.type === "scene" && patch.light !== undefined) {
     const got = normalizeLight(patch.light);
     if (got.why) throw new Error(got.why);
     item.light = got.light;

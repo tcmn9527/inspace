@@ -1,11 +1,11 @@
 /* canvas-items/dom-files.js —— 从 canvas-items.js 拆出（导出名不变，入口统一 re-export）。 */
 
 import { FILE_DOC_SVG, PREVIEW_RENDER_CHARS, TABLE_EXTS, chevronSvg } from "./dom-elements.js";
-import { closeFileEdit, fileEditor, hydrateNoteImages, scheduleItemsSave, startFileEdit } from "../canvas.js";
+import { hydrateNoteImages, scheduleItemsSave } from "../canvas.js";
 import { renderMarkdown } from "../markdown.js";
 import { sanitizeInlineHtml } from "../inline-html.js";
 import { createDelimitedTable, formatSize } from "./dom-media.js";
-import { isCancelled, openPdf, pdfPageSize, pdfProblem, renderPdfPage } from "../canvas-pdf.js";
+import { holdPdf, isCancelled, openPdf, pdfPageSize, pdfProblem, releasePdf, renderPdfPage } from "../canvas-pdf.js";
 
 /* ---------- 文本预览的阅读进度 ----------
    读到哪儿按「滚过的比例」记在块上（item.readFrac），跟块一起落盘、复制也带走。
@@ -51,6 +51,40 @@ export function restoreReadProgress(body, item) {
   });
 }
 
+/* 重的正文（PDF / Office）等真进视野再建：785 张卡一起 openPdf，光解析出来的文档、
+   页位图和工作表 DOM 就能吃掉几个 G。没进视野的只挂一块骨架，进视野时由
+   refreshCulling 调 __mountBody 把正文换进来（导出时 withAllVisible 会全量挂）。
+   离开视野两屏以上再调 __unmountBody 把正文丢掉：一页 761×1077 的位图就是 3MB，
+   几百张看过的卡攒下来照样是大头。 */
+export function mountWhenVisible(card, build, release) {
+  const wait = document.createElement("div");
+  wait.className = "canvas-file-wait";
+  card.append(wait);
+  let body = null;
+  card.__isMounted = () => Boolean(body);
+  card.__mountBody = () => {
+    if (body) return false;
+    body = build();
+    if (wait.isConnected) wait.replaceWith(body);
+    else card.append(body);
+    return true;
+  };
+  card.__unmountBody = () => {
+    if (!body) return false;
+    body.remove();
+    body = null;
+    if (!wait.isConnected) card.append(wait);
+    /* 丢掉模块里的缓存项，让 pdf.js 那份文档跟着正文一起被回收 */
+    try {
+      release?.();
+    } catch {
+      /* 释放失败不影响卸载本身 */
+    }
+    return true;
+  };
+  return card;
+}
+
 export function createFileCard(item, options) {
   const card = document.createElement("div");
   card.className = item.text ? "canvas-file-card canvas-file-card-text" : "canvas-file-card";
@@ -72,20 +106,7 @@ export function createFileCard(item, options) {
   const head = document.createElement("div");
   head.className = "canvas-file-head";
   head.append(icon, main);
-  /* 文本类文件：右上角一颗「编辑 / 浏览」开关，默认浏览态（按类型渲染的只读正文） */
-  if (item.text) {
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "canvas-file-toggle";
-    setFileToggleMode(toggle, fileEditor?.itemId === item.id);
-    toggle.addEventListener("click", (event) => {
-      event.stopPropagation();
-      event.preventDefault();
-      if (fileEditor?.itemId === item.id) void closeFileEdit();
-      else void startFileEdit(item.id);
-    });
-    head.append(toggle);
-  }
+  /* 右上角不再放「编辑 / 浏览」开关：进编辑走双击，退出走 Esc 或点别处 */
   card.append(head);
 
   /* 不管拷贝还是引用，进画布都问一句文件还在不在；
@@ -94,27 +115,36 @@ export function createFileCard(item, options) {
     if (!found) options.onMissing?.(item);
   });
 
-  if (isPdfExt(item.ext)) {
-    card.classList.add("canvas-file-card-pdf");
-    card.append(createPdfBody(item, options));
-    return card;
-  }
-
-  if (isDocxExt(item.ext)) {
-    card.classList.add("canvas-file-card-docx");
-    card.append(createDocxBody(item, options));
-    return card;
-  }
-
-  if (isXlsxExt(item.ext)) {
-    card.classList.add("canvas-file-card-xlsx");
-    card.append(createXlsxBody(item, options));
-    return card;
-  }
-
-  if (isPptxExt(item.ext)) {
-    card.classList.add("canvas-file-card-pptx");
-    card.append(createPptxBody(item, options));
+  /* 四类重正文都走「进视野才建」：解析成本高、还要长期占内存 */
+  const heavyClass = isPdfExt(item.ext)
+    ? "canvas-file-card-pdf"
+    : isDocxExt(item.ext)
+      ? "canvas-file-card-docx"
+      : isXlsxExt(item.ext)
+        ? "canvas-file-card-xlsx"
+        : isPptxExt(item.ext)
+          ? "canvas-file-card-pptx"
+          : "";
+  if (heavyClass) {
+    card.classList.add(heavyClass);
+    mountWhenVisible(
+      card,
+      () =>
+        heavyClass === "canvas-file-card-pdf"
+          ? createPdfBody(item, options)
+          : heavyClass === "canvas-file-card-docx"
+            ? createDocxBody(item, options)
+            : heavyClass === "canvas-file-card-xlsx"
+              ? createXlsxBody(item, options)
+              : createPptxBody(item, options),
+      /* 卸载时把这份 PDF 从 openPdf 的缓存里摘掉：正文一丢，文档就没人引用了 */
+      heavyClass === "canvas-file-card-pdf"
+        ? async () => {
+            const url = await options.loadPdfUrl?.(item);
+            if (url) releasePdf(url);
+          }
+        : null,
+    );
     return card;
   }
 
@@ -486,6 +516,8 @@ export function createPdfBody(item, options) {
     note(`正在读这份 ${formatSize(item.size)} 的 PDF…`);
     try {
       url = await options.loadPdfUrl(item);
+      /* 记一笔持有：卸载时靠它判断是不是最后一个，最后一个走才销毁文档 */
+      holdPdf(url);
       const doc = await openPdf(url);
       if (mine !== seq || !wrap.isConnected) return;
       total = doc.numPages;

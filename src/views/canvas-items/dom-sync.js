@@ -5,7 +5,6 @@ import { linePoints } from "./dom-connectors.js";
 import { LIGHT_DEFAULTS, clipAttr, litPaint, maskAttr, pictureTopLayers, symbolView, tintKey } from "./picture.js";
 import { SVG_NS, ratio } from "./util.js";
 import { syncGen } from "../genpanel.js";
-import { syncScene } from "../scene3d.js";
 
 export function createLineSvg(item) {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -250,7 +249,7 @@ export function syncPlanElement(el, item) {
   if (badge) {
     badge.textContent =
       scale > 0
-        ? `已定标 · 家具 ${item.footprints.length}${item.cameras.length ? ` · 机位 ${item.cameras.length}` : ""}${item.areas.length ? ` · 面积 ${item.areas.length}` : ""}`
+        ? `已定标 · 家具 ${item.footprints.length}${item.areas.length ? ` · 面积 ${item.areas.length}` : ""}`
         : "未定标 · 右键「标定比例…」";
   }
   if (!(scale > 0)) return;
@@ -305,18 +304,6 @@ export function syncPlanElement(el, item) {
       text.textContent = fp.name;
       group.append(text);
     }
-    svg.append(group);
-  }
-  for (const cam of item.cameras) {
-    const group = mk("g", {
-      class: "canvas-plan-camera",
-      "data-camera": cam.id,
-      "data-scene": cam.scene,
-      "data-preset": cam.preset,
-      transform: `translate(${(cam.x * scale).toFixed(1)} ${(cam.y * scale).toFixed(1)}) rotate(${cam.rotate.toFixed(1)})`,
-    });
-    group.append(mk("path", { class: "canvas-plan-camera-cone", d: "M0 0 L-34 -20 A40 40 0 0 1 -34 20 Z" }));
-    group.append(mk("circle", { class: "canvas-plan-camera-dot", cx: 0, cy: 0, r: Math.max(9, Math.min(iw, ih) / 70) }));
     svg.append(group);
   }
 }
@@ -1333,13 +1320,6 @@ export function syncPictureElement(el, item) {
   );
 }
 
-/* 场景块：把这一块的当前数据交给渲染器。渲染器内部第一次会去拉 three.js，
-   拉之前这块只有那句「场景加载中…」，拉到之后每次同步都是重画一帧。 */
-export function syncSceneElement(el, item) {
-  const view = el.querySelector(".canvas-scene-view");
-  if (view) syncScene(view, item);
-}
-
 export function syncItemElement(el, item) {
   el.classList.toggle("is-locked", Boolean(item.locked));
   /* 锁点跟着块的圆角往里收：圆角越大，点离角越远，免得落进圆角缺口被边框压住。
@@ -1416,16 +1396,6 @@ export function syncItemElement(el, item) {
     el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
     el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
     syncPictureElement(el, item);
-    return;
-  }
-
-  if (item.type === "scene") {
-    el.style.width = `${item.w}px`;
-    el.style.height = `${item.h}px`;
-    el.style.borderColor = item.borderColor || "transparent";
-    el.style.borderWidth = `${Number.isFinite(item.borderWidth) ? item.borderWidth : CARD_DEFAULT_BORDER_WIDTH}px`;
-    el.style.borderRadius = `${Number.isFinite(item.radius) ? item.radius : CARD_DEFAULT_RADIUS}px`;
-    syncSceneElement(el, item);
     return;
   }
 

@@ -5,15 +5,10 @@ mod db;
 mod ebook;
 mod ffmpeg;
 mod imageapi;
-mod h3d;
-mod imagegen;
+mod gen_core;
 mod mcp;
-mod models;
-mod modelscan;
-pub mod sdcpp; // 引擎绑定：examples 和后续的生图面板都从这里进
 mod store;
 mod videogen;
-mod videolocal;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -164,13 +159,10 @@ pub fn run() {
             app.manage(Arc::new(canvas::VideoCopyJobs::default()));
             // 8K 贴图包的下载同样在后台线程跑，取消只改这份共享标志
             app.manage(Arc::new(cosmos::CosmosJobs::default()));
-            // 生图引擎：一个常驻 sd_ctx，一次只出一张，空闲几分钟自己放掉
-            app.manage(imagegen::init(data_root.clone(), &db_state));
+            // 生图：只剩远端 API 一条路，状态里放接口配置和并行任务
+            app.manage(gen_core::init(&db_state));
             app.manage(videogen::init(data_root.clone(), &db_state));
-            // 3D 模型库：library/models/ 下的 .glb，产品卡只记文件名
-            app.manage(models::init(data_root.clone())?);
             // 本地图生 3D：会话按需开、用完即放；取消只改这份共享标志
-            app.manage(h3d::H3dState::default());
             // 换数据目录的搬运同理：进度在后台线程报，停止只改标志
             app.manage(Arc::new(store::RootMoveJobs::default()));
             app.manage(db_state);
@@ -260,13 +252,6 @@ pub fn run() {
             canvas::canvas_import_image,
             canvas::canvas_image_url,
             canvas::canvas_open_image,
-            h3d::h3d_status,
-            h3d::h3d_api_get,
-            h3d::h3d_api_set,
-            h3d::h3d_reveal,
-            h3d::h3d_cancel,
-            h3d::h3d_generate,
-            h3d::tex::h3d_texture,
             canvas::canvas_image_save_as,
             canvas::canvas_delete_image,
             canvas::canvas_save_note_image,
@@ -278,9 +263,6 @@ pub fn run() {
             canvas::canvas_read_picture,
             canvas::canvas_write_picture,
             canvas::canvas_delete_picture,
-            canvas::canvas_read_scene,
-            canvas::canvas_write_scene,
-            canvas::canvas_delete_scene,
             canvas::canvas_read_gen,
             canvas::canvas_write_gen,
             canvas::canvas_delete_gen,
@@ -329,19 +311,10 @@ pub fn run() {
             cosmos::cosmos_tex_cancel,
             cosmos::cosmos_tex_reset,
             cosmos::cosmos_tex_read,
-            imagegen::gen_status,
-            imagegen::gen_degrid,
-            imagegen::gen_device_get,
-            imagegen::gen_device_set,
-            imagegen::gen_family_set,
-            imagegen::gen_defaults,
-            imagegen::gen_defaults_set,
-            imagegen::gen_defaults_reset,
-            imagegen::gen_models,
-            imagegen::gen_models_set,
-            imagegen::gen_models_dir_pick,
-            imagegen::gen_models_dir_set,
-            imagegen::gen_models_reveal,
+            gen_core::gen_status,
+            gen_core::gen_defaults,
+            gen_core::gen_defaults_set,
+            gen_core::gen_defaults_reset,
             imageapi::gen_api_get,
             imageapi::gen_api_set,
             imageapi::gen_api_models,
@@ -351,20 +324,8 @@ pub fn run() {
             videogen::gen_video_status,
             videogen::gen_video_start,
             videogen::gen_video_cancel,
-            videolocal::gen_video_engine_get,
-            videolocal::gen_video_engine_set,
-            videolocal::gen_video_local_get,
-            videolocal::gen_video_local_set,
-            videolocal::gen_video_dir_pick,
-            videolocal::gen_video_dir_reveal,
-            models::model_library_dir,
-            models::model_library_list,
-            models::model_library_reveal,
-            models::model_library_url,
-            models::model_library_import,
-            models::model_library_save,
-            imagegen::gen_start,
-            imagegen::gen_cancel,
+            gen_core::gen_start,
+            gen_core::gen_cancel,
             canvas::canvas_reveal,
             canvas::canvas_image_data,
             canvas::canvas_export_save,

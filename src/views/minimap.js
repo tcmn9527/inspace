@@ -27,7 +27,6 @@ const TYPE_COLORS = {
   rect: "#9a9aa6",
   ellipse: "#9a9aa6",
   picture: "#f0a08c",
-  scene: "#8fb8d8",
   gen: "#d8a8cf",
   product: "#c9a87c",
   quote: "#a8bf9a",

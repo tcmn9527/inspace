@@ -13,8 +13,7 @@
       "resources/cuda/cudnn_heuristic64_9.dll": "cudnn_heuristic64_9.dll",
       "resources/cuda/cudnn_ops64_9.dll": "cudnn_ops64_9.dll",
       "resources/cuda/onnxruntime_providers_cuda.dll": "onnxruntime_providers_cuda.dll",
-      "resources/cuda/onnxruntime_providers_shared.dll": "onnxruntime_providers_shared.dll",
-      "resources/worker/h3d_tex_worker.exe": "h3d_tex_worker.exe"
+      "resources/cuda/onnxruntime_providers_shared.dll": "onnxruntime_providers_shared.dll"
     }
   }
 }

@@ -76,7 +76,7 @@ export function makeImage(x, y, w, h, src, linked = false) {
   };
 }
 
-/* 产品/材料卡：一件家具一行字段。户型脚印和 3D 模型以后都按这个 id 找回来。 */
+/* 产品/材料卡：一件家具一行字段。户型脚印以后按这个 id 找回来。 */
 export function makeProduct(x, y, name = "未命名产品", src = "") {
   return {
     id: newId(),
@@ -95,7 +95,6 @@ export function makeProduct(x, y, name = "未命名产品", src = "") {
     source: "",
     note: "",
     src,
-    model: "",
     dims: { w: 0, d: 0, h: 0 },
     borderColor: "",
     fillColor: "",

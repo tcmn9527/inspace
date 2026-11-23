@@ -3,8 +3,8 @@
 import { NOTE_EDITOR_GUARDS, active, addItemElement, bytesToBase64, choiceDialog, commitEditing, confirmDialog, createMarkdownEditor, current, edgeLabelEditor, editingId, filePreviewCache, findItem, itemEls, modalOpen, noteAskId, noteEditor, noteImageCache, noteWriteBack, persistNote, previewKey, removeItemFromDom, renderAll, renderMarkdown, scheduleItemsSave, select, setEditingId, setModalOpen, setNoteAskId, setNoteEditor, setNoteWriteBack, setFileToggleMode, showError, store, updateSelection } from "../canvas.js";
 import { isMarkdownExt, restoreReadProgress } from "../canvas-items/dom-files.js";
 import { sanitizeInlineHtml } from "../inline-html.js";
-import { holdCanvasTextSelection, mountEditorToolbar, releaseCanvasTextSelection, unmountEditorToolbar } from "./editor-toolbar.js";
-import { closeTextToolbar, openTextToolbar } from "./text-toolbar.js";
+import { holdCanvasTextSelection, releaseCanvasTextSelection } from "./editor-toolbar.js";
+import { closeTextToolbar } from "./text-toolbar.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -414,15 +414,17 @@ export function openFileEditor(id, el, body) {
   fileEditor = state;
 
   if (isMarkdownExt(item.ext)) {
-    /* Markdown 文件：工具栏用笔记块那一套，挪到画布顶部中间，正文仍是本地文件。
-       图片落到这块自己的 notes/<块id>/ 图床，正文写相对路径。 */
+    /* Markdown 文件：编辑态跟笔记块一样，工具栏就长在面板里（贴在正文上方），
+       不再浮到画布顶部。正文仍是本地文件，图片落到这块自己的 notes/<块id>/ 图床。 */
     state.markdown = true;
     const toolbar = document.createElement("div");
-    toolbar.className = "canvas-editor-toolbar md-toolbar canvas-file-toolbar";
+    toolbar.className = "md-toolbar canvas-note-toolbar canvas-file-toolbar";
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "Markdown 工具栏");
     state.toolbar = toolbar;
-    mountEditorToolbar(toolbar);
+    /* 头的名字/体积这时候没什么用，工具栏已经说明在改哪份；留着头会把正文挤掉一大截 */
+    card.classList.add("is-md-edit");
+    box.prepend(toolbar);
     state.editor = createMarkdownEditor({
       textarea,
       toolbar,
@@ -460,7 +462,7 @@ export function openFileEditor(id, el, body) {
       scheduleItemsSave();
     };
     editor.addEventListener("input", syncRich);
-    openTextToolbar(editor, syncRich);
+    /* 非 Markdown 的文本文件不再挂字号/文字色那条工具栏：只有 .md 走顶部 md-toolbar */
 
     /* 粘贴一律按纯文本塞，别把外部富文本/脚本带进编辑区 */
     editor.addEventListener("paste", (event) => {
@@ -583,18 +585,18 @@ export function flushFileEditor() {
   if (fileDraftDirty(state)) void persistFileEdit(state);
 }
 
-/* 顶部 Markdown 工具栏是全局宿主，退出/切画布时只摘自己那一条 */
+/* 工具栏现在长在面板里（和笔记块一样），收尾只要把内容销毁，DOM 跟着编辑框一起走 */
 function disposeFileToolbar(state) {
   if (state.rich) releaseCanvasTextSelection();
   state.editor?.destroy();
   state.editor = null;
   if (state.rich) closeTextToolbar();
-  if (state.toolbar) unmountEditorToolbar(state.toolbar);
   state.toolbar = null;
 }
 
 export function closeFileEditorBox(state) {
   disposeFileToolbar(state);
+  state.box.closest(".canvas-file-card")?.classList.remove("is-md-edit");
   state.box.remove();
   state.el.querySelectorAll(".canvas-file-editor").forEach((node) => node.remove());
   state.el.classList.remove("is-editing");

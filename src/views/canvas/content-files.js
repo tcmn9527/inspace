@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：content-files */
 
-import { GEN_CFG_MAX, GEN_MODES, GEN_STEPS_MAX, PICTURE_MAX_CMDS, current, findItem, normalizePictureCmds, normalizePictureSymbols, normalizeSceneParts, showError, snapGenSize, store } from "../canvas.js";
+import { GEN_CFG_MAX, GEN_MODES, GEN_STEPS_MAX, PICTURE_MAX_CMDS, current, findItem, normalizePictureCmds, normalizePictureSymbols, showError, snapGenSize, store } from "../canvas.js";
 
 /* ---------- 笔记 / 画面块的内容文件 ----------
    一块一份，住在画布自己目录里：笔记 notes/<块id>.md，画面 pictures/<块id>.json。
@@ -9,7 +9,6 @@ import { GEN_CFG_MAX, GEN_MODES, GEN_STEPS_MAX, PICTURE_MAX_CMDS, current, findI
 export const CONTENT_WRITE_DELAY = 400;
 export let noteTimers = new Map();
 export let pictureTimers = new Map();
-export let sceneTimers = new Map();
 export let genTimers = new Map();
 export function scheduleContentWrite(timers, key, write) {
   clearTimeout(timers.get(key));
@@ -41,17 +40,6 @@ export function persistPicture(item) {
     const target = current && current.meta.id === canvasId ? findItem(item.id) : null;
     if (!target) return;
     store.writePicture(canvasId, item.id, target.cmds || [], target.symbols || {}).catch(showError);
-  });
-}
-
-/* 场景块里的东西只认 scenes/<块id>.json 那一份：items.json 里没有 parts。 */
-export function persistScene(item) {
-  if (!current || item.type !== "scene") return;
-  const canvasId = current.meta.id;
-  scheduleContentWrite(sceneTimers, item.id, () => {
-    const target = current && current.meta.id === canvasId ? findItem(item.id) : null;
-    if (!target) return;
-    store.writeScene(canvasId, item.id, target.parts || []).catch(showError);
   });
 }
 
@@ -88,12 +76,10 @@ export async function flushBlockContents() {
   const pending = [
     ...[...noteTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "note" })),
     ...[...pictureTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "picture" })),
-    ...[...sceneTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "scene" })),
     ...[...genTimers.entries()].map(([itemId, timer]) => ({ timer, itemId, kind: "gen" })),
   ];
   noteTimers.clear();
   pictureTimers.clear();
-  sceneTimers.clear();
   genTimers.clear();
   if (!canvasId) return;
   await Promise.all(
@@ -105,7 +91,6 @@ export async function flushBlockContents() {
       if (kind === "picture")
         return store.writePicture(canvasId, itemId, item.cmds || [], item.symbols || {}).catch(showError);
       if (kind === "gen") return store.writeGen(canvasId, itemId, genContentOf(item)).catch(showError);
-      return store.writeScene(canvasId, itemId, item.parts || []).catch(showError);
     }),
   );
 }
@@ -122,7 +107,6 @@ export async function loadBlockContents() {
         (item) =>
           (item.type === "note" && !item.linked) ||
           item.type === "picture" ||
-          item.type === "scene" ||
           item.type === "gen",
       )
       .map(async (item) => {
@@ -138,19 +122,6 @@ export async function loadBlockContents() {
               item.cmds = normalizePictureCmds(file.cmds, PICTURE_MAX_CMDS, { symbols: item.symbols }).cmds;
             } else {
               await store.writePicture(canvasId, item.id, item.cmds || [], item.symbols || {});
-            }
-            return;
-          }
-          if (item.type === "scene") {
-            /* 老数据把东西记在 items.json 的块上，块里还留着：读不到文件就补写一份，
-               下一次 items.json 落盘自然把它们清出去 */
-            const file = await store.readScene(canvasId, item.id);
-            if (file) {
-              /* 盘上那份照样过一遍归一化：手改坏的文件里认不了的那件整件丢，
-                 和建块、改块是同一套规矩，不给渲染器递畸形几何 */
-              item.parts = normalizeSceneParts(file.parts).parts;
-            } else {
-              await store.writeScene(canvasId, item.id, item.parts || []);
             }
             return;
           }

@@ -5,12 +5,10 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "dev": "node scripts/msvc-env.mjs cargo build --manifest-path src-tauri/h3d-worker/Cargo.toml && node scripts/prepare-worker.mjs debug && node scripts/msvc-env.mjs tauri dev",
-    "build": "node scripts/prepare-cuda.mjs && node scripts/msvc-env.mjs cargo build --release --manifest-path src-tauri/h3d-worker/Cargo.toml && node scripts/prepare-worker.mjs release && node scripts/msvc-env.mjs tauri build",
-    "build:viewer": "node scripts/build-web-viewer.mjs",
-    "cuda:prepare": "node scripts/prepare-cuda.mjs",
+    "dev": "node scripts/msvc-env.mjs tauri dev",
+    "build": "node scripts/msvc-env.mjs tauri build",
     "ffmpeg:prepare": "node scripts/prepare-ffmpeg.mjs",
-    "build:full": "node scripts/prepare-cuda.mjs && node scripts/prepare-ffmpeg.mjs && node scripts/msvc-env.mjs cargo build --release --manifest-path src-tauri/h3d-worker/Cargo.toml && node scripts/prepare-worker.mjs release && node scripts/msvc-env.mjs tauri build --config src-tauri/tauri.full.conf.json"
+    "build:full": "node scripts/prepare-ffmpeg.mjs && node scripts/msvc-env.mjs tauri build --config src-tauri/tauri.full.conf.json"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

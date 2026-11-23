@@ -1,8 +1,7 @@
 /* 从 canvas.js 拆出：inventory */
 
 import { AUDIO_DEFAULT_HEIGHT } from "../canvas-items.js";
-import { exitSceneEdit } from "./scene-toolbar.js";
-import { AUDIO_DEFAULT_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, active, baseName, beginSceneFurnitureDrag, choiceDialog, copyIntoCanvas, current, dropTool, ebookKey, ebookTocCache, fileBlockSize, findItem, imageCache, insertPoint, itemEls, makeAudio, makeEbook, makeFile, makeNote, makeProduct, makeVideo, normalizeSceneCamera, persistScene, placeBlock, refreshQuoteCard, refreshSceneToolbar, revealItem, sceneCameraState, sceneFurnitureDragDelta, scenePick, scheduleItemsSave, select, setSceneFurnitureSelection, showError, showToast, srcInUse, store, syncItemElement } from "../canvas.js";
+import { AUDIO_DEFAULT_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, active, baseName, choiceDialog, copyIntoCanvas, current, dropTool, ebookKey, ebookTocCache, fileBlockSize, findItem, imageCache, insertPoint, itemEls, makeAudio, makeEbook, makeFile, makeNote, makeProduct, makeVideo, placeBlock, refreshQuoteCard, revealItem, scheduleItemsSave, select, showError, showToast, srcInUse, store, syncItemElement } from "../canvas.js";
 
 /* ---------- 产品 / 材料卡与清单 ---------- */
 
@@ -117,201 +116,6 @@ export function startProductFieldEdit(itemId, field, fieldEl) {
   );
 }
 
-export function scenePlacementActive(item) {
-  return Boolean(itemEls.get(item.id)?.querySelector(".canvas-scene-card.is-placing"));
-}
-
-export function setScenePlacementMode(item, enabled) {
-  if (item.type !== "scene") throw new Error("要选择场景块");
-  if (enabled && item.locked) throw new Error("场景已锁定，请先解锁");
-  const el = itemEls.get(item.id);
-  const card = el?.querySelector(".canvas-scene-card");
-  if (!card) throw new Error("场景还没显示出来");
-  card.classList.toggle("is-placing", enabled);
-  if (!enabled) setSceneFurnitureSelection(card.querySelector(".canvas-scene-view"), []);
-  /* 工具条跟着换态：场景 ↔ 元素 */
-  refreshSceneToolbar();
-  return { id: item.id, placement: enabled };
-}
-
-export function sceneFurnitureGroup(item, index) {
-  if (!Number.isInteger(index) || index < 0 || index >= item.parts.length) throw new Error("家具零件序号无效");
-  const part = item.parts[index];
-  if (!part.surface) return null;
-  const surface = item.surfaces.find((one) => one.id === part.surface);
-  if (!surface) throw new Error(`找不到附着面 ${part.surface}`);
-  const indices = part.group
-    ? item.parts.flatMap((one, at) => one.group === part.group ? [at] : [])
-    : [index];
-  if (indices.some((at) => item.parts[at].surface !== part.surface)) throw new Error("同一件家具必须绑定同一附着面");
-  return { indices, surface, group: part.group || String(index) };
-}
-
-export function moveSceneFurnitureParts(item, origins, delta) {
-  for (const origin of origins) {
-    const part = item.parts[origin.index];
-    part.x = origin.x + delta.x;
-    part.y = origin.y + delta.y;
-    part.z = origin.z + delta.z;
-  }
-}
-
-export function attachSceneControls(el, item) {
-  const card = el.querySelector(".canvas-scene-card");
-  if (!card) return;
-  let frame = 0;
-  const renderSoon = () => {
-    if (frame) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      const target = itemEls.get(item.id);
-      if (target) syncItemElement(target, item);
-    });
-  };
-  card.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || item.locked) return;
-    /* 普通左键不碰内部：交回舞台，和别的块一样拖整块 / 点选 */
-    if (!event.ctrlKey && !event.shiftKey && !scenePlacementActive(item)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    select(item.id);
-    dropTool();
-    if (!event.ctrlKey && !event.shiftKey) {
-      const view = card.querySelector(".canvas-scene-view");
-      try {
-        const hit = scenePick(view, event.clientX, event.clientY);
-        if (!hit) {
-          setSceneFurnitureSelection(view, []);
-          /* 编辑态在背景上按左键：拖动=直接转视角（不用再按 Ctrl），轻点不拖=退出编辑 */
-          const startX = event.clientX;
-          const startY = event.clientY;
-          const base = sceneCameraState(item, view);
-          let orbiting = false;
-          card.classList.add("is-orbiting");
-          const move = (e) => {
-            if (e.pointerId !== event.pointerId) return;
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
-            if (!orbiting && Math.hypot(dx, dy) < 3) return;
-            orbiting = true;
-            item.camera = normalizeSceneCamera({
-              ...base,
-              azim: base.azim - dx * 0.35,
-              elev: base.elev + dy * 0.25,
-            });
-            renderSoon();
-          };
-          const up = () => {
-            card.classList.remove("is-orbiting");
-            window.removeEventListener("pointermove", move);
-            window.removeEventListener("pointerup", up);
-            window.removeEventListener("pointercancel", up);
-            window.removeEventListener("blur", up);
-            /* 轻点背景也留在编辑态：退出只走「退出编辑」按钮或 Esc */
-            if (orbiting) scheduleItemsSave();
-          };
-          window.addEventListener("pointermove", move);
-          window.addEventListener("pointerup", up);
-          window.addEventListener("pointercancel", up);
-          window.addEventListener("blur", up);
-          return;
-        }
-        const furniture = sceneFurnitureGroup(item, hit.index);
-        /* 地板/墙/窗这类没有附着面的构件也能选中（用元素工具改颜色尺寸），只是不能拖着走 */
-        setSceneFurnitureSelection(view, furniture?.indices || [hit.index]);
-        if (!furniture) return;
-        const movement = beginSceneFurnitureDrag(view, furniture.indices, furniture.surface, event.clientX, event.clientY);
-        if (!movement) return;
-        item.camera = normalizeSceneCamera(sceneCameraState(item, view));
-        const origins = furniture.indices.map((index) => ({ index, ...item.parts[index] }));
-        let moved = false;
-        const up = () => {
-          window.removeEventListener("pointermove", move);
-          window.removeEventListener("pointerup", up);
-          window.removeEventListener("pointercancel", up);
-          window.removeEventListener("blur", up);
-          if (moved) persistScene(item);
-          scheduleItemsSave();
-        };
-        const move = (e) => {
-          if (e.pointerId !== event.pointerId) return;
-          if (!card.isConnected || item.locked || !scenePlacementActive(item)) { up(); return; }
-          const delta = sceneFurnitureDragDelta(view, movement, e.clientX, e.clientY);
-          if (!delta) return;
-          moveSceneFurnitureParts(item, origins, delta);
-          moved = true;
-          renderSoon();
-        };
-        if (event.isTrusted) card.setPointerCapture(event.pointerId);
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", up);
-        window.addEventListener("pointercancel", up);
-        window.addEventListener("blur", up);
-      } catch (error) {
-        showError(error);
-      }
-      return;
-    }
-    const base = sceneCameraState(item);
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const panning = event.shiftKey;
-    const interactionClass = panning ? "is-panning" : "is-orbiting";
-    const unitsPerPixel = (2 * base.dist * Math.tan((base.fov * Math.PI) / 360)) / card.getBoundingClientRect().height;
-    const azim = (base.azim * Math.PI) / 180;
-    const elev = (base.elev * Math.PI) / 180;
-    card.classList.add(interactionClass);
-    const move = (e) => {
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      if (panning) {
-        const right = dx * unitsPerPixel;
-        const down = dy * unitsPerPixel;
-        // 相机目标沿屏幕右轴反向、上轴正向移动，模型才会跟随鼠标。
-        item.camera = normalizeSceneCamera({
-          ...base,
-          tx: base.tx + right * Math.cos(azim) - down * Math.sin(azim) * Math.sin(elev),
-          ty: base.ty - right * Math.sin(azim) - down * Math.cos(azim) * Math.sin(elev),
-          tz: base.tz + down * Math.cos(elev),
-        });
-      } else {
-        item.camera = normalizeSceneCamera({
-          ...base,
-          azim: base.azim - dx * 0.35,
-          elev: base.elev + dy * 0.25,
-        });
-      }
-      renderSoon();
-    };
-    const up = () => {
-      card.classList.remove(interactionClass);
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
-      scheduleItemsSave();
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-  });
-  card.addEventListener(
-    "wheel",
-    (event) => {
-      if (item.locked) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const base = sceneCameraState(item);
-      item.camera = normalizeSceneCamera({
-        ...base,
-        dist: base.dist * (event.deltaY > 0 ? 1.1 : 0.9),
-      });
-      renderSoon();
-      scheduleItemsSave();
-    },
-    { passive: false },
-  );
-}
-
 export function attachQuoteCard(el, item) {
   const title = el.querySelector(".canvas-quote-title");
   title?.addEventListener("dblclick", (event) => {
@@ -384,7 +188,6 @@ export const CSV_HEADER_ALIASES = {
   source: ["来源", "链接", "网址", "source", "url"],
   note: ["备注", "说明", "note"],
   image: ["图片", "图片路径", "图片文件", "image", "img"],
-  model: ["模型", "模型文件", "glb", "model"],
 };
 
 export const normalizeCsvHeader = (value) => String(value || "").trim().toLowerCase().replace(/[\s_\-]/g, "");
@@ -491,7 +294,6 @@ export async function importProductsFromCsv(path, origin) {
     product.qty = qty >= 1 ? qty : 1;
     product.source = get("source");
     product.note = get("note");
-    product.model = get("model");
     const imagePath = resolveCsvImagePath(path, get("image"));
     if (imagePath) {
       try {

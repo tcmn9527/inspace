@@ -29,7 +29,6 @@ use tauri::{Emitter, Manager};
 
 use crate::db::{self, DbState};
 use crate::store::{DataRoot, GEN_DIR};
-use crate::videolocal::{self, LocalEngine};
 
 const CONFIG_KEY: &str = "gen_video_api_config";
 const VIDEOS_SUB: &str = "videos";
@@ -130,9 +129,7 @@ pub(crate) struct Job {
     pub(crate) status: String,
     pub(crate) task_id: String,
     pub(crate) started: Instant,
-    /// API 任务自己的取消标志；本地任务直接用 core.cancel（和 sd.cpp 取消共用）
     pub(crate) cancel: Arc<AtomicBool>,
-    pub(crate) local: bool,
 }
 
 pub(crate) struct Core {
@@ -140,21 +137,6 @@ pub(crate) struct Core {
     pub(crate) cancel: Arc<AtomicBool>,
     pub(crate) jobs: Arc<Mutex<HashMap<String, Job>>>,
     pub(crate) config: Arc<Mutex<VideoApiConfig>>,
-    pub(crate) engine: Arc<Mutex<String>>,
-    pub(crate) local: LocalEngine,
-}
-
-impl Core {
-    pub(crate) fn engine(&self) -> String {
-        self.engine
-            .lock()
-            .map(|value| value.clone())
-            .unwrap_or_else(|_| "api".to_string())
-    }
-
-    pub(crate) fn local_engine(&self) -> LocalEngine {
-        self.local.clone()
-    }
 }
 
 pub struct VideoState {
@@ -174,20 +156,6 @@ impl VideoState {
         if let Ok(mut config) = self.core.config.lock() {
             *config = value;
         }
-    }
-
-    pub(crate) fn engine(&self) -> String {
-        self.core.engine()
-    }
-
-    pub(crate) fn set_engine(&self, value: String) {
-        if let Ok(mut engine) = self.core.engine.lock() {
-            *engine = value;
-        }
-    }
-
-    pub(crate) fn local_engine(&self) -> LocalEngine {
-        self.core.local_engine()
     }
 
     pub(crate) fn is_busy(&self) -> bool {
@@ -211,7 +179,6 @@ impl VideoState {
                             "status": job.status,
                             "taskId": job.task_id,
                             "waitedSeconds": job.started.elapsed().as_secs(),
-                            "local": job.local,
                         })
                     })
                     .collect()
@@ -224,27 +191,12 @@ impl VideoState {
 }
 
 pub fn init(data: DataRoot, db: &DbState) -> VideoState {
-    let stored = db
-        .0
-        .lock()
-        .ok()
-        .and_then(|conn| db::read_setting(&conn, "gen_video_engine"))
-        .filter(|value| value == "local" || value == "api");
-    /* 没选过引擎：本地四件套齐就默认走本地，缺件时先落到云 API 的位置 */
-    let engine = match stored.as_deref() {
-        Some("local") => "local".to_string(),
-        Some(_) => "api".to_string(),
-        None if crate::videolocal::resolve(db, &data).problem().is_none() => "local".to_string(),
-        None => "api".to_string(),
-    };
     VideoState {
         core: Arc::new(Core {
             data,
             cancel: Arc::new(AtomicBool::new(false)),
             jobs: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(load(db))),
-            engine: Arc::new(Mutex::new(engine)),
-            local: videolocal::init(db),
         }),
     }
 }
@@ -418,38 +370,28 @@ fn fetch_openai_models(config: &VideoApiConfig) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub fn gen_video_status(state: tauri::State<VideoState>) -> Value {
-    let mut value = state.busy_json();
-    if let Value::Object(map) = &mut value {
-        map.insert("engine".to_string(), Value::String(state.engine()));
-    }
-    value
+    state.busy_json()
 }
 
 #[tauri::command]
 pub fn gen_video_cancel(state: tauri::State<VideoState>, block: Option<String>) -> bool {
     let core = Arc::clone(&state.core);
     let mut hit = false;
-    let mut hit_local = false;
     if let Ok(mut jobs) = core.jobs.lock() {
         match block.as_deref() {
             Some(target) => {
                 if let Some(job) = jobs.get(target) {
                     job.cancel.store(true, Ordering::Relaxed);
-                    hit_local = job.local;
                     hit = true;
                 }
             }
             None => {
                 for job in jobs.values() {
                     job.cancel.store(true, Ordering::Relaxed);
-                    hit_local |= job.local;
                 }
                 hit = !jobs.is_empty();
             }
         }
-    }
-    if hit_local {
-        core.local_engine().cancel();
     }
     hit
 }
@@ -460,27 +402,14 @@ pub async fn gen_video_start(
     state: tauri::State<'_, VideoState>,
     req: VideoRequest,
 ) -> Result<(), String> {
-    let engine = state.engine();
     if req.prompt.trim().is_empty() {
         return Err("提示词是空的".to_string());
     }
-    let config = if engine == "local" {
-        let local = crate::videolocal::resolved_for_start(&app);
-        state.local_engine().set_config(local.clone());
-        if let Some(problem) = local.problem() {
-            return Err(format!(
-                "本地视频模型还没就绪：{problem}。把权重文件放进 {} 后会自动识别，缺什么在设置 → 视频生成里看清单",
-                local.dir
-            ));
-        }
-        None
-    } else {
-        let config = state.config();
-        if let Some(problem) = config.problem() {
-            return Err(format!("视频 API 配置不完整：{problem}（去设置 → 视频生成里配好）"));
-        }
-        Some(config)
-    };
+    let config = state.config();
+    if let Some(problem) = config.problem() {
+        return Err(format!("视频 API 配置不完整：{problem}（去设置 → 视频生成里配好）"));
+    }
+    let config = Some(config);
     if let Some(config) = &config {
         if config.protocol == "dashscope"
             && req.image.as_deref().is_some_and(|text| !text.trim().is_empty())
@@ -498,19 +427,12 @@ pub async fn gen_video_start(
         if jobs.contains_key(&req.block) {
             return Err("这块正在出视频，等这一条跑完".to_string());
         }
-        let (cancel, local) = if config.is_none() {
-            if !jobs.is_empty() {
-                return Err("正在出一个视频，等这一条跑完".to_string());
-            }
-            state.core.cancel.store(false, Ordering::Relaxed);
-            (Arc::clone(&state.core.cancel), true)
-        } else {
-            let limit = config.as_ref().map(|c| c.parallel_limit()).unwrap_or(1);
-            if jobs.len() >= limit {
-                return Err(format!("视频 API 并行已满（{limit} 条），等一条跑完再点"));
-            }
-            (Arc::new(AtomicBool::new(false)), false)
-        };
+        let config_ref = config.as_ref();
+        let limit = config_ref.map(|c| c.parallel_limit()).unwrap_or(1);
+        if jobs.len() >= limit {
+            return Err(format!("视频 API 并行已满（{limit} 条），等一条跑完再点"));
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
         jobs.insert(
             req.block.clone(),
             Job {
@@ -519,7 +441,6 @@ pub async fn gen_video_start(
                 task_id: String::new(),
                 started: Instant::now(),
                 cancel: Arc::clone(&cancel),
-                local,
             },
         );
         cancel
@@ -576,7 +497,7 @@ fn run_job(
     let started = Instant::now();
     let outcome = match config {
         Some(config) => execute(&core, &app, &config, &req, &cancel),
-        None => videolocal::execute(&core, &app, &req),
+        None => Err("视频 API 没配好".to_string()),
     };
     clear_job(&core, &block);
     let canceled = cancel.load(Ordering::Relaxed);

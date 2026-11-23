@@ -1,4 +1,4 @@
-/* 设置窗口的内容：数据文件夹、图片生成、模型库、宇宙贴图、航线、MCP、视频组件。
+/* 设置窗口的内容：数据文件夹、图片生成、宇宙贴图、航线、MCP、视频组件。
 
    这个模块只管各页里的控件和状态，窗口长什么样、左侧菜单选哪一项由
    settings-window.js 负责。所有路径/模型目录都在 Rust 侧，主窗口和这里读写同一份。
@@ -83,20 +83,6 @@ export function initSettings(options = {}) {
   ui.routeField = document.querySelector("#settings-route-field");
   ui.routeMinutes = document.querySelector("#settings-route-minutes");
   ui.routeStatus = document.querySelector("#settings-route-status");
-  ui.genFamilies = document.querySelector("#settings-gen-families");
-  ui.genDevice = document.querySelector("#settings-gen-device");
-  ui.genNote = document.querySelector("#settings-gen-note");
-  ui.genHint = document.querySelector("#settings-gen-hint");
-  ui.genStatus = document.querySelector("#settings-gen-status");
-  ui.genDir = document.querySelector("#settings-gen-dir");
-  ui.genDetail = document.querySelector("#settings-gen-detail");
-  ui.genCheck = document.querySelector("#settings-gen-check");
-  ui.genReveal = document.querySelector("#settings-gen-reveal");
-  ui.genDirPick = document.querySelector("#settings-gen-dir-pick");
-  ui.genDirReset = document.querySelector("#settings-gen-dir-reset");
-  ui.genError = document.querySelector("#settings-gen-error");
-  ui.genEngine = document.querySelector("#settings-gen-engine");
-  ui.genLocal = document.querySelector("#settings-gen-local");
   ui.genApi = document.querySelector("#settings-gen-api");
   ui.genApiProtocol = document.querySelector("#settings-gen-api-protocol");
   ui.genApiUrl = document.querySelector("#settings-gen-api-url");
@@ -114,51 +100,8 @@ export function initSettings(options = {}) {
   ui.videoReload = document.querySelector("#settings-video-reload");
   ui.videoStatus = document.querySelector("#settings-video-status");
   ui.videoError = document.querySelector("#settings-video-error");
-  ui.videoEngine = document.querySelector("#settings-video-engine");
-  ui.videoLocalBox = document.querySelector("#settings-video-local");
   ui.videoCloudBox = document.querySelector("#settings-video-cloud");
-  ui.videoLocalStatus = document.querySelector("#settings-video-local-status");
-  ui.videoLocalError = document.querySelector("#settings-video-local-error");
   ui.videoDir = document.querySelector("#settings-video-dir");
-  ui.videoRoles = document.querySelector("#settings-video-roles");
-  ui.videoNotes = document.querySelector("#settings-video-notes");
-  ui.videoRescan = document.querySelector("#settings-video-rescan");
-  ui.videoReveal = document.querySelector("#settings-video-reveal");
-  ui.videoDirPick = document.querySelector("#settings-video-dir-pick");
-  ui.videoDirReset = document.querySelector("#settings-video-dir-reset");
-  ui.h3dEngine = document.querySelector("#settings-h3d-engine");
-  ui.h3dLocalBox = document.querySelector("#settings-h3d-local");
-  ui.h3dApiBox = document.querySelector("#settings-h3d-api");
-  ui.h3dApiProtocol = document.querySelector("#settings-h3dapi-protocol");
-  ui.h3dApiUrl = document.querySelector("#settings-h3dapi-url");
-  ui.h3dApiModel = document.querySelector("#settings-h3dapi-model");
-  ui.h3dApiKey = document.querySelector("#settings-h3dapi-key");
-  ui.h3dApiParallel = document.querySelector("#settings-h3dapi-parallel");
-  ui.h3dApiError = document.querySelector("#settings-h3dapi-error");
-  ui.h3dDir = document.querySelector("#settings-h3d-dir");
-  ui.h3dCheck = document.querySelector("#settings-h3d-check");
-  ui.h3dReveal = document.querySelector("#settings-h3d-reveal");
-  ui.h3dStatus = document.querySelector("#settings-h3d-status");
-  ui.h3dError = document.querySelector("#settings-h3d-error");
-  ui.h3dTexError = document.querySelector("#settings-h3d-tex-error");
-  ui.modelsStatus = document.querySelector("#settings-models-status");
-  ui.modelsDir = document.querySelector("#settings-models-dir");
-  ui.modelsReveal = document.querySelector("#settings-models-reveal");
-  ui.modelsImport = document.querySelector("#settings-models-import");
-  ui.modelsError = document.querySelector("#settings-models-error");
-
-  ui.h3dCheck.addEventListener("click", () => refreshH3d(true));
-  ui.h3dEngine.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-engine]");
-    if (button) void pickH3dEngine(button.dataset.engine);
-  });
-  for (const field of [ui.h3dApiUrl, ui.h3dApiModel, ui.h3dApiKey, ui.h3dApiParallel]) {
-    field.addEventListener("blur", () => void saveH3dApi());
-  }
-  ui.h3dApiProtocol.addEventListener("change", () => void saveH3dApi());
-  ui.h3dReveal.addEventListener("click", () => {
-    void invoke("h3d_reveal").catch((error) => showH3dError(String(error)));
-  });
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -170,30 +113,9 @@ export function initSettings(options = {}) {
   ui.cosmosUpgrade.addEventListener("click", upgradeCosmosTextures);
   ui.cosmosCancel.addEventListener("click", cancelCosmosTextures);
   ui.cosmosClear.addEventListener("click", clearCosmosTextures);
-  ui.genCheck.addEventListener("click", runGenCheck);
-  ui.genDevice.addEventListener("change", async () => {
-    showGenError("");
-    try {
-      await invoke("gen_device_set", { device: ui.genDevice.value });
-    } catch (error) {
-      showGenError(String(error));
-    }
-  });
-  ui.genFamilies.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-family]");
-    if (button) pickFamily(button.dataset.family);
-  });
-  ui.genReveal.addEventListener("click", revealGenDir);
-  ui.genDirPick.addEventListener("click", pickGenDir);
-  ui.genDirReset.addEventListener("click", () => setGenDir(null));
-  ui.genEngine.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-engine]");
-    if (button) pickGenEngine(button.dataset.engine);
-  });
   for (const field of [ui.genApiUrl, ui.genApiKey]) {
     /* 地址和 Key 填完就去把模型列表读回来：模型名不给手填，只能从列表里挑 */
     field.addEventListener("blur", async () => {
-      if (!genApi.enabled) return;
       await saveGenApiForm();
       await reloadGenApiModels();
     });
@@ -231,18 +153,6 @@ export function initSettings(options = {}) {
   ui.videoModel.addEventListener("change", saveVideoForm);
   ui.videoParallel.addEventListener("change", saveVideoForm);
   ui.videoReload.addEventListener("click", () => reloadVideoModels());
-  ui.videoEngine.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-video-engine]");
-    if (button) pickVideoEngine(button.dataset.videoEngine);
-  });
-  ui.videoRescan.addEventListener("click", () => refreshVideoLocal(false));
-  ui.videoReveal.addEventListener("click", revealVideoDir);
-  ui.videoDirPick.addEventListener("click", pickVideoDir);
-  ui.videoDirReset.addEventListener("click", () => setVideoDir(""));
-  ui.modelsReveal.addEventListener("click", () => {
-    invoke("model_library_reveal").catch((error) => showModelsError(String(error)));
-  });
-  ui.modelsImport.addEventListener("click", importModel);
   setupMoveEvents();
   setupCosmosEvents();
   setupRoute();
@@ -261,100 +171,6 @@ function setupMoveEvents() {
   ).catch(() => {});
 }
 
-/* ---------- 本地 3D 生成 ---------- */
-let h3dChecked = false;
-
-function showH3dError(message) {
-  ui.h3dError.textContent = message || "";
-  ui.h3dError.hidden = !message;
-}
-
-async function refreshH3d(verbose = false) {
-  try {
-    const status = await invoke("h3d_status");
-    if (verbose) h3dChecked = true;
-    ui.h3dDir.textContent = status.dir;
-    if (status.ok) {
-      const texReady = status.textureOk;
-      ui.h3dStatus.textContent =
-        texReady && verbose ? "模型齐全，几何和纹理都能生成" : "模型齐全";
-      ui.h3dStatus.hidden = false;
-      showH3dError("");
-    } else {
-      ui.h3dStatus.hidden = true;
-      showH3dError(`还缺 ${status.missing.join("、")}：把 Hunyuan3D 的 ONNX 权重放进上面的目录（onnx/ 与 u2net.onnx）`);
-    }
-    if (status.textureOk) {
-      ui.h3dTexError.hidden = true;
-    } else {
-      ui.h3dTexError.textContent = `「生成带纹理」还缺 ${status.textureMissing.join("、")}：放进 ${status.dir}\libtorch 与 jit 目录`;
-      ui.h3dTexError.hidden = false;
-    }
-  } catch (error) {
-    showH3dError(String(error));
-  }
-}
-
-/* ---------- 3D 生成引擎：本地模型 / API（二选一） ---------- */
-let h3dApi = { enabled: false, protocol: "hunyuan", parallel: 2, baseUrl: "", apiKey: "", model: "" };
-
-function paintH3dEngine() {
-  const usingApi = Boolean(h3dApi.enabled);
-  if (ui.h3dEngine) {
-    for (const button of ui.h3dEngine.querySelectorAll("[data-engine]")) {
-      const on = button.dataset.engine === (usingApi ? "api" : "local");
-      button.classList.toggle("is-active", on);
-      button.setAttribute("aria-selected", on ? "true" : "false");
-    }
-  }
-  if (ui.h3dLocalBox) ui.h3dLocalBox.hidden = usingApi;
-  if (ui.h3dApiBox) ui.h3dApiBox.hidden = !usingApi;
-}
-
-async function pickH3dEngine(engine) {
-  const want = engine === "api";
-  if (want === Boolean(h3dApi.enabled)) return;
-  try {
-    h3dApi = await invoke("h3d_api_set", { config: { ...h3dApi, enabled: want } });
-    paintH3dEngine();
-  } catch (error) {
-    showH3dError(String(error));
-  }
-}
-
-async function refreshH3dApi() {
-  try {
-    h3dApi = await invoke("h3d_api_get");
-    ui.h3dApiProtocol.value = h3dApi.protocol || "hunyuan";
-    ui.h3dApiUrl.value = h3dApi.baseUrl || "";
-    ui.h3dApiModel.value = h3dApi.model || "";
-    ui.h3dApiKey.value = h3dApi.apiKey || "";
-    ui.h3dApiParallel.value = String(h3dApi.parallel || 2);
-    paintH3dEngine();
-  } catch {
-    /* 读不出来就留空，不打扰 */
-  }
-}
-
-async function saveH3dApi() {
-  try {
-    h3dApi = await invoke("h3d_api_set", {
-      config: {
-        enabled: Boolean(h3dApi.enabled),
-        protocol: ui.h3dApiProtocol.value,
-        parallel: Number(ui.h3dApiParallel.value) || 2,
-        baseUrl: ui.h3dApiUrl.value.trim(),
-        apiKey: ui.h3dApiKey.value.trim(),
-        model: ui.h3dApiModel.value.trim(),
-      },
-    });
-    ui.h3dApiError.hidden = true;
-  } catch (error) {
-    ui.h3dApiError.textContent = String(error);
-    ui.h3dApiError.hidden = false;
-  }
-}
-
 export async function refreshSettings() {
   try {
     currentRoot = await invoke("data_root");
@@ -367,9 +183,6 @@ export async function refreshSettings() {
   refreshCosmos();
   refreshGen();
   refreshVideo();
-  refreshModels();
-  refreshH3d();
-  refreshH3dApi();
   paintRouteCard();
   renderRoute();
 }
@@ -818,25 +631,10 @@ async function clearCosmosTextures() {
 
 /* ---------- 图片生成 ---------- */
 
-/* 权重四件：VAE 和视觉投影跟模型一对一、没得挑，DiT 和文本编码器各有量化档。
-   打开设置只读一行状态（gen_status 不探测，随时可读）；点「检测模型」才摊开整块结论：
-   这台机器的内存和盘装得下哪一档 → 建议哪一档 → 还缺哪几个文件、去哪儿下 →
-   目录里真有的文件摊成两列让他直接选。列文件比造「低/中/高」那种预设诚实：
-   下了什么就看到什么，体积摆在右手边自己权衡。 */
-let genState = null;
-let genModels = null;
-let genChecked = false;
-let genBusy = false;
-let currentFamily = "qwen21";
-
-/* 两族各有一套权重和默认参数；切过去就把已载入的引擎放掉，下次出图按新族载入。 */
-const H3_NOTE =
-  "H3-Image 只支持文生图和参考图编辑（最多 16 张参考图）；1–2MP 出图约 5–8 秒，16MP 约 2 分钟。权重许可为 MiniMax 社区许可，商用需授权。";
-
-/* ---------- 生图引擎：本地模型 / API ----------
-   引擎是一道全局开关：选了 API，出图整条路走远端，本地权重一概不载。
+/* 只剩远端 API 一条路：本地扩散引擎和本地放大模型都已移除，这里就是一张接口配置表。
    Key 存在本机设置库里，这个窗口要能接着编辑所以原样带回；别的地方只报「配没配好」。 */
-let genApi = { enabled: false, protocol: "images", baseUrl: "", apiKey: "", model: "" };
+let genApi = { enabled: true, protocol: "images", baseUrl: "", apiKey: "", model: "", parallel: 2 };
+let genBusy = false;
 
 function showGenApiError(message) {
   ui.genApiError.textContent = message;
@@ -875,43 +673,10 @@ function fillModelOptions(names) {
   ui.genApiModel.disabled = !list.length || genBusy;
 }
 
-function paintGenEngine() {
-  const usingApi = Boolean(genApi.enabled);
-  for (const button of ui.genEngine.querySelectorAll("[data-engine]")) {
-    const on = button.dataset.engine === (usingApi ? "api" : "local");
-    button.classList.toggle("is-active", on);
-    button.setAttribute("aria-selected", on ? "true" : "false");
-  }
-  ui.genApi.hidden = !usingApi;
-  ui.genLocal.hidden = usingApi;
-}
-
-async function pickGenEngine(engine) {
-  if (genBusy) return;
-  const want = engine === "api";
-  if (want === genApi.enabled) return;
-  showGenError("");
-  showGenApiError("");
-  try {
-    genApi = await invoke("gen_api_set", { config: { ...genApi, enabled: want } });
-    paintGenEngine();
-    if (want) {
-      if (!genApi.baseUrl.trim() || !genApi.apiKey.trim()) {
-        showGenApiStatus("填上接口地址和 API Key，模型列表会自己读回来");
-      } else {
-        await reloadGenApiModels();
-      }
-    } else {
-      showGenApiStatus("");
-    }
-  } catch (error) {
-    showGenError(String(error));
-  }
-}
-
 function readGenApiForm() {
   return {
     ...genApi,
+    enabled: true,
     protocol: ui.genApiProtocol.value === "chat" ? "chat" : "images",
     baseUrl: ui.genApiUrl.value.trim(),
     model: ui.genApiModel.value.trim(),
@@ -921,7 +686,6 @@ function readGenApiForm() {
 }
 
 async function saveGenApiForm() {
-  if (!genApi.enabled) return;
   const next = readGenApiForm();
   if (
     next.protocol === genApi.protocol &&
@@ -943,7 +707,6 @@ async function saveGenApiForm() {
 }
 
 async function reloadGenApiModels() {
-  if (!genApi.enabled) return;
   const form = readGenApiForm();
   if (!form.baseUrl.trim()) {
     fillModelOptions([]);
@@ -978,14 +741,20 @@ async function reloadGenApiModels() {
   }
 }
 
+/* 打开设置：只读配置和一句状态，不主动打网络——列表要用户点「重新读取模型」。 */
+async function refreshGen() {
+  showGenApiError("");
+  genApi = await invoke("gen_api_get").catch(() => genApi);
+  genApi.enabled = true;
+  fillGenApiForm();
+  const missing = apiProblem();
+  showGenApiStatus(missing ? `还差：${missing}` : `已连：${genApi.baseUrl} · ${genApi.model}`);
+}
+
 /* ---------- 视频生成 API ----------
    视频没有本地兜底，配置好就能用。三家协议：OpenAI videos 拉 /models；
    海螺和 DashScope 没有列表接口，模型清单在后端内置。 */
 let videoApi = { protocol: "openai", baseUrl: "", apiKey: "", model: "" };
-/* 视频引擎：api = 三家云协议；local = 本机 sd.cpp 跑 H3 */
-let videoEngine = "api";
-let videoLocal = { dir: "", diffusion: "", videoVae: "", audioVae: "", encoder: "", fps: 24 };
-let videoScan = { dir: "", ready: false, roles: [], notes: [] };
 let videoDefaultDir = "";
 
 function showVideoError(message) {
@@ -1031,169 +800,20 @@ function fillVideoForm() {
 }
 
 async function refreshVideo() {
-  videoEngine = await invoke("gen_video_engine_get").catch(() => videoEngine);
   videoApi = await invoke("gen_video_api_get").catch(() => videoApi);
-  const local = await invoke("gen_video_local_get").catch(() => null);
-  if (local?.config) {
-    videoLocal = local.config;
-    videoScan = local.scan || videoScan;
-    videoDefaultDir = local.defaultDir || "";
-  }
   fillVideoForm();
-  fillVideoLocal();
-  paintVideoEngine();
-  if (videoEngine === "api") await reloadVideoModels(true);
+  await reloadVideoModels(true);
 }
 
-function paintVideoEngine() {
-  const local = videoEngine === "local";
-  for (const button of ui.videoEngine.querySelectorAll("[data-video-engine]")) {
-    const on = button.dataset.videoEngine === (local ? "local" : "api");
-    button.classList.toggle("is-active", on);
-    button.setAttribute("aria-selected", on ? "true" : "false");
-  }
-  ui.videoLocalBox.hidden = !local;
-  ui.videoCloudBox.hidden = local;
-}
 
-async function pickVideoEngine(engine) {
-  const want = engine === "local" ? "local" : "api";
-  if (want === videoEngine) return;
-  showVideoLocalError("");
-  showVideoError("");
-  try {
-    videoEngine = await invoke("gen_video_engine_set", { engine: want });
-    paintVideoEngine();
-    if (videoEngine === "api") await reloadVideoModels(true);
-    else paintVideoLocal();
-  } catch (error) {
-    showVideoLocalError(String(error));
-  }
-}
 
-function fillVideoLocal() {
-  const dir = (videoScan.dir || videoLocal.dir || "").trim();
-  ui.videoDir.textContent = dir || "（还没定目录）";
-  ui.videoDir.title = dir;
-  ui.videoDirReset.hidden = !dir || dir === videoDefaultDir;
-  ui.videoRoles.replaceChildren();
-  for (const slot of videoScan.roles || []) {
-    const row = document.createElement("div");
-    row.className = `settings-gen-file${slot.missing ? " is-missing" : ""}`;
-    row.append(genSpan(slot.label, "settings-gen-role"));
-    if (slot.file) {
-      row.append(
-        genSpan(slot.file.name, "settings-gen-name"),
-        genSpan(formatBytes(slot.file.bytes), "settings-gen-size"),
-        genSpan("已识别", "settings-gen-state"),
-      );
-    } else {
-      row.append(
-        genSpan(slot.suggestName, "settings-gen-name"),
-        genSpan(formatBytes(slot.suggestBytes), "settings-gen-size"),
-        genSpan(slot.required ? "缺" : "缺（可空）", "settings-gen-state"),
-      );
-      const link = document.createElement("button");
-      link.type = "button";
-      link.className = "settings-gen-link";
-      link.textContent = "下载页";
-      link.addEventListener("click", async () => {
-        try {
-          await invoke("plugin:opener|open_url", { url: slot.url });
-        } catch {
-          showVideoLocalError("打不开这个链接（系统浏览器调用失败）");
-        }
-      });
-      row.append(link);
-    }
-    ui.videoRoles.append(row);
-  }
-  ui.videoNotes.replaceChildren();
-  const notes = videoScan.notes || [];
-  ui.videoNotes.hidden = !notes.length;
-  for (const note of notes) {
-    const line = document.createElement("p");
-    line.className = "settings-model-note";
-    line.textContent = note;
-    ui.videoNotes.append(line);
-  }
-  paintVideoLocal();
-}
 
-function videoLocalProblem() {
-  if (!(videoScan.roles || []).length) return "还没找到模型目录";
-  if (videoScan.ready) return "";
-  const missing = (videoScan.roles || [])
-    .filter((slot) => slot.missing && slot.required)
-    .map((slot) => slot.label);
-  return missing.length ? `还缺 ${missing.join("、")}` : "";
-}
 
-function paintVideoLocal() {
-  const problem = videoLocalProblem();
-  showVideoLocalError("");
-  ui.videoLocalStatus.textContent = problem
-    ? `${problem}；把文件放进上面的文件夹后点「重新扫描」`
-    : "本地视频模型就绪；面板里点开始就走本机";
-  ui.videoLocalStatus.hidden = false;
-}
 
-function showVideoLocalError(message) {
-  ui.videoLocalError.textContent = message;
-  ui.videoLocalError.hidden = !message;
-}
 
-async function refreshVideoLocal(quiet = false) {
-  try {
-    const state = await invoke("gen_video_local_get");
-    if (state?.config) {
-      videoLocal = state.config;
-      videoScan = state.scan || videoScan;
-      videoDefaultDir = state.defaultDir || videoDefaultDir;
-    }
-  } catch (error) {
-    if (!quiet) showVideoLocalError(String(error));
-  }
-  fillVideoLocal();
-}
 
-async function setVideoDir(dir) {
-  showVideoLocalError("");
-  try {
-    const state = await invoke("gen_video_local_set", {
-      config: { ...videoLocal, dir: dir || "" },
-    });
-    if (state?.config) {
-      videoLocal = state.config;
-      videoScan = state.scan || videoScan;
-      videoDefaultDir = state.defaultDir || videoDefaultDir;
-    }
-    fillVideoLocal();
-  } catch (error) {
-    showVideoLocalError(String(error));
-  }
-}
 
-async function pickVideoDir() {
-  showVideoLocalError("");
-  let picked = null;
-  try {
-    picked = await invoke("gen_video_dir_pick");
-  } catch (error) {
-    showVideoLocalError(String(error));
-    return;
-  }
-  if (picked) await setVideoDir(picked);
-}
 
-async function revealVideoDir() {
-  showVideoLocalError("");
-  try {
-    await invoke("gen_video_dir_reveal");
-  } catch (error) {
-    showVideoLocalError(String(error));
-  }
-}
 
 function readVideoForm() {
   return {
@@ -1252,297 +872,6 @@ async function reloadVideoModels(quiet = false) {
     ui.videoReload.disabled = false;
     ui.videoModel.disabled = !ui.videoModel.options.length;
   }
-}
-
-async function pickFamily(family) {
-  if (genBusy || family === currentFamily) return;
-  lockGen(true);
-  showGenError("");
-  try {
-    await invoke("gen_family_set", { family });
-    genChecked = false;
-    genModels = null;
-    /* 主窗口那边缓存着「新建面板默认参数」和当前族，切完通知它一声 */
-    emitTo("main", "inspace:gen-family", { family }).catch(() => {});
-    await refreshGen();
-  } catch (error) {
-    showGenError(String(error));
-  } finally {
-    lockGen(false);
-  }
-}
-
-function showGenError(message) {
-  ui.genError.textContent = message;
-  ui.genError.hidden = !message;
-}
-
-function lockGen(on) {
-  genBusy = on;
-  for (const button of [ui.genCheck, ui.genReveal, ui.genDirPick, ui.genDirReset]) {
-    button.disabled = on;
-  }
-  for (const button of ui.genFamilies.querySelectorAll("[data-family]")) {
-    button.disabled = on;
-  }
-  if (ui.genApiModel) ui.genApiModel.disabled = on || !ui.genApiModel.options.length;
-  ui.genCheck.textContent = on ? "检测中…" : genChecked ? "重新检测" : "检测模型";
-}
-
-async function refreshGen() {
-  showGenError("");
-  /* 每次打开设置都从「收起」开始：健康态就一行状态加一个目录，摊开是他自己点出来的 */
-  genChecked = false;
-  genApi = await invoke("gen_api_get").catch(() => genApi);
-  fillGenApiForm();
-  paintGenEngine();
-  const dev = await invoke("gen_device_get").catch(() => "gpu");
-  if (ui.genDevice) ui.genDevice.value = dev === "cpu" ? "cpu" : "gpu";
-  try {
-    genState = await invoke("gen_status");
-  } catch (error) {
-    genState = null;
-    ui.genStatus.textContent = "模型状态读取失败";
-    ui.genDir.textContent = "";
-    ui.genDetail.hidden = true;
-    ui.genHint.hidden = true;
-    ui.genDirReset.hidden = true;
-    lockGen(false);
-    showGenError(String(error));
-    return;
-  }
-  paintGen();
-}
-
-function paintGen() {
-  const s = genState;
-  if (!s) return;
-  currentFamily = s.family || "qwen21";
-  for (const button of ui.genFamilies.querySelectorAll("[data-family]")) {
-    const on = button.dataset.family === currentFamily;
-    button.classList.toggle("is-active", on);
-    button.setAttribute("aria-selected", on ? "true" : "false");
-  }
-  ui.genNote.hidden = currentFamily !== "h3image";
-  ui.genNote.textContent = currentFamily === "h3image" ? H3_NOTE : "";
-  ui.genStatus.textContent = s.missing.length
-    ? `缺 ${s.missing.length} 个模型文件，出图起不来：${s.missing.join("、")}`
-    : `当前 ${s.dit} + ${s.encoder}`;
-  ui.genDir.textContent = s.modelsDir;
-  /* 「往里扔文件就行」这句只在还缺东西时才需要说 */
-  ui.genHint.hidden = !s.missing.length;
-  ui.genDirReset.hidden = s.dirIsDefault;
-  ui.genCheck.textContent = genChecked ? "重新检测" : "检测模型";
-  ui.genDetail.hidden = !(genChecked && genModels);
-  if (genChecked && genModels) renderGenDetail();
-}
-
-async function runGenCheck() {
-  if (genBusy) return;
-  lockGen(true);
-  showGenError("");
-  try {
-    genModels = await invoke("gen_models");
-    genChecked = true;
-    /* 检测顺带把状态行也刷新了：换档、换目录之后的缺件情况在这儿一次看到 */
-    genState = await invoke("gen_status").catch(() => genState);
-  } catch (error) {
-    showGenError(String(error));
-  } finally {
-    lockGen(false);
-  }
-  paintGen();
-}
-
-function genText(text, className) {
-  const p = document.createElement("p");
-  p.className = className;
-  p.textContent = text;
-  return p;
-}
-
-function genSpan(text, className) {
-  const span = document.createElement("span");
-  span.className = className;
-  span.textContent = text;
-  return span;
-}
-
-function mbText(mb) {
-  return mb ? `${(mb / 1024).toFixed(1)} GB` : "认不到";
-}
-
-function renderGenDetail() {
-  const m = genModels;
-  const box = ui.genDetail;
-  box.replaceChildren();
-  box.append(
-    genText(
-      `显卡 ${m.machine.gpu || "没认到"} · 显存 ${mbText(m.machine.vramMb)} · 内存空闲 ${mbText(
-        m.machine.ramAvailMb,
-      )} · 这个盘还剩 ${mbText(m.machine.dirFreeMb)}`,
-      "settings-gen-line",
-    ),
-  );
-  box.append(genText(m.advice, "settings-gen-line is-advice"));
-  const lacking = m.needed.filter((row) => !row.present && !row.optional);
-  if (lacking.length) {
-    box.append(genText(`这几个文件还没有，下好扔进上面那个文件夹就行：`, "settings-gen-line is-title"));
-    box.append(genNeededBlock(m));
-    box.append(genText("画图模型的量化档，从省内存到费内存：", "settings-gen-line is-title"));
-    box.append(genTierBlock(m));
-  }
-  if (m.dit.length || m.encoder.length) {
-    box.append(genText("目录里已经有这些，点一个当场记下，下一次出图生效：", "settings-gen-line is-title"));
-    const cols = document.createElement("div");
-    cols.className = "settings-gen-cols";
-    cols.append(genColumn("画图模型", "dit"), genColumn("文本编码器", "encoder"));
-    const fixed = document.createElement("p");
-    fixed.className = "settings-gen-fixed";
-    fixed.textContent = `跟着模型定死：${
-      m.fixed.map((file) => `${file.name}（${formatBytes(file.bytes)}）`).join(" · ") ||
-      "这目录里还没有 VAE 和视觉投影"
-    }`;
-    cols.append(fixed);
-    box.append(cols);
-  } else {
-    box.append(genText("这个目录里还没有可选的模型档：先把上面那几个文件放进去。", "settings-gen-line"));
-  }
-}
-
-/* 下载清单的字节数取仓库里的真数，和本地文件大小无关——这一栏说的是「该下什么」。 */
-function genNeededBlock(m) {
-  const wrap = document.createElement("div");
-  wrap.className = "settings-gen-files";
-  for (const row of m.needed) {
-    const line = document.createElement("div");
-    line.className = `settings-gen-file${row.present ? "" : " is-missing"}`;
-    line.append(
-      genSpan(row.role, "settings-gen-role"),
-      genSpan(row.name, "settings-gen-name"),
-      genSpan(formatBytes(row.bytes), "settings-gen-size"),
-      genSpan(row.present ? "已有" : row.optional ? "缺（可先不下）" : "缺", "settings-gen-state"),
-    );
-    const link = document.createElement("button");
-    link.type = "button";
-    link.className = "settings-gen-link";
-    link.textContent = "下载页";
-    link.addEventListener("click", async () => {
-      try {
-        await invoke("plugin:opener|open_url", { url: row.page });
-      } catch {
-        showGenError("打不开这个链接（系统浏览器调用失败）");
-      }
-    });
-    line.append(link);
-    wrap.append(line);
-  }
-  return wrap;
-}
-
-function genTierBlock(m) {
-  const wrap = document.createElement("div");
-  wrap.className = "settings-gen-files";
-  for (const tier of m.tiers) {
-    const line = document.createElement("div");
-    line.className = `settings-gen-file${tier.recommended ? " is-recommended" : ""}`;
-    line.append(
-      genSpan(tier.name, "settings-gen-name"),
-      genSpan(formatBytes(tier.bytes), "settings-gen-size"),
-    );
-    if (tier.recommended) line.append(genSpan("这台机器建议", "settings-gen-state"));
-    if (tier.present) line.append(genSpan("已在目录里", "settings-gen-state"));
-    wrap.append(line);
-  }
-  return wrap;
-}
-
-function slotOf(kind) {
-  return kind === "dit"
-    ? { list: genModels.dit, current: genModels.currentDit }
-    : { list: genModels.encoder, current: genModels.currentEncoder };
-}
-
-function genColumn(title, kind) {
-  const { list, current } = slotOf(kind);
-  const col = document.createElement("div");
-  col.className = "settings-gen-col";
-  const head = document.createElement("p");
-  head.className = "settings-gen-col-title";
-  head.textContent = list.length ? title : `${title}：一个都没有`;
-  col.append(head);
-  for (const file of list) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "settings-gen-opt";
-    if (file.name === current) row.classList.add("is-current");
-    const name = document.createElement("span");
-    name.className = "settings-gen-name";
-    name.textContent = file.name;
-    const size = document.createElement("span");
-    size.className = "settings-gen-size";
-    size.textContent = formatBytes(file.bytes);
-    row.append(name, size);
-    row.addEventListener("click", () => pickGenModel(kind, file.name));
-    col.append(row);
-  }
-  return col;
-}
-
-async function pickGenModel(kind, name) {
-  if (genBusy || !genModels || slotOf(kind).current === name) return;
-  lockGen(true);
-  showGenError("");
-  try {
-    genModels = await invoke("gen_models_set", kind === "dit" ? { dit: name } : { encoder: name });
-    genState = await invoke("gen_status").catch(() => genState);
-  } catch (error) {
-    showGenError(String(error));
-  } finally {
-    lockGen(false);
-  }
-  paintGen();
-}
-
-async function revealGenDir() {
-  if (genBusy) return;
-  showGenError("");
-  try {
-    await invoke("gen_models_reveal");
-  } catch (error) {
-    showGenError(String(error));
-  }
-}
-
-/* 换目录是「选完就认」，不弹确认也不留保存按钮：挑的时候已经看清是哪个文件夹了。
-   换完直接摊开检测结果——新目录里有没有东西，这一眼就是要给他的答复。 */
-async function setGenDir(dir) {
-  if (genBusy) return;
-  lockGen(true);
-  showGenError("");
-  try {
-    genModels = await invoke("gen_models_dir_set", { dir });
-    genState = await invoke("gen_status").catch(() => genState);
-    genChecked = true;
-  } catch (error) {
-    showGenError(String(error));
-  } finally {
-    lockGen(false);
-  }
-  paintGen();
-}
-
-async function pickGenDir() {
-  if (genBusy) return;
-  showGenError("");
-  let picked = null;
-  try {
-    picked = await invoke("gen_models_dir_pick");
-  } catch (error) {
-    showGenError(String(error));
-    return;
-  }
-  if (picked) await setGenDir(picked);
 }
 
 /* ---------- 遨游星球 ---------- */
@@ -1674,41 +1003,3 @@ function showRouteStatus(message) {
   }, 3000);
 }
 
-/* ---------- 3D 模型库 ---------- */
-
-function showModelsError(message) {
-  ui.modelsError.textContent = message;
-  ui.modelsError.hidden = !message;
-}
-
-async function refreshModels() {
-  try {
-    const [dir, files] = await Promise.all([
-      invoke("model_library_dir"),
-      invoke("model_library_list"),
-    ]);
-    ui.modelsDir.textContent = dir;
-    ui.modelsStatus.textContent = files.length ? `${files.length} 个模型` : "还没有模型";
-    showModelsError("");
-  } catch (error) {
-    ui.modelsDir.textContent = "";
-    ui.modelsStatus.textContent = "模型库读取失败";
-    showModelsError(String(error));
-  }
-}
-
-async function importModel() {
-  ui.modelsImport.disabled = true;
-  showModelsError("");
-  try {
-    const file = await invoke("model_library_import", { path: null });
-    if (file) {
-      await refreshModels();
-      ui.modelsStatus.textContent = `已导入 ${file.name}（${formatBytes(file.size)}）`;
-    }
-  } catch (error) {
-    showModelsError(String(error));
-  } finally {
-    ui.modelsImport.disabled = false;
-  }
-}

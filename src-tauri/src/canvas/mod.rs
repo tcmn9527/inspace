@@ -10,7 +10,6 @@
 //!     files/        拖入/选择的其它文件，一律拷副本；文本类在卡片里给只读预览，双击交系统程序打开
 //!     notes/        笔记块的内容，一块一个 <块id>.md，图片副本在同名的 <块id>/ 目录里
 //!     pictures/     画面块的绘制指令和素材表，一块一个 <块id>.json
-//!     scenes/       场景块里的东西，一块一个 <块id>.json
 //!     genpanels/    生图面板的提示词和参数，一块一个 <块id>.json（出的图在 images/）
 //!
 //! 删除画布时整个文件夹进系统回收站。
@@ -62,7 +61,6 @@ const IMAGE_DIR: &str = "images";
 const AUDIO_DIR: &str = "audio";
 const NOTE_DIR: &str = "notes";
 const PICTURE_DIR: &str = "pictures";
-const SCENE_DIR: &str = "scenes";
 /// 生图面板的内容，一块一个 <块id>.json。出的图本身落在 images/ 里，这儿只记提示词和参数。
 const GENPANEL_DIR: &str = "genpanels";
 /* 图片单文件上限。普通文生图只有几 MB；高清放大是 4× 输出，
@@ -652,14 +650,6 @@ fn note_text_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
 fn picture_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
     Ok(dir
         .join(PICTURE_DIR)
-        .join(format!("{}.json", check_item_id(item_id)?)))
-}
-
-/// 场景块里的东西：<画布>/scenes/<块id>.json。一件东西动辄上百个坐标点，
-/// 整份塞进 items.json 会把这个画布的读写和每份快照一起拖慢。
-fn scene_file(dir: &Path, item_id: &str) -> Result<PathBuf, String> {
-    Ok(dir
-        .join(SCENE_DIR)
         .join(format!("{}.json", check_item_id(item_id)?)))
 }
 

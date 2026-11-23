@@ -1,7 +1,6 @@
 /* 从 canvas.js 拆出：context-menu */
 
-import { h3dEntries } from "./h3d-ui.js";
-import { BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CLOSE_X_SVG, PAGE_RATIOS, PRESETS, absolutePathOf, addSceneModelFlow, cancelPlanCalibration, changeProductImage, clientToWorld, collectPictureImageSrcs, copyItems, createFurnitureFlow, current, dropGenRun, dropRegionImage, dropVideoRun, ebookKey, ebookTocCache, editingId, exportPictureImage, exportQuote, exportSceneFlow, fileEditor, filePreviewCache, findItem, flushFileEditor, genTimers, imageCache, importCsvFromQuote, isContainer, isFileEditable, itemBounds, itemEls, modalOpen, newSceneForProduct, noteEditor, noteImageCache, noteTimers, openImageCompare, openMenu, ownedMembers, pickProductModel, pictureEditors, pictureMenuEntries, pictureTimers, placeProductInSceneFlow, placeProductOnPlanFlow, planCalibration, previewKey, promptDialog, refreshFileBlock, refreshPictureChrome, refreshQuotes, renamePageFlow, revealFileBlock, revealTarget, scenePlacementActive, sceneTimers, scheduleItemsSave, select, selectedIds, setConnectorBend, setEditingId, setModalOpen, setNoteEditor, setPageOrderFlow, setPageRatio, setSceneCameraPreset, setScenePlacementMode, showError, showToast, srcInUse, startFileEdit, startNoteEdit, startTextEdit, startPlanCalibration, store, syncConnector, syncItemElement, toggleContainer, toolMenuEntries, updateSelection, videoControlOf } from "../canvas.js";
+import { BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CLOSE_X_SVG, PAGE_RATIOS, PRESETS, absolutePathOf, cancelPlanCalibration, changeProductImage, clientToWorld, collectPictureImageSrcs, copyItems, current, dropGenRun, dropRegionImage, dropVideoRun, ebookKey, ebookTocCache, editingId, exportPictureImage, exportQuote, fileEditor, filePreviewCache, findItem, flushFileEditor, genTimers, imageCache, importCsvFromQuote, isContainer, isFileEditable, itemBounds, itemEls, modalOpen, noteEditor, noteImageCache, noteTimers, openImageCompare, openMenu, ownedMembers, pictureEditors, pictureMenuEntries, pictureTimers, placeProductOnPlanFlow, planCalibration, previewKey, promptDialog, refreshFileBlock, refreshPictureChrome, refreshQuotes, renamePageFlow, revealFileBlock, revealTarget, scheduleItemsSave, select, selectedIds, setConnectorBend, setEditingId, setModalOpen, setNoteEditor, setPageOrderFlow, setPageRatio, showError, showToast, srcInUse, startFileEdit, startNoteEdit, startTextEdit, startPlanCalibration, store, syncConnector, syncItemElement, toggleContainer, toolMenuEntries, updateSelection, videoControlOf } from "../canvas.js";
 
 /* ---------- 右键菜单 ---------- */
 
@@ -89,7 +88,6 @@ export const STACK_LABELS = {
   rect: "矩形",
   ellipse: "圆形",
   picture: "画面",
-  scene: "场景",
   gen: "生图面板",
 };
 
@@ -288,7 +286,6 @@ export function itemMenuEntries(item, x, y, depth = 0) {
     }
     const lockedSave = imageSaveAsEntry(item);
     if (lockedSave) entries.push(lockedSave);
-    entries.push(...h3dEntries(item));
     /* 对比是只读查看，锁着也允许 */
     const compare = compareImagesEntry(item);
     if (compare) entries.push(compare);
@@ -418,17 +415,6 @@ export function itemMenuEntries(item, x, y, depth = 0) {
     });
   } else if (item.type === "product") {
     entries.push({ label: "更换图片…", onClick: () => void changeProductImage(item.id) });
-    entries.push({ label: "设置 3D 模型…", onClick: () => void pickProductModel(item) });
-    const scenes = current ? current.items.filter((one) => one.type === "scene") : [];
-    entries.push({
-      label: "放进 3D 场景",
-      children: scenes.length
-        ? scenes.map((scene) => ({
-            label: `场景 #${scene.seq}`,
-            onClick: () => void placeProductInSceneFlow(item, scene),
-          }))
-        : [{ label: "新建场景并放入", onClick: () => newSceneForProduct(item) }],
-    });
     const plans = current ? current.items.filter((one) => one.type === "plan") : [];
     entries.push({
       label: "放到户型图",
@@ -492,40 +478,6 @@ export function itemMenuEntries(item, x, y, depth = 0) {
       })),
     });
     entries.push({ label: "设为第几页…", onClick: () => setPageOrderFlow(item) });
-  } else if (item.type === "scene") {
-    entries.push({
-      label: scenePlacementActive(item) ? "退出编辑元素" : "编辑元素",
-      onClick: () => setScenePlacementMode(item, !scenePlacementActive(item)),
-    });
-    entries.push({ label: "从模型库添加…", onClick: () => void addSceneModelFlow(item) });
-    entries.push({ label: "新建模型…", onClick: () => void createFurnitureFlow(item) });
-    entries.push({
-      label: "导出为 GLB",
-      onClick: () => void exportSceneFlow(item),
-    });
-    entries.push({
-      label: "重置视角",
-      onClick: () => {
-        item.camera = null;
-        const el = itemEls.get(item.id);
-        if (el) syncItemElement(el, item);
-        scheduleItemsSave();
-      },
-    });
-    entries.push({
-      label: "视角",
-      children: [
-        ["auto", "自动"],
-        ["front", "正面"],
-        ["left", "左角"],
-        ["right", "右角"],
-        ["top", "俯视"],
-      ].map(([value, label]) => ({
-        label,
-        onClick: () => setSceneCameraPreset(item, value),
-      })),
-    });
-    entries.push(borderMenuEntry(item, colorEntry(item, "borderColor")));
   }
   /* 连线不复制：它两头挂着块，粘出去无处可接。
      复制的语义：正文区有文字选区 → 复制纯文字；否则复制整块（面板） */
@@ -551,7 +503,6 @@ export function itemMenuEntries(item, x, y, depth = 0) {
   }
   const saveAs = imageSaveAsEntry(item);
   if (saveAs) entries.push(saveAs);
-  entries.push(...h3dEntries(item));
   if (entries.length) entries.push("-");
   /* 锁定贴着删除放，都在分隔线下面 */
   if (item.type !== "connector") {
@@ -579,11 +530,10 @@ export const PROP_KIND = {
   connector: { name: "连线", hint: "连接两块面板的线，可改线型、箭头和折点。" },
   note: { name: "笔记", hint: "Markdown 笔记卡，双击进入编辑。" },
   picture: { name: "画面（矢量）", hint: "矢量画面：绘制指令、素材和手绘笔画都在这块里。" },
-  scene: { name: "场景（真 3D）", hint: "真 3D 场景：可摆家具、调光与机位，Ctrl 转、Shift 平移。" },
   gen: { name: "生图面板", hint: "提示词 + 开始，出图参数也可以由 agent 设置。" },
   product: { name: "产品卡", hint: "一件家具 / 材料：名称、价格、数量和真实尺寸。" },
   quote: { name: "清单", hint: "汇总画布内所有产品卡的金额，可导 CSV / XLSX。" },
-  plan: { name: "户型图", hint: "两点定标后能量面积、摆家具脚印和 3D 机位。" },
+  plan: { name: "户型图", hint: "两点定标后能量面积、摆家具脚印。" },
   page: { name: "提案页", hint: "提案页框：按页导出客户版 PDF / 网页。" },
   image: { name: "图片", hint: "静态图片，可双击看大图。" },
   audio: { name: "音乐", hint: "音频面板，可播放和调音量。" },
@@ -913,11 +863,6 @@ export function deleteItems(ids) {
         if (!srcInUse(one.src)) void store.deleteCanvasImage(canvasId, one.src, false).catch(() => {});
       }
     }
-    if (item.type === "scene") {
-      clearTimeout(sceneTimers.get(item.id));
-      sceneTimers.delete(item.id);
-      void store.deleteScene(canvasId, item.id).catch(() => {});
-    }
     if (item.type === "gen") {
       clearTimeout(genTimers.get(item.id));
       genTimers.delete(item.id);
@@ -975,6 +920,8 @@ export function deleteItems(ids) {
 
 export function removeItemFromDom(id) {
   const el = itemEls.get(id);
+  /* 删块也一样：先把懒挂的文件正文卸掉（释放 pdf.js 文档），再摘元素 */
+  el?.__unmountBody?.();
   if (el) el.remove();
   itemEls.delete(id);
 }

@@ -1,11 +1,10 @@
 /* canvas-items/core.js —— 从 canvas-items.js 拆出（导出名不变，入口统一 re-export）。 */
 
-import { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, AUDIO_MIN_HEIGHT, AUDIO_MIN_WIDTH, BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CARD_DEFAULT_BORDER_WIDTH, CARD_DEFAULT_RADIUS, DEFAULT_BORDER, DOCX_DEFAULT_HEIGHT, DOCX_DEFAULT_WIDTH, DOCX_MIN_HEIGHT, DOCX_MIN_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, EBOOK_MIN_HEIGHT, EBOOK_MIN_WIDTH, FILE_DEFAULT_HEIGHT, FILE_DEFAULT_WIDTH, FILE_MIN_HEIGHT, FILE_MIN_WIDTH, GEN_CFG_AUTO, GEN_CFG_MAX, GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_IMAGE_DEFAULT, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_MODES, GEN_MODE_DEFAULT, GEN_STEPS_AUTO, GEN_STEPS_MAX, GEN_STRENGTH_DEFAULT, GEN_STRENGTH_MAX, GEN_STRENGTH_MIN, GEN_TEXT_MAX, GEN_VIDEO_DEFAULT_HEIGHT, GEN_VIDEO_DEFAULT_WIDTH, GEN_VIDEO_MIN_HEIGHT, GEN_VIDEO_MIN_WIDTH, GEN_VIDEO_SECONDS_DEFAULT, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PPTX_DEFAULT_HEIGHT, PPTX_DEFAULT_WIDTH, PPTX_MIN_HEIGHT, PPTX_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, SCENE_MIN_HEIGHT, SCENE_MIN_WIDTH, TEXT_DEFAULT_RADIUS, TEXT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, VIDEO_MIN_HEIGHT, VIDEO_MIN_WIDTH, XLSX_DEFAULT_HEIGHT, XLSX_DEFAULT_WIDTH, XLSX_MIN_HEIGHT, XLSX_MIN_WIDTH } from "./constants.js";
+import { AUDIO_DEFAULT_HEIGHT, AUDIO_DEFAULT_WIDTH, AUDIO_MIN_HEIGHT, AUDIO_MIN_WIDTH, BORDER_DEFAULT_WIDTH, BORDER_MAX_WIDTH, CARD_DEFAULT_BORDER_WIDTH, CARD_DEFAULT_RADIUS, DEFAULT_BORDER, DOCX_DEFAULT_HEIGHT, DOCX_DEFAULT_WIDTH, DOCX_MIN_HEIGHT, DOCX_MIN_WIDTH, EBOOK_DEFAULT_HEIGHT, EBOOK_DEFAULT_WIDTH, EBOOK_MIN_HEIGHT, EBOOK_MIN_WIDTH, FILE_DEFAULT_HEIGHT, FILE_DEFAULT_WIDTH, FILE_MIN_HEIGHT, FILE_MIN_WIDTH, GEN_CFG_AUTO, GEN_CFG_MAX, GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_IMAGE_DEFAULT, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_MODES, GEN_MODE_DEFAULT, GEN_STEPS_AUTO, GEN_STEPS_MAX, GEN_STRENGTH_DEFAULT, GEN_STRENGTH_MAX, GEN_STRENGTH_MIN, GEN_TEXT_MAX, GEN_VIDEO_DEFAULT_HEIGHT, GEN_VIDEO_DEFAULT_WIDTH, GEN_VIDEO_MIN_HEIGHT, GEN_VIDEO_MIN_WIDTH, GEN_VIDEO_SECONDS_DEFAULT, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PPTX_DEFAULT_HEIGHT, PPTX_DEFAULT_WIDTH, PPTX_MIN_HEIGHT, PPTX_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, TEXT_DEFAULT_RADIUS, TEXT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, VIDEO_MIN_HEIGHT, VIDEO_MIN_WIDTH, XLSX_DEFAULT_HEIGHT, XLSX_DEFAULT_WIDTH, XLSX_MIN_HEIGHT, XLSX_MIN_WIDTH } from "./constants.js";
 import { snapGenSize } from "./gen-makes.js";
 import { sanitizeInlineHtml } from "../inline-html.js";
 import { normalizeHidden, normalizeLight, normalizePictureCmds, normalizePictureSymbols } from "./picture.js";
-import { normalizePlanAreas, normalizePlanCalibration, normalizePlanCameras, normalizePlanFootprints } from "./plan.js";
-import { normalizeSceneCamera, normalizeSceneParts, normalizeSceneSurfaces } from "./scene-parts.js";
+import { normalizePlanAreas, normalizePlanCalibration, normalizePlanFootprints } from "./plan.js";
 import { CONNECTOR_MAX_POINTS, SIDES, accentStroke, clamp, colorOr, num } from "./util.js";
 
 export function normalizeConnectorPoints(raw) {
@@ -288,46 +287,6 @@ export function normalizeBlock(raw) {
       z: layerOf(raw),
     };
   }
-  if (type === "scene") {
-    const parts = normalizeSceneParts(raw.parts).parts;
-    return {
-      ...base,
-      x: num(raw.x),
-      y: num(raw.y),
-      w: Math.max(SCENE_MIN_WIDTH, num(raw.w, SCENE_DEFAULT_WIDTH)),
-      h: Math.max(SCENE_MIN_HEIGHT, num(raw.h, SCENE_DEFAULT_HEIGHT)),
-      parts,
-      surfaces: normalizeSceneSurfaces(raw.surfaces).surfaces,
-      /* 机位写歪了当「没定过」：让渲染器按内容自己框一个，比拿一堆 NaN 去摆相机好 */
-      camera: normalizeSceneCamera(raw.camera),
-      /* 没挂光就是平光：和画面块同一个约定，坏数据不许把整块判死 */
-      light: normalizeLight(raw.light).light || null,
-      /* 阴影默认开；关掉只影响这一块的渲染，不进 GLB 导出 */
-      shadow: raw.shadow !== false,
-      groundColor: colorOr(raw.groundColor, ""),
-      /* 地面辅助网格：开着时按镜头距离自动细分（主格 + 细线），不进 GLB */
-      grid: raw.grid === true || ["small", "medium", "large"].includes(raw.grid),
-      /* 正交投影：户型/产品那种无透视的轴测视角 */
-      ortho: raw.ortho === true,
-      /* 存下来的机位（最多 3 个）：点一下切过去 */
-      cameras: (Array.isArray(raw.cameras) ? raw.cameras : [])
-        .slice(0, 3)
-        .map((one) => {
-          const cam = normalizeSceneCamera(one?.camera);
-          return cam
-            ? { name: String(one?.name || "").slice(0, 24) || "机位", camera: cam, ortho: one?.ortho === true }
-            : null;
-        })
-        .filter(Boolean),
-      borderColor: typeof raw.borderColor === "string" ? raw.borderColor : DEFAULT_BORDER,
-      borderWidth: Math.min(
-        BORDER_MAX_WIDTH,
-        Math.max(0, Math.round(num(raw.borderWidth, CARD_DEFAULT_BORDER_WIDTH))),
-      ),
-      radius: Math.max(0, Math.round(num(raw.radius, CARD_DEFAULT_RADIUS))),
-      z: layerOf(raw),
-    };
-  }
   if (type === "gen") {
     return {
       ...base,
@@ -407,8 +366,6 @@ export function normalizeBlock(raw) {
       note: typeof raw.note === "string" ? raw.note : "",
       /* 产品图是画布 images/ 里的副本，不是引用态 */
       src: typeof raw.src === "string" ? raw.src : "",
-      /* 下面两样先存着，P2/P3 的 3D 模型和户型脚印会指回来 */
-      model: typeof raw.model === "string" ? raw.model : "",
       dims: {
         w: Math.max(0, num(dims.w, 0)),
         d: Math.max(0, num(dims.d, 0)),
@@ -457,7 +414,6 @@ export function normalizeBlock(raw) {
       imageH: Math.max(0, num(raw.imageH, 0)),
       calibration: normalizePlanCalibration(raw.calibration),
       footprints: normalizePlanFootprints(raw.footprints),
-      cameras: normalizePlanCameras(raw.cameras),
       areas: normalizePlanAreas(raw.areas),
       borderColor: typeof raw.borderColor === "string" ? raw.borderColor : "",
       fillColor: typeof raw.fillColor === "string" ? raw.fillColor : "",
@@ -500,21 +456,6 @@ export function toPersisted(item) {
   if (item.type === "picture") {
     /* 手绘一笔就上百个点，整幅塞进 items.json 会把这个画布的读写一起拖慢 */
     const { cmds, ...rest } = item;
-    return rest;
-  }
-  if (item.type === "scene") {
-    /* 同理：一件东西的底面就有一圈坐标点，那份东西列表只认 scenes/<块id>.json。
-       「编辑」时场景临时铺满画布，盘上仍记用户原来摆的位置尺寸 */
-    const { parts, __editRestore, ...rest } = item;
-    if (__editRestore) {
-      Object.assign(rest, {
-        x: __editRestore.x,
-        y: __editRestore.y,
-        w: __editRestore.w,
-        h: __editRestore.h,
-        z: __editRestore.z,
-      });
-    }
     return rest;
   }
   if (item.type === "gen") {

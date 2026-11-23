@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：tools-camera */
 
-import { MAX_SCALE, MIN_SCALE, SCENE_DEFAULT_HEIGHT, SCENE_DEFAULT_WIDTH, ZOOM_HOLD_DELAY, ZOOM_HOLD_INTERVAL, active, agentRevealBlock, assignTool, clamp, ctrlHeld, current, editingId, findItem, fileTypeMenuItems, insertFileFromPicker, insertGenPanel, insertPoint, insertVideoPanel, itemBounds, itemEls, makeScene, normalizeSceneParts, noteEditor, openMenu, persistScene, placeBlock, positionEdgeLabelEditor, sceneLightOf, sceneSurfacesOf, scheduleCameraSave, scheduleItemsSave, select, setCosmosCamera, setSceneCameraScale, tool, toolboxMarkup, ui, updateSelection } from "../canvas.js";
+import { MAX_SCALE, MIN_SCALE, ZOOM_HOLD_DELAY, ZOOM_HOLD_INTERVAL, active, agentRevealBlock, assignTool, clamp, ctrlHeld, current, editingId, findItem, fileTypeMenuItems, insertFileFromPicker, insertGenPanel, insertPoint, insertVideoPanel, itemBounds, itemEls, noteEditor, openMenu, placeBlock, positionEdgeLabelEditor, scheduleCameraSave, scheduleItemsSave, select, setCosmosCamera, tool, toolboxMarkup, ui, updateSelection } from "../canvas.js";
 import { refreshMinimap } from "../minimap.js";
 import { clampCameraXToPage } from "./page-width-core.js";
 
@@ -60,7 +60,6 @@ export function toolMenuEntries() {
         { label: "图生图", onClick: () => armAndInsertGen("i2i") },
         { label: "参考图编辑", onClick: () => armAndInsertGen("edit") },
         { label: "图片局部重绘", onClick: () => armAndInsertGen("inpaint") },
-        { label: "图片高清放大", onClick: () => armAndInsertGen("upscale") },
       ],
     },
     {
@@ -70,35 +69,7 @@ export function toolMenuEntries() {
         insertVideoPanel();
       },
     },
-    {
-      label: "3D 场景",
-      onClick: () => {
-        dropTool();
-        insertSceneBlock();
-      },
-    },
   ];
-}
-
-/* 用户自己建 3D 场景：起手就是一间能用的客厅（地板/背景墙/侧墙/窗/地毯/边柜 + 白天光） */
-export function insertSceneBlock() {
-  if (!current) return;
-  const at = insertPoint(SCENE_DEFAULT_WIDTH, SCENE_DEFAULT_HEIGHT);
-  const item = makeScene(at.x, at.y);
-  /* 默认就一个空间 + 一块地板：墙/窗要的话自己加（或让 agent 铺房间壳） */
-  const got = normalizeSceneParts([
-    { op: "box", x: 0, y: 0, z: 0, w: 620, d: 520, h: 2, color: "#b98a5e", name: "地板" },
-  ]);
-  item.parts = got.parts;
-  item.surfaces = sceneSurfacesOf([
-    { id: "floor", name: "地面", kind: "floor", x: 0, y: 0, z: 2, w: 608, h: 508 },
-  ]);
-  item.light = sceneLightOf("day");
-  placeBlock(item);
-  persistScene(item);
-  select(item.id);
-  agentRevealBlock(item.id);
-  scheduleItemsSave();
 }
 
 export function armAndInsertGen(mode) {
@@ -280,9 +251,6 @@ export function applyCamera() {
   updateSelection();
   positionEdgeLabelEditor();
   setCosmosCamera(camera);
-  /* 场景块的位图分辨率要跟着相机缩放重算：CSS 的 scale 只是把已有的画布放大，
-     不重画的话放到 4 倍就是一坨马赛克 */
-  setSceneCameraScale(camera.scale);
   scheduleCulling();
   /* 鸟瞰窗跟着相机走：以前只有拖块结束、改画布宽度才重画，平移/缩放/agent 改块之后
      它还停在上一帧的内容上（看着就像「鸟瞰图没显示全」）。这里每帧只排队一次，
@@ -292,9 +260,9 @@ export function applyCamera() {
 
 /* 视口裁剪：只渲染视野附近的面板。上千块的参考画布如果全部挂在 DOM 里，
    拖动和缩放每一帧都要把整棵树重新画一遍，卡得没法操作。
-   只裁普通块；场景/生图/音视频自带运行时，显示/隐藏可能把它们的上下文弄坏，不碰。 */
+   只裁普通块；生图/音视频自带运行时，显示/隐藏可能把它们的上下文弄坏，不碰。 */
 export const CULL_MARGIN_PX = 480;
-export const CULL_TYPES = new Set(["text", "image", "rect", "ellipse", "line", "arrow", "note", "picture", "product", "quote", "plan", "page"]);
+export const CULL_TYPES = new Set(["text", "image", "rect", "ellipse", "line", "arrow", "note", "picture", "product", "quote", "plan", "page", "file"]);
 export let cullingSuspended = 0;
 export let cullFrame = 0;
 
@@ -316,6 +284,13 @@ export function refreshCulling() {
   const top = -y / scale - pad;
   const right = (rect.width - x) / scale + pad;
   const bottom = (rect.height - y) / scale + pad;
+  /* 正文卸载的门槛：离开视野两屏以外才丢，小范围来回平移不会反复重建 */
+  const farX = (rect.width / scale) * 2;
+  const farY = (rect.height / scale) * 2;
+  const staleLeft = left - farX;
+  const staleRight = right + farX;
+  const staleTop = top - farY;
+  const staleBottom = bottom + farY;
   /* 正在编辑的块不能被藏掉，不然输入焦点和光标会一起没 */
   const keep = editingId || noteEditor?.itemId || "";
   const revealed = [];
@@ -337,6 +312,15 @@ export function refreshCulling() {
     }
     const inside =
       item.id === keep || (bx + bw >= left && bx <= right && by + bh >= top && by <= bottom);
+    /* 重的文件正文是懒挂的：进视野这一帧才把 PDF/Office 解析出来（见 dom-files 的
+       mountWhenVisible）。没进过视野的卡片一辈子不解析，几百份文档也不吃内存。 */
+    if (inside) el.__mountBody?.();
+    else if (el.__isMounted?.() && item.id !== keep) {
+      /* 出去两屏以外就把正文丢掉：一页 PDF 位图好几 MB，看过的卡攒起来才是大头 */
+      if (bx + bw < staleLeft || bx > staleRight || by + bh < staleTop || by > staleBottom) {
+        el.__unmountBody?.();
+      }
+    }
     const wasCulled = el.classList.contains("is-culled");
     el.classList.toggle("is-culled", !inside);
     if (wasCulled && inside && item.type === "text") revealed.push(item);
@@ -357,6 +341,10 @@ export function refreshCulling() {
 export async function withAllVisible(fn) {
   cullingSuspended += 1;
   const hidden = ui?.world ? [...ui.world.querySelectorAll(".canvas-item.is-culled")] : [];
+  /* 导出/截图要的是完整画面：懒挂的文件正文先全部建起来，别把骨架拍进去 */
+  if (ui?.world) {
+    for (const el of ui.world.querySelectorAll(".canvas-item")) el.__mountBody?.();
+  }
   for (const el of hidden) el.classList.remove("is-culled");
   try {
     return await fn();

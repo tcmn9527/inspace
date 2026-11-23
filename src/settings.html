@@ -37,7 +37,6 @@
         <button class="settings-nav-item" data-pane="data" type="button">数据文件夹</button>
         <button class="settings-nav-item" data-pane="gen" type="button">图片生成</button>
         <button class="settings-nav-item" data-pane="video" type="button">视频生成</button>
-        <button class="settings-nav-item" data-pane="h3d" type="button">3D 生成</button>
         <button class="settings-nav-item" data-pane="cosmos" type="button" hidden>宇宙主题</button>
         <button class="settings-nav-item" data-pane="mcp" type="button">Agent 连接（MCP）</button>
         <button class="settings-nav-item" data-pane="shortcuts" type="button">快捷键</button>
@@ -75,11 +74,7 @@
         <section class="settings-pane" data-pane="gen" hidden>
           <div class="settings-card" id="settings-gen-card">
             <p class="settings-title">图片生成</p>
-            <div class="settings-gen-engine" id="settings-gen-engine" role="tablist" aria-label="生图引擎">
-              <button class="settings-gen-family" data-engine="local" type="button" role="tab">本地模型</button>
-              <button class="settings-gen-family" data-engine="api" type="button" role="tab">API</button>
-            </div>
-            <div class="settings-gen-api" id="settings-gen-api" hidden>
+            <div class="settings-gen-api" id="settings-gen-api">
               <label class="settings-field">
                 <span>协议</span>
                 <select id="settings-gen-api-protocol">
@@ -108,38 +103,6 @@
               </div>
               <p class="settings-status" id="settings-gen-api-status" hidden></p>
               <p class="settings-error" id="settings-gen-api-error" hidden></p>
-              <p class="settings-hint">
-                Images 协议直接出文生图；带参考图时走 edits。Chat 协议把提示词和图发进对话。
-                走 API 时步数、CFG、种子、负向这些本地参数不生效，高清放大自动走本地放大模型。
-                并行数 = 同时最多跑几张（1–10）；本地模型固定一次一张。
-              </p>
-            </div>
-            <div class="settings-gen-local" id="settings-gen-local">
-              <div class="settings-gen-families" id="settings-gen-families" role="tablist" aria-label="出图模型">
-                <button class="settings-gen-family" data-family="qwen21" type="button" role="tab">Qwen-Image 2.1</button>
-                <button class="settings-gen-family" data-family="h3image" type="button" role="tab">MiniMax-H3-Image</button>
-              </div>
-              <label class="settings-field settings-gen-device">
-                <span>运行设备</span>
-                <select id="settings-gen-device">
-                  <option value="gpu">显卡（快，推荐）</option>
-                  <option value="cpu">内存 / CPU（慢，显存不够时用）</option>
-                </select>
-              </label>
-              <p class="settings-gen-note" id="settings-gen-note" hidden></p>
-              <p class="settings-hint" id="settings-gen-hint" hidden>
-                模型文件都放在下面这个文件夹里，扔进去就能用。点「检测模型」看这台机器装得下哪一档、还缺哪几个文件。
-              </p>
-              <p class="settings-status" id="settings-gen-status"></p>
-              <span class="settings-path" id="settings-gen-dir"></span>
-              <div class="settings-gen-detail" id="settings-gen-detail" hidden></div>
-              <div class="settings-actions">
-                <button class="plain-btn" id="settings-gen-check" type="button">检测模型</button>
-                <button class="plain-btn" id="settings-gen-reveal" type="button">打开模型文件夹</button>
-                <button class="plain-btn" id="settings-gen-dir-pick" type="button">换个目录</button>
-                <button class="plain-btn" id="settings-gen-dir-reset" type="button" hidden>恢复默认位置</button>
-              </div>
-              <p class="settings-error" id="settings-gen-error" hidden></p>
             </div>
           </div>
         </section>
@@ -147,29 +110,9 @@
         <section class="settings-pane" data-pane="video" hidden>
           <div class="settings-card" id="settings-video-card">
             <p class="settings-title">视频生成</p>
-            <div class="settings-gen-engine" id="settings-video-engine" role="tablist" aria-label="视频引擎">
-              <button class="settings-gen-family" data-video-engine="local" type="button" role="tab">本地模型</button>
-              <button class="settings-gen-family" data-video-engine="api" type="button" role="tab">云端 API</button>
-            </div>
-            <div class="settings-video-local" id="settings-video-local">
-              <p class="settings-hint">
-                把 MiniMax-H3 的四个权重文件放进下面这个文件夹，应用会自动识别扩散模型、视频 VAE、音频 VAE、文本编码器；文件名不一样也能认，认不出的会提示改名，缺的会给下载链接。出片 1–20 秒、带声音；每条要几分钟，和本地生图抢显存。
-              </p>
-              <span class="settings-path" id="settings-video-dir"></span>
-              <div class="settings-actions">
-                <button class="plain-btn" id="settings-video-rescan" type="button">重新扫描</button>
-                <button class="plain-btn" id="settings-video-reveal" type="button">打开模型文件夹</button>
-                <button class="plain-btn" id="settings-video-dir-pick" type="button">换个目录</button>
-                <button class="plain-btn" id="settings-video-dir-reset" type="button" hidden>恢复默认位置</button>
-              </div>
-              <p class="settings-status" id="settings-video-local-status"></p>
-              <div class="settings-gen-files" id="settings-video-roles"></div>
-              <div class="settings-model-notes" id="settings-video-notes" hidden></div>
-              <p class="settings-error" id="settings-video-local-error" hidden></p>
-            </div>
             <div class="settings-video-cloud" id="settings-video-cloud">
               <p class="settings-hint">
-                文生视频、图生视频走远端 API。海螺和 OpenAI 协议直接吃画布上的首帧图；万相和百炼可灵只收公网图片 URL，本地首帧暂不支持。任务提交后服务端停不掉，按秒计费。并行数 = 同时最多跑几条（1–10）；本地模型固定一次一条。
+                文生视频、图生视频都走远端 API，没有本地模型这一档。海螺和 OpenAI 协议直接吃画布上的首帧图；万相和百炼可灵只收公网图片 URL，本地首帧暂不支持。任务提交后服务端停不掉，按秒计费。并行数 = 同时最多跑几条（1–10）。
               </p>
               <div class="settings-gen-api settings-video-form">
                 <label class="settings-field">
@@ -202,78 +145,6 @@
                 <p class="settings-status" id="settings-video-status" hidden></p>
                 <p class="settings-error" id="settings-video-error" hidden></p>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="settings-pane" data-pane="h3d" hidden>
-          <div class="settings-card" id="settings-models-card">
-            <p class="settings-title">3D 模型库</p>
-            <p class="settings-hint">
-              把 .glb 文件放进下面这个文件夹，3D 面板里就能调用到。
-              3D 面板不支持用户手动创建，需要时可以让 agent 通过 MCP 调用。
-            </p>
-            <p class="settings-status" id="settings-models-status"></p>
-            <code class="settings-path" id="settings-models-dir"></code>
-            <div class="settings-actions">
-              <button class="plain-btn" id="settings-models-reveal" type="button">打开模型文件夹</button>
-              <button class="plain-btn" id="settings-models-import" type="button">导入模型…</button>
-            </div>
-            <p class="settings-error" id="settings-models-error" hidden></p>
-          </div>
-
-          <div class="settings-card">
-            <p class="settings-title">3D 生成</p>
-            <div class="settings-gen-engine" id="settings-h3d-engine" role="tablist" aria-label="3D 生成引擎">
-              <button class="settings-gen-family" data-engine="local" type="button" role="tab">本地模型</button>
-              <button class="settings-gen-family" data-engine="api" type="button" role="tab">API</button>
-            </div>
-            <div id="settings-h3d-local">
-              <p class="settings-hint">
-                右键图片块「生成 3D 模型」：本机从单张图生成几何模型（Hunyuan3D 标准版），结果进 3D 模型库。需要 CUDA 12 显卡，生成时约两分半，期间可以取消。
-                「生成带纹理的 3D 模型」会连颜色纹理一起做，总共约五分钟。
-              </p>
-              <code class="settings-path" id="settings-h3d-dir"></code>
-              <div class="settings-actions">
-                <button class="plain-btn" id="settings-h3d-check" type="button">检测模型</button>
-                <button class="plain-btn" id="settings-h3d-reveal" type="button">打开所在目录</button>
-              </div>
-              <p class="settings-status" id="settings-h3d-status" hidden></p>
-              <p class="settings-error" id="settings-h3d-error" hidden></p>
-              <p class="settings-error" id="settings-h3d-tex-error" hidden></p>
-              <p class="settings-hint">
-                权重许可：腾讯混元 3D 2.0 社区许可（欧盟、英国、韩国不可用；商业使用需遵守许可条款，月活超过一百万需申请授权）。
-              </p>
-            </div>
-            <div id="settings-h3d-api" hidden>
-              <p class="settings-hint">
-                云端 3D 生成服务的接入配置（协议、接口地址、Key、模型名）。当前版本云端协议还没接上，生成请用本地模型。
-              </p>
-              <label class="settings-field">
-                <span>协议</span>
-                <select id="settings-h3dapi-protocol">
-                  <option value="hunyuan">Hunyuan3D（腾讯混元）</option>
-                  <option value="tripo">Tripo</option>
-                  <option value="fal">Fal</option>
-                </select>
-              </label>
-              <label class="settings-field">
-                <span>接口地址</span>
-                <input id="settings-h3dapi-url" type="text" spellcheck="false" placeholder="https://…" />
-              </label>
-              <label class="settings-field">
-                <span>模型名</span>
-                <input id="settings-h3dapi-model" type="text" spellcheck="false" placeholder="例如 hunyuan3d-2" />
-              </label>
-              <label class="settings-field">
-                <span>API Key</span>
-                <input id="settings-h3dapi-key" type="password" spellcheck="false" placeholder="sk-…" />
-              </label>
-              <label class="settings-field">
-                <span>并行数</span>
-                <input id="settings-h3dapi-parallel" type="number" min="1" max="10" step="1" value="2" />
-              </label>
-              <p class="settings-error" id="settings-h3dapi-error" hidden></p>
             </div>
           </div>
         </section>
@@ -391,29 +262,6 @@
                 <div class="settings-shortcut-row">
                   <span>依次放下画面笔、退出摆放 / 鸟瞰窗焦点、画图工具、选中</span>
                   <span class="settings-keys"><kbd>Esc</kbd></span>
-                </div>
-              </div>
-              <div class="settings-shortcut-group">
-                <p class="settings-shortcut-heading">3D 场景</p>
-                <div class="settings-shortcut-row">
-                  <span>摆放模式下移动家具（右键进入）</span>
-                  <span class="settings-keys"><kbd>左键拖动</kbd></span>
-                </div>
-                <div class="settings-shortcut-row">
-                  <span>退出家具摆放</span>
-                  <span class="settings-keys"><kbd>Esc</kbd></span>
-                </div>
-                <div class="settings-shortcut-row">
-                  <span>旋转视角</span>
-                  <span class="settings-keys"><kbd>Ctrl</kbd><kbd>左键拖动</kbd></span>
-                </div>
-                <div class="settings-shortcut-row">
-                  <span>整体平移视图</span>
-                  <span class="settings-keys"><kbd>Shift</kbd><kbd>左键拖动</kbd></span>
-                </div>
-                <div class="settings-shortcut-row">
-                  <span>推近 / 拉远</span>
-                  <span class="settings-keys"><kbd>滚轮</kbd></span>
                 </div>
               </div>
               <div class="settings-shortcut-group">

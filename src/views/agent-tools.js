@@ -197,88 +197,24 @@ const PICTURE_LIGHT = {
   },
 };
 
-const SCENE_PARTS = {
-  type: "array",
-  description:
-    "场景块里的东西，一件一个对象。坐标是「地上的」不是纸上的：x 左右、y 往画面里去（越大越远）、z 底面离地多高、h 立起来多高，单位仍是块内画面像素。" +
-    "三种写法：{op:\"box\",x,y,z,w,d,h,rotate,color,name}——w 是 x 方向的宽、d 是 y 方向的厚，三个尺寸都得是正数（0 高不是「一片地」，是写错了，整件丢掉并报回第几件）；" +
-    "{op:\"poly\",x,y,z,points,h,rotate,color,name}——points 是底面轮廓 [{x,y},…]（也收 [x,y]），点相对 (x,y)，首尾不用重复写、写了两遍会自己收掉，至少 3 个不重复的点，轮廓里别写 c1/c2（底面只吃折线，要圆弧就多取几点）。" +
-    "这两种都是「轮廓 + h 挤成真棱柱」：L 形、梯形、八角台都能立起来，直角就是直角。" +
-    "{op:\"roof\",x,y,z,h,…} 是屋顶：同一圈底面立到 h 高，顶上一圈往中线收。矩形底面写 w,d 再加 ridge（屋脊多长）——ridge 不写或 = w 是双坡（悬山，脊和房子一样长）、0 < ridge < w 是四阿 / 庑殿（四角都斜下去）、ridge:0 是四角攒尖；多边形底面写 points（八角亭的攒尖就这么来），这种没有脊长可写，硬写会报回。" +
-    "墙和顶是两件东西，别指望一件自带屋顶：墙 {op:\"box\",z:26,h:170} 立到 196，顶就写 {op:\"roof\",z:196,h:130}；出檐不靠参数，让顶的 w,d 各比墙宽出一圈就行（宽 100 的墙给宽 160 的顶，檐口探出去 30）。" +
-    "模型件写 {op:\"model\",x,y,z,src,w,d,h,rotate,scale,name}：src 只写模型库（数据根 library/models）里的 .glb 文件名，w/d/h 是期望的真实尺寸（厘米，按 w 等比缩放；没给 w 就按 h，默认 80cm）。产品卡落场景请用 scene_place_product，别手拼。" +
-    "实体件还能带 tex（场景块所在画布 images/ 里的图片路径）和 texRepeat（每格多少厘米，默认 100）当材质贴图；把产品卡图片套到墙/地上用 scene_apply_material。" +
-    "可选 group（家具组 id）和 surface（附着面 id）：同组零件一起移动，未绑定 surface 的固定。请先 scene_surface_set 定义承载面，再 scene_furniture_bind 绑定并贴面；scene_get 读完整零件和真实包围盒。" +
-    "落点 (x,y) 永远是底面那个中心，rotate 绕它转。" +
-    "影子不用你画也不用来这儿要：块上有 light 就有一盏真的太阳，几何自己把影子落到地上，没光就是平光。",
-  items: { type: "object" },
-};
-
-const SCENE_SURFACE = {
-  type: "object",
-  properties: {
-    id: { type: "string", description: "附着面的唯一 id" },
-    name: { type: "string", description: "显示名称" },
-    kind: { type: "string", enum: ["floor", "wall"] },
-    x: { type: "number" }, y: { type: "number" }, z: { type: "number" },
-    w: { type: "number", description: "平面宽度（厘米）" },
-    h: { type: "number", description: "地面深度 / 墙面高度（厘米）" },
-    rotate: { type: "number", description: "平面水平宽轴相对场景 x 轴的角度；墙面 0 朝 -y，90 朝 +x" },
-  },
-  required: ["id", "kind", "w", "h"],
-};
-const SCENE_SURFACES = {
-  type: "array", items: SCENE_SURFACE,
-  description: "家具附着面。地面 x/y 是中心、z 是顶面；墙 x/y 是宽度中点、z 是底边。家具只能在整个组仍留在面内的范围移动。",
-};
-
-const SCENE_CAMERA = {
-  type: ["object", "null"],
-  description:
-    "这块的机位；写成 null 或不写就是「按内容自动框一个」。存的是绕注视点转的球坐标，改窗口大小、挪块都不会让机位漂",
-  properties: {
-    azim: { type: "number", description: "相机绕到哪个方位：0 从正北那边看过来、顺时针数、180 是从南往北看（默认）" },
-    elev: { type: "number", description: "相机抬高 2~88 度，默认 30：越大越俯视" },
-    dist: { type: "number", description: "相机离注视点多远（块内画面像素）。不给就自动框住全部内容" },
-    tx: { type: "number", description: "注视点的地面 x，默认是所有内容的中心" },
-    ty: { type: "number", description: "注视点的地面 y（越远越大），默认同上" },
-    tz: { type: "number", description: "注视点离地多高，默认取内容高度的一档" },
-    fov: { type: "number", description: "竖直视角 8~100 度，默认 45。越小越像长焦（透视压平、远处显得大）" },
-  },
-};
-
 /* 生图面板那七个字段：面板上只摆提示词框和一颗按钮，尺寸/步数/贴合度/种子没有控件，
-   只有这条通道能改——和画面块的光、场景块的机位是同一个约定。
+   只有这条通道能改——和画面块的光是同一个约定。
    建块和改块共用一份，漏一个不报错、那块会安静地建成默认值。 */
 const GEN_PROPS = {
   prompt: { type: "string", description: "生图面板的提示词（这一张要什么）" },
-  negative: { type: "string", description: "生图面板的负向提示词（不想要什么）" },
-  imageW: { type: "number", description: "出图宽，256~2048（H3 到 4096），自己贴到 32 的倍数，默认 1024" },
+  imageW: { type: "number", description: "出图宽，256~4096，自己贴到 32 的倍数，默认 1024" },
   imageH: { type: "number", description: "出图高，同上" },
-  steps: { type: "number", description: "步数 1~100；0 或省略 = 按模型默认（Qwen 30 / H3 6）" },
-  cfg: { type: "number", description: "提示词贴合度 1~20；0 或省略 = 按模型默认（Qwen 6 / H3 1）" },
-  seed: { type: "number", description: "种子；-1 每张换一个，给正数才能复现同一张" },
-  model: {
-    type: "string",
-    enum: ["", "qwen21", "h3image"],
-    description:
-      "用哪一族出图：qwen21=Qwen-Image 2.1（30 步，快，日常），h3image=MiniMax-H3-Image（6 步，质感更强、1MP 约 5 秒）；空串跟随设置里的当前模型。点名会顺带把当前模型切过去",
-  },
   mode: {
     type: "string",
-    enum: ["auto", "t2i", "i2i", "edit", "upscale"],
+    enum: ["auto", "t2i", "i2i", "edit", "inpaint"],
     description:
       "出图那一档。auto（默认）看连线自己定：没接图=文生图，接一张=图生图，接多张=参考图编辑。" +
       "只有「一张参考图而不是底图」这种要明写 edit（画风锚点就是这种）；一张也不接却想文生图，明写 t2i 盖掉连线。" +
-      "upscale 是纯 ESRGAN 高清放大，不吃推断：连一张图、出不带提示词的 4× 那张。",
+      "inpaint 是局部重绘：连一张底图、再带 mask，白的地方按 prompt 重画。",
   },
-  strength: { type: "number", description: "图生图改多少，0~1，默认 0.75：小=贴着原图改，大=只留个大概" },
 };
 
 const GEN_KEYS = Object.keys(GEN_PROPS);
-
-/* 换档只认这两个槽位；pace 是每张工具都带的装饰参数，不能当档位传下去 */
-const GEN_MODEL_KEYS = ["dit", "encoder"];
 
 /* waitSeconds：这条命令最长可能占住总线多久，只给 Rust 那头的等待上限用，
    注册时会被摘掉，不进 tools/list。没写的走默认 120 秒。 */
@@ -382,7 +318,7 @@ const TOOL_DEFS = [
     pageWidth: { type: "number", description: "固定宽度（200–10000），不传或 null 表示无限画布" },
   }),
   def("space_scene", "看当前画布里所有块的摘要：id、类型、位置尺寸、层级、各类型的关键字段。做任何块操作前先调这个拿 id。", {
-    type: { type: "string", description: "只看某一类块（text/rect/ellipse/line/arrow/note/picture/scene/file/image/audio/video/ebook/connector），不传就全部" },
+    type: { type: "string", description: "只看某一类块（text/rect/ellipse/line/arrow/note/picture/file/image/audio/video/ebook/connector），不传就全部" },
   }),
   def(
     "space_snapshot",
@@ -510,7 +446,7 @@ const TOOL_DEFS = [
   ),
   def(
     "ui_wheel",
-    "调试用：向视口某个点派发一次滚轮（不模拟鼠标），验证块内滚动或 3D 场景推拉。",
+    "调试用：向视口某个点派发一次滚轮（不模拟鼠标），验证块内滚动或缩放映像。",
     {
       x: { type: "number", description: "客户端 x" },
       y: { type: "number", description: "客户端 y" },
@@ -616,10 +552,10 @@ const TOOL_DEFS = [
   ),
   def("block_get", "看单个块的摘要。", { id: ID }, ["id"]),
   def("block_create", "在画布里新建一块。坐标不给就落在视野中央、连续创建自动错开。", {
-    type: { type: "string", description: "text/rect/ellipse/line/arrow/note/picture/scene/gen/genvideo/product/quote/plan/page/image/audio/video/file/ebook/connector" },
+    type: { type: "string", description: "text/rect/ellipse/line/arrow/note/picture/gen/genvideo/product/quote/plan/page/image/audio/video/file/ebook/connector" },
     x: X, y: Y, w: W, h: H,
     seconds: { type: "number", description: "视频面板：时长（秒，1~60），默认 6" },
-    width: { type: "number", description: "视频面板：出片宽（64~4096，偶数），本地引擎还会对齐到 32" },
+    width: { type: "number", description: "视频面板：出片宽（64~4096，偶数）" },
     height: { type: "number", description: "视频面板：出片高，同宽" },
     text: { type: "string", description: "文字块的正文" },
     markdown: { type: "string", description: "笔记块的 Markdown 正文" },
@@ -634,7 +570,7 @@ const TOOL_DEFS = [
     model: { type: "string", description: "产品卡：本机 GLB 模型路径（P2 用）" },
     dims: {
       type: "object",
-      description: "产品卡：真实尺寸（毫米，宽×深×高），给户型脚印和 3D 用",
+      description: "产品卡：真实尺寸（毫米，宽×深×高），给户型脚印用",
       properties: { w: { type: "number" }, d: { type: "number" }, h: { type: "number" } },
     },
     internal: { type: "boolean", description: "客户版隐藏，默认 true；设为 false 才包含在客户版导出中（提案页也需设为 false）" },
@@ -670,10 +606,6 @@ const TOOL_DEFS = [
     cmds: PICTURE_CMDS,
     symbols: PICTURE_SYMBOLS,
     light: PICTURE_LIGHT,
-    parts: SCENE_PARTS,
-    surfaces: SCENE_SURFACES,
-    camera: SCENE_CAMERA,
-    groundColor: { type: "string", description: "场景块的地面颜色，如 #9a917d；空串用默认那档灰" },
     ...GEN_PROPS,
     x2: { type: "number", description: "线段终点的世界 x" },
     y2: { type: "number", description: "线段终点的世界 y" },
@@ -751,10 +683,6 @@ const TOOL_DEFS = [
     to: { type: "string", description: "连线改终点块" },
     fromSide: { type: "string", enum: ["auto", "top", "right", "bottom", "left"] },
     paperColor: { type: "string", description: "画面块的画纸底色，如 #f5efdf；空串是透明" },
-    parts: SCENE_PARTS,
-    surfaces: SCENE_SURFACES,
-    camera: SCENE_CAMERA,
-    groundColor: { type: "string", description: "场景块的地面颜色，如 #9a917d；空串用默认那档灰" },
     hidden: {
       type: "array",
       items: { type: "string" },
@@ -841,87 +769,6 @@ const TOOL_DEFS = [
     id: ID,
     maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
   }, ["id"]),
-  def("scene_screenshot", "看一块场景现在渲染成什么样，返回一张 PNG。这就是那块 3D 视口本身：里面是相机拍出来的，不是指令清单，所以摆歪了、影子不对、东西跑出框，都在这儿看得见。改完 parts / camera / light 就调它看一眼再决定下一步。", {
-    id: ID,
-    maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
-  }, ["id"]),
-  def("scene_get", "读场景完整 parts（含序号、家具组、附着面）、surfaces 和真实几何/屏幕位置；GLB 未加载时 rendering.parts[].loaded=false，加载后才能绑定或移动。", { id: ID }, ["id"]),
-  def("scene_surface_set", "新建或更新一个明确的地面/墙面附着面。已有家具绑定的面不能改变几何，需先解除绑定；不会靠名字或画面自动猜面。", {
-    id: ID, surface: SCENE_SURFACE,
-  }, ["id", "surface"]),
-  def("scene_furniture_bind", "把若干零件绑定成一件家具并贴到指定附着面（超出边界会夹回；比面还大则报错）。桌面和桌腿要一起绑定，未绑定物体固定。surface 空串解除。", {
-    id: ID,
-    parts: { type: "array", items: { type: "integer", minimum: 0 }, minItems: 1, description: "scene_get 返回的零件序号" },
-    surface: { type: "string", description: "附着面 id；空串解除绑定" },
-    group: { type: "string", description: "家具组 id，省略自动生成" },
-  }, ["id", "parts", "surface"]),
-  def("scene_furniture_move", "沿附着面移动整件家具，和鼠标摆放共用约束。du 沿宽轴，dv 地面沿深轴/墙面向上（厘米）；整组不会脱离承载面或越出其边界，返回实际落点及 clamped。", {
-    id: ID, part: { type: "integer", minimum: 0, description: "家具任一零件序号" },
-    du: { type: "number" }, dv: { type: "number" },
-  }, ["id", "part"]),
-  def("scene_placement_mode", "进入/退出元素编辑模式：进入后普通左键点选/拖动场景里的家具和构件，Ctrl 旋转、Shift 平移视图不变。右键也可切换，Esc 退出；未绑定的墙体等固定结构不动。", {
-    id: ID, enabled: { type: "boolean" },
-  }, ["id", "enabled"]),
-  def("scene_room_shell", "给一块场景铺房间壳：客厅 / 主卧 / 餐厅三种，含地板、背景墙、侧墙、窗、地毯和边柜。单位是厘米（客厅 6.2×5.2m、墙高 2.8m）。会替换场景里现有的 parts，然后按白天光、自动机位重排；摆好壳再用 scene_place_product 把产品卡里的 GLB 家具放进去。", {
-    id: ID,
-    preset: { type: "string", enum: ["living", "bedroom", "dining"], description: "房间类型，默认 living" },
-    wallColor: { type: "string", description: "墙面颜色，如 #ece7de" },
-    floorColor: { type: "string", description: "地板颜色，如 #b98a5e" },
-  }, ["id"]),
-  def("scene_light_preset", "给场景换一套现成的光：day（白天）、warm（傍晚暖光）、night（夜间暖灯）、off（平光）。", {
-    id: ID,
-    preset: { type: "string", enum: ["day", "warm", "night", "off"] },
-  }, ["id", "preset"]),
-  def("scene_camera_preset", "把场景机位摆到现成的角度：front（正面）、left（左角）、right（右角）、top（俯视）、auto（按内容自动框）。", {
-    id: ID,
-    preset: { type: "string", enum: ["front", "left", "right", "top", "auto"] },
-  }, ["id", "preset"]),
-  def("scene_place_product", "把一张产品卡上的 GLB 模型放进场景：按卡上的真实尺寸 dims（毫米）等比缩放，落点 x/y 是场景地面坐标（厘米），rotate 是绕落点转的角度；不给 x/y 就放在地面中心。产品卡的 model 必须是模型库里已有的 .glb。返回场景摘要和 partIndex。", {
-    scene: ID,
-    product: ID,
-    x: X,
-    y: Y,
-    surface: { type: "string", description: "地面附着面 id；有多个地面时必填" },
-    rotate: { type: "number", description: "绕落点转的角度，0~360" },
-  }, ["scene", "product"]),
-  def("scene_apply_material", "把一张产品卡的图片当材质贴到场景的某个实体面上：target 给件名（地板 / 背景墙 / 侧墙 / 边柜 / 地毯）或 parts 序号，repeat 是每格多少厘米（默认 100）。clear:true 去掉贴图回到纯色。模型件不能贴。", {
-    scene: ID,
-    product: ID,
-    target: { type: ["string", "number"], description: "件名或 parts 序号（从 0 开始）" },
-    repeat: { type: "number", description: "每格多少厘米，默认 100" },
-    clear: { type: "boolean", description: "true 就去掉这个面的贴图" },
-  }, ["scene"]),
-  def("scene_add_model", "把模型库里的一份 .glb 放进 3D 场景：给场景块 id 和模型文件名（来自模型库）。没地面会自动补一块，放进去就选中、可以直接拖动摆位。返回 {index, name}。", {
-    scene: ID,
-    name: { type: "string", description: "模型库里的文件名，如 SheenChair.glb" },
-  }, ["scene", "name"]),
-  def("scene_create_furniture", "参数化生成一件模型放进 3D 场景：柜子 / 桌子 / 方块 / 圆柱 / 球体 / 圆锥，尺寸单位厘米。save=true 时同时导出 GLB 存进模型库。返回 {start, count, saved}（场景里零件的起点序号/数量/入库文件名）。", {
-    scene: ID,
-    kind: { type: "string", enum: ["cabinet", "table", "box", "cylinder", "sphere", "cone", "torus", "capsule"], description: "柜子/桌子/方块/圆柱/球体/圆锥/圆环/胶囊，默认 cabinet" },
-    w: { type: "number", description: "宽 cm（40–320），默认柜 160 / 桌 140" },
-    d: { type: "number", description: "深 cm（20–120），默认柜 45 / 桌 70" },
-    h: { type: "number", description: "高 cm（20–240），默认柜 80 / 桌 75" },
-    color: { type: "string", description: "颜色值，如 #b98a5e；默认原木色" },
-    doors: { type: "number", description: "柜门扇数 0–4，默认 2（仅柜子）" },
-    leg: { type: "number", description: "柜腿高度 cm 0/10/15，默认 10（仅柜子）" },
-    save: { type: "boolean", description: "true 就同时导出 GLB 存进模型库" },
-  }, ["scene"]),
-  def("model_generate", "用几何配方现建一个 GLB 模型（three.js 构几何、GLTFExporter 导出）。parts 是零件数组：支持 box / poly / roof / solid（圆柱、球、圆锥、圆环、胶囊）和 mesh（任意三角网格：positions 扁平 [x,y,z,...]，y 向上、原点即落点，可带 indices）。不传 out 就存进模型库并返回文件名；给 scene（场景块 id）会顺手摆进场景。足球这种多面体就用 mesh：算好顶点和三角面传进来。返回 {name, placed} 或 {name, path}。", {
-    name: { type: "string", description: "模型名（进模型库的文件名 / 导出默认名）" },
-    parts: { type: "array", items: { type: "object" }, description: "零件数组；mesh 件写 {op:'mesh', positions:[...], indices:[...], color, name}" },
-    scene: { type: "string", description: "可选：生成后直接摆进这个场景块" },
-    out: { type: "string", description: "可选：导出到绝对路径（.glb），给了就不进模型库" },
-  }, ["name", "parts"], 180),
-  def("h3d_generate", "把画布上的一张图片块（或生图面板）生成 3D 模型：本地 Hunyuan3D 几何阶段，GPU 上约两分半。完成后模型存进模型库（library/models），返回 {name, size, modified}，可用 scene_add_model 放进 3D 场景。给 textured:true 会连纹理一起生成（几何 + 去光照 + 六视图扩散 + 烘焙贴图，总共约五分钟，返回带贴图的 GLB）。", {
-    id: ID,
-    seed: { type: "number", description: "可选：随机种子；同一张图同种子形状一致" },
-    textured: { type: "boolean", description: "true 生成带纹理的模型（更慢）；默认只生成几何" },
-  }, ["id"], 600),
-  def("h3d_cancel", "停止正在跑的 h3d_generate（下个批次就停，已生成的部分丢弃）。"),
-  def("scene_export_glb", "把 3D 场景块导出成一个 GLB：墙地、家具、程序几何合成一个文件（米制、贴图内嵌），可以交给客户或用外部 3D 软件打开。out 给保存的绝对路径（.glb）。返回 {path, block}。", {
-    id: ID,
-    out: { type: "string", description: "保存到的绝对路径（.glb）" },
-  }, ["id", "out"], 120),
   def("plan_calibrate", "给户型块定标：x1/y1/x2/y2 是图片上两个点的相对位置（0~1，左上角是 0,0），mm 是这两点的真实长度（毫米）。定标后家具脚印、面积和机位才有真实比例。可以先 space_snapshot 看户型图再估点。", {
     id: ID,
     x1: { type: "number", description: "第一点的横向比例 0~1" },
@@ -937,14 +784,6 @@ const TOOL_DEFS = [
     y: Y,
     rotate: { type: "number", description: "脚印旋转角度，0~360" },
   }, ["plan", "product"]),
-  def("plan_place_camera", "在户型图上放一个 3D 机位标记：链接一个场景块，preset 是 front / left / right / top / auto；用户点这个标记时会把该场景切到这个机位。x/y 是户型图毫米坐标（标记位置），rotate 是朝向。", {
-    plan: ID,
-    scene: ID,
-    x: X,
-    y: Y,
-    rotate: { type: "number", description: "标记朝向，0~360" },
-    preset: { type: "string", enum: ["front", "left", "right", "top", "auto"], description: "点击时场景切到哪个机位，默认 front" },
-  }, ["plan", "scene"]),
   def("plan_area", "在户型图上量一块面积：points 是毫米坐标 [{x,y},…]（至少 3 个点，按顺序围一圈），返回 squareMeters。", {
     plan: ID,
     points: { type: "array", items: { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"] } },
@@ -958,15 +797,10 @@ const TOOL_DEFS = [
     id: ID,
     maxSide: { type: "number", description: "长边像素，默认 1400，最大 4096" },
   }, ["id"]),
-  def("proposal_template", "一键搭一套软装提案骨架：7 页（封面 / 客户需求 / 风格板 / 客厅 / 主卧 / 餐厅 / 材料与报价），客厅、主卧、餐厅三页里已经铺好房间壳场景，最后页带清单块。只建占位文字，不出图；建完再往里填参考图、产品卡和户型。", {
-    title: { type: "string", description: "提案标题，默认「软装提案」" },
-    x: X,
-    y: Y,
-  }),
   def("page_duplicate", "复制一张提案页和页里的内容，新页排在原页右边（媒体各拷一份独立副本），用来快速做风格变体。连线不复制。", {
     id: ID,
   }, ["id"]),
-  def("client_web_export", "把客户版网页导出到指定文件夹：在 dir 下新开一个 name 子文件夹，写 index.html、每页一张 PNG 和一个可转 3D 的查看器。模型和材质图都内嵌，客户双击 index.html 就能看；内部块、页名、页框描边都不进成品。dir 必须已经存在。", {
+  def("client_web_export", "把客户版网页导出到指定文件夹：在 dir 下新开一个 name 子文件夹，写 index.html 和每页一张 PNG，客户双击 index.html 就能看；内部块、页名、页框描边都不进成品。dir 必须已经存在。", {
     dir: { type: "string", description: "目标文件夹的绝对路径（必须已存在）" },
     name: { type: "string", description: "子文件夹名，默认「画布名 客户版 时间」" },
   }, ["dir"]),
@@ -974,10 +808,6 @@ const TOOL_DEFS = [
     dir: { type: "string", description: "目标文件夹的绝对路径（必须已存在）" },
     name: { type: "string", description: "PDF 文件名（不带扩展名），默认「画布名 客户版」" },
   }, ["dir"]),
-  def("model_list", "列出 3D 模型库（数据根 library/models）里的 .glb，返回 {models:[{name,size,modified}]}。产品卡的 model 字段就填这里的 name。"),
-  def("model_import", "把一份本机 .glb 收进模型库（贴图要内嵌）；path 不给就弹文件框。返回导入后的 {name,size}。", {
-    path: { type: "string", description: "本机 .glb 的绝对路径；不给就开文件框" },
-  }),
   def(
     "picture_export",
     "把一块画面落成一张独立的图片块：只渲染这一块、存成 PNG 进画布 images/，摆在原块右边。之后它就是普通图片，能拖、能双击看大图、也能单独导出。",
@@ -994,89 +824,48 @@ const TOOL_DEFS = [
     ...(PICTURE_LIGHT.properties || {}),
     off: { type: "boolean", description: "true 就是关掉这块的光，回到没有光的原样" },
   }, ["id"]),
-  def("gen_status", "问出图引擎现在什么状况：权重进没进内存、哪一块生图面板正占着它、要用的那几个文件在不在盘上、当前用的是哪一档（dit / encoder）、空闲多久自动放掉。顺带把这块画布里每一面生图面板的摘要都列出来（提示词、参数、那一档 mode 和改动幅度 strength、进料 feed={mode,label,count} 说清这次真会走哪档、接了几张输入图、相位、最近那张的相对路径）。provider=local|api 说这一张走本地还是远端 API；apiModel 是 API 模式下的模型名，apiProblem 非空说明 API 配置缺东西、出图会直接报错。走 API 时本地档位和缺件都不用管。"),
-  def("gen_models", "检测出图模型这一整套的现状，一次全给：模型目录（modelsDir，用户在设置窗口定的，可能在数据根之外）+ 目录里可换的两列文件（dit 画图模型、encoder 文本编码器，各带字节数，小的在前）+ fixed 两件跟着模型定死的 + 当前选的档 + missing 缺哪些 + machine 这台机器的数字（显卡名、显存、内存总量与空闲、该盘剩余）+ advice 为什么建议某一档 + needed 建议那一套要放的四个文件（名字、字节数、下载页、在不在盘上，视觉投影标 optional）+ tiers 全部量化档。头一次调用会探显卡，稍慢一两秒。这是引擎级的全局配置，和当前画布无关。"),
-  def("gen_models_set", "换出图档位：dit / encoder 各给一个模型文件夹里的文件名，没给的槽位不动。选了立刻落库并放掉已载入的权重——下一次出图按新档重新载入，头一次会慢一两分钟。正在出图时换不了（先 gen_cancel 或等这张跑完）。文件名必须是 gen_models 扫出来的那一个，且不能跨槽位（拿编码器当 DiT 会报回）。模型目录不由这条工具改：要挪地方是用户在设置窗口「换个目录」。", {
-    dit: { type: "string", description: "画图模型文件名，取自 gen_models 的 dit 列" },
-    encoder: { type: "string", description: "文本编码器文件名，取自 gen_models 的 encoder 列" },
-  }),
-  def("gen_run", "让一块生图面板出一张图。默认这一次调用会等到出完为止（出图约半分钟；头一次跑要先从盘上读权重，那一两分钟也算在里头，所以别把 timeout 压太小）。引擎一次只吃一张：别的面板正在出图会直接报回，先 gen_cancel 或等它完事。图出好自动存进这个画布的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次；固定 seed 才能复现同一张（-1 是每张换一个）。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。mode 给 upscale 是另一条路：纯 ESRGAN 放大，连一张图、不读提示词也不看步数，出来就是 4× 那张（864×1152 那种输入约十秒）。设置里选了 API 引擎时整条路走远端：family/steps/cfg/seed/negative 都不生效，只发提示词、尺寸和参考图；i2i/inpaint 降级成「参考图+提示词」，upscale 自动走本地放大模型（不受 API 开关影响）。", {
+  def("gen_status", "问出图这条路现在什么状况：provider 固定 api（本地引擎已移除），apiModel 是设置里的远端模型名，apiProblem 非空说明接口地址 / 模型名 / Key 还缺东西、出图会直接报错，parallel 是同时最多跑几张，running 是正在跑的块 id。顺带把这块画布里每一面生图面板的摘要都列出来（提示词、尺寸、那一档 mode、进料 feed={mode,label,count} 说清这次真会走哪档、接了几张输入图、相位、最近那张的相对路径）。"),
+  def("gen_run", "让一块生图面板出一张图（走设置里配好的远端接口）。默认这一次调用会等到出完为止，别把 timeout 压太小。并行上限由设置里的并行数决定（1–10）：满了会直接报回，先 gen_cancel 或等一个跑完。图出好自动存进这个画布的 images/，路径写在返回的 src 上；面板上那张不会自己变成图片块，要另摆一块用 gen_place。想改词重出就带着 prompt 再调一次。输入图靠连线：谁用 connector 连到这块，谁就是进料——接一张是图生图，接多张是参考图编辑，一根不接就是文生图。远端只发提示词、尺寸和参考图；i2i/inpaint 降级成「参考图 + 提示词」，inpaint 会尽量把 mask 一起发过去。高清放大（upscale）依赖本地放大模型，这一版已移除，会直接报错。", {
     id: ID,
     prompt: { type: "string", description: "这一张要什么，一句话到一段话" },
-    negative: { type: "string", description: "不想要什么" },
-    imageW: { type: "number", description: "出图宽，256~2048（H3 到 4096），自己贴到 32 的倍数，默认 1024" },
+    imageW: { type: "number", description: "出图宽，256~4096，自己贴到 32 的倍数，默认 1024" },
     imageH: { type: "number", description: "出图高，同上" },
-    steps: { type: "number", description: "步数 1~100；0 或省略 = 按模型默认（Qwen 30 / H3 6）" },
-    cfg: { type: "number", description: "提示词贴合度 1~20；0 或省略 = 按模型默认（Qwen 6 / H3 1）" },
-    seed: { type: "number", description: "种子；-1 每张换一个，给正数才能同一张复现" },
-    model: {
-      type: "string",
-      enum: ["", "qwen21", "h3image"],
-      description:
-        "用哪一族出图：qwen21=Qwen-Image 2.1，h3image=MiniMax-H3-Image（6 步，1MP 约 5 秒、16MP 约 2 分钟，参考图编辑最多 16 张）；空串跟随设置里的当前模型。点名会顺带切过去",
-    },
     mode: {
       type: "string",
-      enum: ["auto", "t2i", "i2i", "edit", "upscale", "inpaint"],
+      enum: ["auto", "t2i", "i2i", "edit", "inpaint"],
       description:
-        "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑。upscale 是纯 ESRGAN 高清放大，不参与推断、要明说：连一张图进来，出不带提示词的 4× 那张。inpaint 是局部重绘：连一张底图、再带 mask，白的地方按 prompt 重画。注意 H3 只支持 t2i / edit / upscale，i2i 和 inpaint 会报回",
+        "出图那一档，写在块上会留着。auto 按连线定：没图=文生图、一张=图生图、多张=参考图编辑。inpaint 是局部重绘：连一张底图、再带 mask，白的地方按 prompt 重画。",
     },
     mask: {
       type: "string",
       description: "局部重绘（mode=inpaint）的遮罩：PNG 的 base64（data: 前缀也吃），白=重绘、黑=保留，尺寸会自动缩到底图",
     },
-    refine: {
-      type: "boolean",
-      description: "高清放大（mode=upscale）时是否在放大后再低强度重绘一遍补细节；要配 prompt 一起用",
-    },
-    strength: { type: "number", description: "图生图改多少 0~1，默认 0.75" },
     wait: { type: "boolean", description: "false 只起一轮就返回（马上拿 phase 判断），默认 true 等到出完" },
     timeout: { type: "number", description: "等多少秒，默认 300，最大 600。到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问" },
   }, ["id"], 630),
-  def(
-    "gen_family",
-    "看/切当前生图模型族。不传 family 只返回现在的设置：族 id、名称、支持的模式、出图边长上限、模型目录、当前档位和缺件。传 qwen21（Qwen-Image 2.1，30 步，日常）或 h3image（MiniMax-H3-Image，6 步，1MP 约 5 秒、16MP 约 2 分钟）就切过去——会放掉已载入的权重，下一次出图按新族重新载入；正在出图时切换会被拒绝。设置里选了 API 引擎时，切族只影响以后切回本地时的配置，不影响 API 出图。",
-    {
-      family: {
-        type: "string",
-        enum: ["qwen21", "h3image"],
-        description: "要切到哪一族；不传只看当前设置",
-      },
-    },
-  ),
-  def("gen_cancel", "掐掉正在出的那一张。id 点名一块（API 并行时各停各的），不给就停当前在跑的第一块。载入权重那几分钟也能停（那边一出来看到取消标志就自己收）。没有图在跑返回 canceled:false。走 API 时网络那头掐不断：界面立刻显示已取消，请求回来那张会作废丢弃。", {
+  def("gen_cancel", "掐掉正在出的那一张。id 点名一块（并行时各停各的），不给就停当前在跑的第一块。没有图在跑返回 canceled:false。网络那头掐不断：界面立刻显示已取消，请求回来那张会作废丢弃。", {
     id: { type: "string", description: "生图面板块 id；不给就停正在跑的那一块" },
   }),
   def("gen_place", "把一块生图面板最近出的那张落成一块独立图片块，落在面板右边。落出去的是复制：面板接着显示它那张、也接着能改词重出，图片块自己带一份文件，删哪一块都不影响另一块。", { id: ID }, ["id"]),
-  def("gen_video", "生成一条视频（文生视频 / 图生视频）。走哪个引擎由设置 → 视频生成里的「本地模型 / 云端 API」决定：本地用本机 sd.cpp 跑 MiniMax-H3（1–20 秒、带音频、每条几分钟），云端用配置好的 API 协议，云端并行条数在设置 → 视频生成里配（1–10），本地一次只跑一条；平台是异步任务，通常 1-5 分钟。firstFrame 给画布块 id（图片块、画面块、已出图的生图面板）或直接给 PNG 的 base64/data URL，给了就是图生视频；DashScope 协议（万相/百炼可灵）只收公网图片 URL，本地首帧会被拒。给了 block（genvideo 面板 id）就按面板走：提示词/秒数/尺寸/首帧优先用面板上的，状态和结果也写回面板，出完可 gen_video_place 落块。返回视频缓存文件的绝对路径（gen/videos/ 下）。等太久到 timeout 返回 timedOut:true，任务还在平台那边跑，用 gen_video_status 接着看。", {
+  def("gen_video", "生成一条视频（文生视频 / 图生视频），走设置里配好的远端 API 协议（没有本地模型这一档）。并行条数在设置 → 视频生成里配（1–10）；平台是异步任务，通常 1-5 分钟。firstFrame 给画布块 id（图片块、画面块、已出图的生图面板）或直接给 PNG 的 base64/data URL，给了就是图生视频；DashScope 协议（万相/百炼可灵）只收公网图片 URL，本地首帧会被拒。给了 block（genvideo 面板 id）就按面板走：提示词/秒数/尺寸/首帧优先用面板上的，状态和结果也写回面板，出完可 gen_video_place 落块。返回视频缓存文件的绝对路径（gen/videos/ 下）。等太久到 timeout 返回 timedOut:true，任务还在平台那边跑，用 gen_video_status 接着看。", {
     prompt: { type: "string", description: "视频要什么：画面、动作、镜头；挂面板时可省略，用面板上的提示词" },
     block: { type: "string", description: "genvideo 面板块 id：给了就按面板的参数和首帧跑，状态/结果写回面板" },
     firstFrame: { type: "string", description: "首帧图：画布块 id，或 PNG 的 base64 / data URL；不给就是文生视频" },
-    seconds: { type: "number", description: "秒数，默认 6；OpenAI 4-12、海螺 6/10、DashScope 3-15、本地最长 20" },
+    seconds: { type: "number", description: "秒数，默认 6；OpenAI 4-12、海螺 6/10、DashScope 3-15" },
     ratio: { type: "string", enum: ["16:9", "9:16", "1:1"], description: "没给宽高时按画幅推默认尺寸" },
-    imageW: { type: "number", description: "出片宽（32 对齐），本地引擎会再对齐一次" },
+    imageW: { type: "number", description: "出片宽（32 对齐）" },
     imageH: { type: "number", description: "出片高" },
     model: { type: "string", description: "覆盖设置里的模型名（可选）" },
     timeout: { type: "number", description: "等多少秒，默认 600，最大 1800" },
   }, ["prompt"]),
-  def("gen_video_status", "问视频任务现在什么状况：busy、当前引擎（local/api）、jobs 数组（每条在跑的任务：块号、状态、等了多久、平台任务号；并行时可能多条）、job 为第一条（兼容旧调用）。"),
-  def("gen_video_cancel", "取消正在等的一条视频任务。id 点名一块（云端 API 可以并行多条，各停各的），不给就停正在跑的第一条。注意：任务提交后平台停不掉，费用照算，这里只是本地不再等。", {
+  def("gen_video_status", "问视频任务现在什么状况：busy、jobs 数组（每条在跑的任务：块号、状态、等了多久、平台任务号；并行时可能多条）、job 为第一条（兼容旧调用）。"),
+  def("gen_video_cancel", "取消正在等的一条视频任务。id 点名一块（并行时各停各的），不给就停正在跑的第一条。注意：任务提交后平台停不掉，费用照算，这里只是本地不再等。", {
     id: { type: "string", description: "genvideo 面板块 id；不给就停正在跑的那一条" },
   }),
-  def("gen_video_local", "看/换本地视频模型的文件夹。四件套（扩散模型、视频 VAE、音频 VAE、文本编码器）放进这个目录后自动扫描识别，文件名不一样也能认。不传 dir 只返回当前识别结果（每个槽位用了哪个文件、缺什么、建议改名、下载链接）；传 dir 就换目录并重新扫描，空串收回默认位置。", {
-    dir: { type: "string", description: "模型目录的绝对路径；空串回到默认位置" },
-  }, [], 30),
-  def("gen_device", "看/换生图计算设备。gpu=显卡(快,推荐)；cpu=全内存(慢,显存不够时用)。注意:H3 本地解码的格纹与设备无关,两种设备都可能有;要无格用 Qwen21 或云端 API。不传 device 只返回当前值。换设备会放掉已载入权重,下一张重新加载。", {
-    device: { type: "string", enum: ["gpu", "cpu"], description: "目标设备;省略只查询" },
-  }),
-  def("gen_degrid", "对画布里已落盘的旧图原地去网格（清掉 H3 解码棋盘），不重出构图。srcs 给 images/ 下的相对路径列表；返回处理了几张。处理完画面需刷新才见新像素。", {
-    id: { type: "string", description: "画布 id" },
-    srcs: { type: "array", items: { type: "string" }, description: "images/ 下相对路径列表" },
-  }, ["id", "srcs"], 120),
-  def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen 图片生成、video 视频生成、h3d 3D 生成、mcp Agent 连接、shortcuts 快捷键。", {
+  def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen 图片生成、video 视频生成、mcp Agent 连接、shortcuts 快捷键。", {
     page: {
       type: "string",
-      enum: ["theme", "data", "gen", "video", "h3d", "mcp", "shortcuts"],
+      enum: ["theme", "data", "gen", "video", "mcp", "shortcuts"],
       description: "要打开的那一页；不给就是主题页",
     },
   }),
@@ -1181,7 +970,6 @@ const BLOCK_FIELDS = [
   "seconds", "width", "height",
   "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
   "cmds", "symbols", "paperColor", "hidden", "light",
-  "parts", "surfaces", "camera", "groundColor", "shadow",
   ...GEN_KEYS,
 ];
 
@@ -1313,41 +1101,6 @@ function cosmosRouteTool(args) {
 
 /* 档位和航线同理：引擎级的全局配置，不为它把用户从当前画布拽走。
    这一个还带机器规格和本机建议档，所以缺文件时能把「该下什么」直接说清楚。 */
-async function genModelsTool() {
-  const models = await invoke("gen_models");
-  const advised = models.tiers.find((tier) => tier.recommended)?.name || models.currentDit;
-  const lacking = models.needed.filter((row) => !row.present && !row.optional);
-  if (lacking.length) {
-    const want = lacking.map((row) => `${row.name}（${row.role}）`).join("、");
-    return {
-      ...models,
-      note:
-        `模型目录 ${models.modelsDir} 里还缺 ${lacking.length} 件：${want}。这台机器的建议档是 ${advised}，` +
-        "文件名、字节数、下载页都在 needed 里，量化档对照表在 tiers 里——把这些报给用户，" +
-        "下载和「换个目录」都是他在设置窗口做的事，你别代劳。",
-    };
-  }
-  if (models.missing.length) {
-    return {
-      ...models,
-      note: `当前档位缺文件：${models.missing.join("、")}；换一档用 gen_models_set，或让用户把文件放回 ${models.modelsDir}`,
-    };
-  }
-  const advice = advised === models.currentDit ? "本机建议档就是当前这档" : `这台机器装得下更大的：建议 ${advised}`;
-  return { ...models, note: `两列（dit / encoder）里挑一档，gen_models_set 换。${advice}` };
-}
-
-async function genModelsSetTool(args) {
-  if (!args.dit && !args.encoder) throw new Error("dit 和 encoder 至少给一个，不然没什么可换");
-  const models = await invoke("gen_models_set", args);
-  return {
-    ...models,
-    note:
-      `已记下：画图模型 ${models.currentDit}、编码器 ${models.currentEncoder}。` +
-      "载入的权重已放掉，下一次出图按新档重新读盘，头一次会慢一两分钟",
-  };
-}
-
 /* 截图不改任何数据，所以不走 pace 那一拍；但要先把画布页切出来，不然取不到 DOM */
 async function snapshot(args) {
   await ensureView("canvas");
@@ -1401,12 +1154,10 @@ async function blockScreenshot(args, type, label) {
     maxSide: args.maxSide || 1200,
   });
   const perPixel = shot.region.w / shot.width;
-  /* 这块「装了多少东西」每种块说法不一样，都得报：出图的这一张、画图的几百条指令、场景的几件东西 */
+  /* 这块「装了多少东西」每种块说法不一样，都得报：出图的这一张、画图的几百条指令 */
   const inside =
     type === "picture"
       ? `${block.cmds} 条指令`
-      : type === "scene"
-        ? `${block.parts} 件东西`
         : block.phase === "loading" || block.phase === "running"
           ? `这一张跑到第 ${block.step} / ${block.steps} 步`
           : block.src
@@ -1426,7 +1177,7 @@ async function blockScreenshot(args, type, label) {
    生图那一头只放看和落块：gen_run 一次只吃一张、一批排三十秒一张没意义，gen_cancel 掐的是唯一那一张，
    都不该藏在批量里。 */
 const BATCH_ALLOWED =
-  /^(block_|connector_|picture_|scene_|gen_(status$|screenshot$|place$)|note_read$|note_write$|file_import$|pdf_goto$|ebook_goto$|camera_)/;
+  /^(block_|connector_|picture_|gen_(status$|screenshot$|place$)|note_read$|note_write$|file_import$|pdf_goto$|ebook_goto$|camera_)/;
 
 /* 一项的结果只留 id 和类型：200 项把完整摘要都塞回去，这个回复会大到没法看 */
 function briefResult(data) {
@@ -1618,13 +1369,13 @@ async function dispatch(name, args) {
     case "block_create":
       return onCanvas(args, () =>
         /* schema 里写了的字段，这里就得挨个接住：漏一个不报错，那块会安静地建成空的
-           （第一版就是这样把 parts / light / camera / groundColor 落掉的——五件东西回来是 0 件） */
+           （第一版就是这样把 cmds / light / paperColor 落掉的——五件东西回来是 0 件） */
         canvasAgent.blockCreate(
           pick(args, [
             "type", "x", "y", "w", "h", "text", "markdown", "name", "path", "mode", "as",
             "fontSize", "align", "vAlign", "radius", "borderWidth", "locked", "container", "color", "textColor", "borderColor", "fillColor",
             "brand", "sku", "spec", "price", "qty", "source", "note", "model", "dims", "internal", "title", "ratio", "order",
-            "paperColor", "cmds", "symbols", "light", "parts", "surfaces", "camera", "groundColor", "shadow",
+            "paperColor", "cmds", "symbols", "light",
             ...GEN_KEYS,
             "seconds", "width", "height",
             "x2", "y2", "shape", "arrow", "label", "bend", "points", "from", "to", "fromSide",
@@ -1680,65 +1431,6 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.pictureExport(args.id));
     case "picture_screenshot":
       return blockScreenshot(args, "picture", "画面块");
-    case "scene_screenshot":
-      return blockScreenshot(args, "scene", "场景块");
-    case "scene_get":
-      return onCanvas(args, () => canvasAgent.sceneGet({ id: args.id }));
-    case "scene_surface_set":
-      return onCanvas(args, () => canvasAgent.sceneSurfaceSet(pick(args, ["id", "surface"])));
-    case "scene_furniture_bind":
-      return onCanvas(args, () => canvasAgent.sceneFurnitureBind(pick(args, ["id", "parts", "surface", "group"])));
-    case "scene_furniture_move":
-      return onCanvas(args, () => canvasAgent.sceneFurnitureMove(pick(args, ["id", "part", "du", "dv"])));
-    case "scene_placement_mode":
-      return onCanvas(args, () => {
-        canvasAgent.blockReveal(args.id);
-        return canvasAgent.scenePlacementMode(pick(args, ["id", "enabled"]));
-      });
-    case "scene_room_shell":
-      return onCanvas(args, () =>
-        canvasAgent.sceneRoomShell(pick(args, ["id", "preset", "wallColor", "floorColor"])),
-      );
-    case "scene_light_preset":
-      return onCanvas(args, () => canvasAgent.sceneLightPreset(pick(args, ["id", "preset"])));
-    case "scene_camera_preset":
-      return onCanvas(args, () => canvasAgent.sceneCameraPreset(pick(args, ["id", "preset"])));
-    case "scene_place_product":
-      return onCanvas(args, () =>
-        canvasAgent.scenePlaceProduct(pick(args, ["scene", "product", "x", "y", "rotate", "surface"])),
-      );
-    case "scene_apply_material":
-      return onCanvas(args, () =>
-        canvasAgent.sceneApplyMaterial(pick(args, ["scene", "product", "target", "repeat", "clear"])),
-      );
-    case "model_generate":
-      return canvasAgent.modelGenerate({
-        name: args.name,
-        parts: args.parts,
-        scene: args.scene || "",
-        out: args.out || "",
-      });
-    case "h3d_generate": {
-      await ensureView("canvas");
-      const canvasId = current?.meta?.id;
-      if (!canvasId) throw new Error("先打开一个画布");
-      const model = await invoke(args.textured ? "h3d_texture" : "h3d_generate", {
-        id: canvasId,
-        itemId: args.id,
-        seed: args.seed,
-      });
-      await beat(args);
-      return model;
-    }
-    case "h3d_cancel":
-      await invoke("h3d_cancel");
-      return { stopped: true };
-    case "scene_export_glb":
-      return onCanvas(args, () => canvasAgent.sceneExportGlb(args.id, args.out));
-    case "scene_add_model":
-      return onCanvas(args, () => canvasAgent.sceneAddModel(args.scene, args.name));
-    case "scene_create_furniture":
-      return onCanvas(args, () => canvasAgent.sceneCreateFurniture(args.scene, pick(args, ["kind", "w", "d", "h", "color", "doors", "leg", "save"])));
     case "plan_calibrate":
       return onCanvas(args, () =>
         canvasAgent.planCalibrate(pick(args, ["id", "x1", "y1", "x2", "y2", "mm"])),
@@ -1746,10 +1438,6 @@ async function dispatch(name, args) {
     case "plan_place_product":
       return onCanvas(args, () =>
         canvasAgent.planPlaceProduct(pick(args, ["plan", "product", "x", "y", "rotate"])),
-      );
-    case "plan_place_camera":
-      return onCanvas(args, () =>
-        canvasAgent.planPlaceCamera(pick(args, ["plan", "scene", "x", "y", "rotate", "preset"])),
       );
     case "plan_area":
       return onCanvas(args, () => canvasAgent.planArea(pick(args, ["plan", "points"])));
@@ -1769,22 +1457,8 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.clientWebExport(args.dir, args.name));
     case "client_pdf_export":
       return onCanvas(args, () => canvasAgent.clientPdfExport(args.dir, args.name));
-    case "proposal_template":
-      return onCanvas(args, () => canvasAgent.proposalTemplate(pick(args, ["title", "x", "y"])));
     case "page_duplicate":
       return onCanvas(args, () => canvasAgent.pageDuplicate({ id: args.id }));
-    case "model_list": {
-      const models = await invoke("model_library_list");
-      return { models };
-    }
-    case "model_import": {
-      const file = await invoke("model_library_import", { path: args.path || null });
-      return file ? { imported: file } : { imported: null };
-    }
-    case "gen_models":
-      return genModelsTool();
-    case "gen_models_set":
-      return genModelsSetTool(pick(args, GEN_MODEL_KEYS));
     case "gen_status":
       return onCanvas(args, () => canvasAgent.genStatus());
     case "gen_run":
@@ -1792,8 +1466,6 @@ async function dispatch(name, args) {
       return onCanvas(args, () =>
         canvasAgent.genRun(args.id, pick(args, [...GEN_KEYS, "wait", "timeout", "refine"]), args.mask || ""),
       );
-    case "gen_family":
-      return canvasAgent.genFamily(args.family);
     case "gen_cancel":
       return onCanvas(args, () => canvasAgent.genCancel(args.id));
     case "gen_place":
@@ -1804,12 +1476,6 @@ async function dispatch(name, args) {
       return onCanvas(args, () => canvasAgent.genVideoStatus());
     case "gen_video_cancel":
       return onCanvas(args, () => canvasAgent.genVideoCancel(args.id));
-    case "gen_video_local":
-      return onCanvas(args, () => canvasAgent.genVideoLocal(args.dir));
-    case "gen_device":
-      return args.device ? canvasAgent.genDeviceSet(args.device) : canvasAgent.genDeviceGet();
-    case "gen_degrid":
-      return canvasAgent.genDegrid(args.id, args.srcs || []);
     case "open_settings":
       return canvasAgent.openSettings(args.page);
     case "export_canvas":

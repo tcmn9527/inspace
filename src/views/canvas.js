@@ -1437,7 +1437,7 @@ export const canvasAgent = {
   pageSnapshot: agentPageSnapshot,
   pageDuplicate: agentPageDuplicate,
   exportCanvas: async (format, options = {}) => {
-    const kinds = ["wechat", "html", "png", "pdf", "toutiao"];
+    const kinds = ["wechat", "html", "png", "pdf", "toutiao", "xiaohongshu"];
     const kind = kinds.includes(format) ? format : "wechat";
     const result = await exporter.exportAs(kind, { quality: options.quality });
     const saved = await store.exportAuto(result.name, result.format, result.data);

@@ -37,6 +37,7 @@
         <button class="settings-nav-item" data-pane="data" type="button">数据文件夹</button>
         <button class="settings-nav-item" data-pane="gen" type="button">图片生成</button>
         <button class="settings-nav-item" data-pane="video" type="button">视频生成</button>
+        <button class="settings-nav-item" data-pane="assistant" type="button">AI 助手</button>
         <button class="settings-nav-item" data-pane="cosmos" type="button" hidden>宇宙主题</button>
         <button class="settings-nav-item" data-pane="mcp" type="button">Agent 连接（MCP）</button>
         <button class="settings-nav-item" data-pane="shortcuts" type="button">快捷键</button>
@@ -144,6 +145,80 @@
                 </div>
                 <p class="settings-status" id="settings-video-status" hidden></p>
                 <p class="settings-error" id="settings-video-error" hidden></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-pane="assistant" hidden>
+          <div class="settings-card" id="settings-assistant-card">
+            <p class="settings-title">AI 助手</p>
+            <div class="settings-assistant-form">
+              <div class="settings-assistant-group">
+                <p class="settings-assistant-group-title">连接</p>
+                <label class="settings-field">
+                  <span>协议</span>
+                  <select id="settings-assistant-protocol">
+                    <option value="openai">OpenAI 兼容（OpenAI / DeepSeek / 通义 / Kimi 等）</option>
+                    <option value="anthropic">Anthropic Messages</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="ollama">Ollama</option>
+                    <option value="custom">自定义 OpenAI 兼容</option>
+                  </select>
+                </label>
+                <label class="settings-field">
+                  <span>接口地址</span>
+                  <input id="settings-assistant-url" type="text" spellcheck="false" placeholder="https://api.openai.com" />
+                </label>
+                <label class="settings-field">
+                  <span>API Key</span>
+                  <input id="settings-assistant-key" type="password" spellcheck="false" placeholder="sk-…（Ollama 可留空）" />
+                </label>
+                <label class="settings-field">
+                  <span>模型</span>
+                  <input id="settings-assistant-model" type="text" list="settings-assistant-models" spellcheck="false" placeholder="读取模型后选择，或手填" />
+                  <datalist id="settings-assistant-models"></datalist>
+                </label>
+                <div class="settings-actions">
+                  <button class="plain-btn" id="settings-assistant-models-btn" type="button">读取模型</button>
+                  <button class="plain-btn" id="settings-assistant-test" type="button">测试连接</button>
+                </div>
+                <p class="settings-status" id="settings-assistant-status" hidden></p>
+                <p class="settings-error" id="settings-assistant-error" hidden></p>
+              </div>
+
+              <div class="settings-assistant-group">
+                <p class="settings-assistant-group-title">生成与执行</p>
+                <div class="settings-assistant-grid">
+                  <label class="settings-field">
+                    <span>温度</span>
+                    <div class="settings-assistant-combo">
+                      <input id="settings-assistant-temperature" type="number" min="0" max="2" step="0.1" value="0.4" />
+                      <em class="settings-assistant-range">0 – 2</em>
+                    </div>
+                  </label>
+                  <label class="settings-field">
+                    <span>最大 token</span>
+                    <div class="settings-assistant-combo">
+                      <input id="settings-assistant-maxtokens" type="number" min="64" max="200000" step="128" value="4096" />
+                      <em class="settings-assistant-range">64 – 200000</em>
+                    </div>
+                  </label>
+                </div>
+                <label class="settings-field is-wide">
+                  <span>系统提示</span>
+                  <textarea id="settings-assistant-system" rows="3" spellcheck="false" placeholder="可选：给画布助手一段固定人设"></textarea>
+                </label>
+                <div class="settings-assistant-checks">
+                  <label class="settings-assistant-check">
+                    <input id="settings-assistant-confirm" type="checkbox" checked />
+                    <span>危险操作前确认</span>
+                  </label>
+                  <label class="settings-assistant-check">
+                    <input id="settings-assistant-vision" type="checkbox" />
+                    <span>模型支持图片输入</span>
+                  </label>
+                </div>
               </div>
             </div>
           </div>

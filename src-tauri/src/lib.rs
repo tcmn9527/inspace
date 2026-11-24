@@ -1,3 +1,4 @@
+mod assistant;
 mod canvas;
 mod capture;
 mod cosmos;
@@ -336,6 +337,13 @@ pub fn run() {
             canvas::canvas_export_auto,
             canvas::canvas_export_reveal,
             capture::webview_capture,
+            assistant::assistant_api_get,
+            assistant::assistant_api_status,
+            assistant::assistant_api_set,
+            assistant::assistant_models,
+            assistant::assistant_model_vision,
+            assistant::assistant_chat,
+            assistant::assistant_cancel,
             mcp::mcp_register_tools,
             mcp::mcp_reply,
             mcp::mcp_info,

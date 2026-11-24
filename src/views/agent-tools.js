@@ -8,6 +8,7 @@
 
 import { GUIDE_TOPICS, guideText } from "./agent-guide.js";
 import { canvasAgent, current } from "./canvas.js";
+import { articleExport, articleGenerate, articleTemplateApply, articleTemplateExtract, articleTemplateList } from "./canvas/article-templates.js";
 import { outsideCount, pageWidth, setPageWidth } from "./canvas/page-width.js";
 import { cosmosFlight, cosmosFlightControl, cosmosRoute, cosmosRouteSet } from "./cosmos.js";
 import { LIGHT_THEMES, THEMES, currentTheme, setTheme } from "./theme.js";
@@ -865,26 +866,67 @@ const TOOL_DEFS = [
   def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen 图片生成、video 视频生成、mcp Agent 连接、shortcuts 快捷键。", {
     page: {
       type: "string",
-      enum: ["theme", "data", "gen", "video", "mcp", "shortcuts"],
+      enum: ["theme", "data", "gen", "video", "assistant", "mcp", "shortcuts"],
       description: "要打开的那一页；不给就是主题页",
     },
   }),
-  def("export_canvas", "把当前画布导出成成品文件，直接写进数据目录的 exports/，不弹保存框。wechat 对版式画布（有大面积画面块打底）出整版长图页，和画布长得一模一样；纯文字画布出文章流 HTML。html 是交互网页，png / pdf 是整张图，toutiao 是 Word 文档。", {
-    format: {
-      type: "string",
-      enum: ["wechat", "html", "png", "pdf", "toutiao"],
-      description: "导出格式，默认 wechat",
+  def(
+    "article_template_list",
+    "列出左侧画布树「文章模板」分组里的模板画布。模板就是普通画布，分组不存在时这条工具会自动建一个。返回每张模板的 id、名字和块数。",
+  ),
+  def(
+    "article_template_extract",
+    "提取模板的配色、布局和元素类型：传 name 就取「文章模板」分组里的那张画布，不传就用当前画布。只返回结构，不落盘。配色取 color / fillColor / borderColor / paperColor，布局取坐标尺寸，元素类型取 item.type，字号取文字块最大和中位。",
+    {
+      name: { type: "string", description: "模板画布的名字或 id；不传给当前画布" },
     },
-    quality: {
-      type: "string",
-      enum: ["normal", "high", "ultra"],
-      description: "png / pdf 的清晰度档位，默认 high",
+  ),
+  def(
+    "article_template_apply",
+    "按「文章模板」分组里的某张模板画布生成一张新画布：先提取它的配色、布局和元素类型，再按原位置和样式落骨架块，文字先放占位符，随后由 AI 填内容。",
+    {
+      name: { type: "string", description: "模板画布的名字或 id" },
+      spaceName: { type: "string", description: "可选：新画布名字，默认「模板名 · 新画布」" },
     },
-  }, []),
-  def("gen_screenshot", "看一块生图面板现在是什么样，返回一张 PNG——取景窗里就是最近那张成品，正在跑的时候是逐步预览的那一帧。比 space_snapshot 近得多，改完提示词、出了图想确认画面对不对，调它。", {
-    id: ID,
-    maxSide: { type: "number", description: "长边像素，默认 1200，最大 4096" },
-  }, ["id"]),
+    ["name"],
+  ),
+  def(
+    "article_generate",
+    "一条调用排好整篇文章：新建画布，按标题 / 小标题 / 正文落文字块，位置、宽度和块高按字数自动算，不会互相压字。给了 template 就沿用那张模板画布的标题与正文字号、颜色，否则用内置版式。返回每个块的 id 和角色，想改哪块再用 block_update。排完用 article_export 导出。",
+    {
+      title: { type: "string", description: "文章标题，同时作为新画布的名字" },
+      template: { type: "string", description: "可选：文章模板画布的名字或 id" },
+      platform: {
+        type: "string",
+        enum: ["wechat", "toutiao", "xiaohongshu"],
+        description: "排版目标平台，决定栏宽（wechat / toutiao 780，xiaohongshu 720），默认 wechat",
+      },
+      sections: {
+        type: "array",
+        description: "正文分段，每项 { heading?, body }：body 必填，heading 是这一段的小标题",
+        items: {
+          type: "object",
+          properties: {
+            heading: { type: "string", description: "小标题，可省略" },
+            body: { type: "string", description: "这一段正文" },
+          },
+          required: ["body"],
+        },
+      },
+    },
+    ["title", "sections"],
+  ),
+  def(
+    "article_export",
+    "按平台导出文章成品到数据根 exports/：wechat 是公众号 HTML，toutiao 是 Word，xiaohongshu 是图文 HTML，另有 html / png / pdf。",
+    {
+      format: {
+        type: "string",
+        enum: ["wechat", "toutiao", "xiaohongshu", "html", "png", "pdf"],
+        description: "导出格式",
+      },
+    },
+  ),
   def("note_read", "读笔记块的 Markdown 正文。", { id: ID }, ["id"]),
   def("note_write", "写笔记块的 Markdown 正文；引用外部 .md 的块会把正文写回原文件。", {
     id: ID,
@@ -1480,6 +1522,23 @@ async function dispatch(name, args) {
       return canvasAgent.openSettings(args.page);
     case "export_canvas":
       return onCanvas(args, () => canvasAgent.exportCanvas(args.format, { quality: args.quality }));
+    case "article_template_list":
+      return articleTemplateList();
+    case "article_template_extract":
+      return onCanvas(args, () => articleTemplateExtract(args.name));
+    case "article_template_apply":
+      return onCanvas(args, () => articleTemplateApply(args.name, { spaceName: args.spaceName }));
+    case "article_generate":
+      return onCanvas(args, () =>
+        articleGenerate({
+          title: args.title,
+          template: args.template,
+          platform: args.platform,
+          sections: args.sections,
+        }),
+      );
+    case "article_export":
+      return onCanvas(args, () => articleExport(args.format || "wechat"));
     case "note_read":
       return onCanvas(args, () => canvasAgent.noteRead(args.id));
     case "note_write":

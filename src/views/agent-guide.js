@@ -905,6 +905,37 @@ client_web_export {dir, name}：在 dir 下新建 <name> 子文件夹，写 inde
 - 导出网页和 PDF 都按客户版规则摘掉页名、描边和内部块，排完先 page_screenshot 看一眼。`,
   },
   {
+    id: "article-template",
+    title: "文章模板与导出",
+    body: `## 文章模板与导出（5 个工具）
+
+### 模板从哪来
+模板就是普通画布，统一放在左侧画布树的「文章模板」分组里；分组不存在时 article_template_list
+会自动建一个。article_template_list 列的是分组里的画布，不是 JSON 文件。
+
+### 看模板结构
+article_template_extract {name?} 读「文章模板」分组里的模板画布并返回配色、布局、元素类型；
+不传 name 就提取当前画布。提取是确定性的：配色取块上的 color / fillColor / borderColor / paperColor，
+布局取坐标尺寸，元素类型取 item.type，字号取文字块的最大和中位；不要让模型凭空猜样式。
+
+### 一条调用排好整篇（优先用这个）
+article_generate {title, sections, template?, platform?} 直接新建画布并落好标题 / 小标题 / 正文：
+- sections 是分段数组，每项 {heading?, body}，body 必填；
+- 宽度按 platform 定（wechat / toutiao 780，xiaohongshu 720），块高按实际文字重算，
+  每落一块读回真实高度再排下一块，不会压字；
+- 给了 template 就继承那张模板画布的标题 / 正文字号和颜色，不给就用内置版式。
+它会返回每个块的 id 和角色；要改哪段就用 block_update 改那个 id，不要重排整页。
+写完正文再 article_export 导出。字数多的长文分几次 sections 传，别一次塞几千字。
+
+### 手工套骨架
+article_template_apply {name, spaceName?} 只落骨架、文字是占位符，适合先看版式再逐块填。
+块上的文字随后用 block_update 填；不要直接改模板画布本身。
+
+### 导出成品
+article_export {format} 支持 wechat / toutiao / xiaohongshu / html / png / pdf，写到数据根 exports/。
+小红书先出窄栏图文 HTML；要成图就再走 png。生成完把 export 返回的文件名和路径原样告诉用户。`,
+  },
+  {
     id: "playback",
     title: "阅读与播放",
     body: `## PDF、电子书、音视频（6 个工具）

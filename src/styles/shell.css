@@ -639,3 +639,147 @@
   font-size: 11px;
   opacity: 0.7;
 }
+
+/* AI 助手这一页字段多，按连接/生成/模板分三组，输入控件铺满整列，
+   不再像原来那样挤在左侧一小条里，右边留一大片空白。 */
+.settings-assistant-form {
+  /* 标签列宽和行内间距只在这里定：单列字段、两列并排字段、按钮缩进都跟着它，
+     免得各写一套数值导致输入框左边界参差不齐 */
+  --as-label: 68px;
+  --as-gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 860px;
+  margin-top: 16px;
+}
+
+.settings-assistant-group {
+  padding: 16px 18px 18px;
+  border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+
+.settings-assistant-group-title {
+  margin: 0 0 10px;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-assistant-form .settings-field {
+  display: grid;
+  grid-template-columns: var(--as-label) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--as-gap);
+  margin-top: 10px;
+}
+
+.settings-assistant-form .settings-field > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-assistant-form .settings-field.is-wide {
+  align-items: start;
+}
+
+.settings-assistant-form .settings-field.is-wide > span {
+  padding-top: 8px;
+}
+
+.settings-assistant-form input[type="text"],
+.settings-assistant-form input[type="password"],
+.settings-assistant-form input[type="number"],
+.settings-assistant-form select,
+.settings-assistant-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.settings-assistant-form textarea {
+  height: auto;
+  min-height: 76px;
+  padding: 8px 9px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.settings-assistant-form input:focus,
+.settings-assistant-form select:focus,
+.settings-assistant-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-assistant-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 两列之间留宽一点：左边字段的区间小字别贴着右边那列的标签 */
+  gap: 0 32px;
+}
+
+/* 数字字段后面跟一句取值范围：光有 min/max 属性，界面上是看不见的，
+   填超了也只会被悄悄夹住，所以把区间写出来，再把夹过的值回填到框里 */
+.settings-assistant-combo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-assistant-combo input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.settings-assistant-range {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* 并排的两列沿用同一套标签宽度，输入框左边界才和上面那些单列字段对得上 */
+.settings-assistant-grid .settings-field {
+  grid-template-columns: var(--as-label) minmax(0, 1fr);
+}
+
+.settings-assistant-form .settings-actions {
+  margin-top: 14px;
+  margin-left: calc(var(--as-label) + var(--as-gap));
+}
+
+.settings-assistant-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin: 14px 0 0 calc(var(--as-label) + var(--as-gap));
+}
+
+.settings-assistant-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-assistant-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}

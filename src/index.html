@@ -40,6 +40,26 @@
             </button>
             <span class="titlebar-path" id="titlebar-path"></span>
             <div class="titlebar-tools">
+              <div class="canvas-zoom">
+                <button class="canvas-zoom-btn" id="canvas-zoom-out" type="button" title="缩小" aria-label="缩小">
+                  −
+                </button>
+                <input
+                  class="canvas-zoom-value"
+                  id="canvas-zoom-value"
+                  type="text"
+                  value="100%"
+                  inputmode="decimal"
+                  spellcheck="false"
+                  autocomplete="off"
+                  title="输入缩放比例后回车生效（25%–400%）· Ctrl+0 重置为 100%"
+                  aria-label="缩放比例"
+                />
+                <button class="canvas-zoom-btn" id="canvas-zoom-in" type="button" title="放大" aria-label="放大">
+                  +
+                </button>
+              </div>
+
               <div class="canvas-tools" id="canvas-tools">
                 <button
                   class="canvas-tool canvas-tool-tools"
@@ -69,26 +89,6 @@
                       <path d="M3.2 11h13.6" stroke="currentColor" stroke-width="1.3" fill="none" />
                     </svg>
                   </span>
-                </button>
-              </div>
-
-              <div class="canvas-zoom">
-                <button class="canvas-zoom-btn" id="canvas-zoom-out" type="button" title="缩小" aria-label="缩小">
-                  −
-                </button>
-                <input
-                  class="canvas-zoom-value"
-                  id="canvas-zoom-value"
-                  type="text"
-                  value="100%"
-                  inputmode="decimal"
-                  spellcheck="false"
-                  autocomplete="off"
-                  title="输入缩放比例后回车生效（25%–400%）· Ctrl+0 重置为 100%"
-                  aria-label="缩放比例"
-                />
-                <button class="canvas-zoom-btn" id="canvas-zoom-in" type="button" title="放大" aria-label="放大">
-                  +
                 </button>
               </div>
 
@@ -214,6 +214,19 @@
             </div>
           </header>
           <div class="canvas-content">
+            <button
+              class="assistant-float-toggle"
+              id="assistant-toggle"
+              type="button"
+              title="打开 AI 助手"
+              aria-label="打开 AI 助手"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+                <rect x="2" y="3.2" width="12" height="9.6" rx="1.8" stroke="currentColor" stroke-width="1.4" fill="none" />
+                <rect class="titlebar-side-bar" x="10.1" y="5" width="3.2" height="6" rx="0.9" fill="currentColor" opacity="0.55" />
+              </svg>
+            </button>
         <!-- 搜索：Ctrl+F 唤出，搜这个画布的块，也搜 Markdown 卡片里的正文 -->
         <div class="canvas-search" id="canvas-search" hidden>
           <div class="canvas-search-field">
@@ -291,6 +304,41 @@
         <p class="canvas-error" id="canvas-error" hidden></p>
           </div>
         </div>
+
+        <aside class="assistant-panel" id="assistant-panel" aria-label="AI 助手" hidden>
+          <header class="assistant-head">
+            <div class="assistant-title">
+              <span>AI 助手</span>
+              <span class="assistant-model" id="assistant-model"></span>
+            </div>
+            <div class="assistant-actions">
+              <button class="assistant-act" id="assistant-new" type="button" title="新会话" aria-label="新会话">＋</button>
+              <button class="assistant-act" id="assistant-close" type="button" title="收起助手" aria-label="收起助手">×</button>
+            </div>
+          </header>
+          <div class="assistant-status" id="assistant-status" hidden></div>
+          <div class="assistant-messages" id="assistant-messages"></div>
+          <form class="assistant-compose" id="assistant-form">
+            <div class="assistant-compose-resize" id="assistant-compose-resize" aria-hidden="true"></div>
+            <div class="assistant-attachments" id="assistant-attachments" hidden></div>
+            <textarea
+              class="assistant-input"
+              id="assistant-input"
+              rows="3"
+              placeholder="说说要做什么，比如：用当前画布做一个公众号文章模板"
+              spellcheck="false"
+              aria-label="给 AI 助手的消息"
+            ></textarea>
+            <div class="assistant-compose-bar">
+              <span class="assistant-context" id="assistant-context"></span>
+              <button class="assistant-attach" id="assistant-attach" type="button" title="添加图片" aria-label="添加图片" hidden>图片</button>
+              <input class="assistant-file" id="assistant-file" type="file" accept="image/*" multiple hidden />
+              <button class="assistant-stop" id="assistant-stop" type="button" hidden>停止</button>
+              <button class="assistant-send" id="assistant-send" type="submit">发送</button>
+            </div>
+          </form>
+          <div class="assistant-resize" id="assistant-resize" aria-hidden="true"></div>
+        </aside>
       </section>
 
     </div>

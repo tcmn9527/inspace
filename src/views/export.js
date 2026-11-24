@@ -1478,6 +1478,17 @@ export function createExporter({
       };
     }
 
+    if (format === "xiaohongshu") {
+      /* 小红书没有官方导出协议，先给一份窄栏图文 HTML：复制到笔记编辑器时
+         图片与文字都能留住，版式也按手机竖屏收窄，不被桌面页宽撑散。 */
+      const html = await buildHtml(box, name);
+      return {
+        format: "html",
+        name: `${name} · 小红书`,
+        data: bytesToBase64(new TextEncoder().encode(html)),
+      };
+    }
+
     if (format === "html") {
       const html = await buildHtml(box, name);
       /* 网页是文本，走 UTF-8 字节再转 base64：直接 btoa 会把中文弄坏 */

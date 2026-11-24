@@ -2,6 +2,7 @@ import { enterCanvas, initCanvas, leaveCanvas } from "./views/canvas.js";
 import { currentTheme, setTheme } from "./views/theme.js";
 import { initCosmos } from "./views/cosmos.js";
 import { initAgent } from "./views/agent.js";
+import { initAssistantPanel } from "./views/assistant-panel.js";
 
 const { getCurrentWindow } = window.__TAURI__.window;
 const { invoke } = window.__TAURI__.core;
@@ -103,6 +104,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initCanvas();
   initCosmos();
   initAgent();
+  initAssistantPanel();
   routeReady = Promise.resolve(enterCanvas()).catch((error) => console.error(`进画布失败：${error}`));
   window.__inspace = { route: "canvas", ready: routeReady };
 });

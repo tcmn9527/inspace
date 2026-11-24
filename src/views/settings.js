@@ -10,6 +10,7 @@
 import { choiceDialog, confirmDialog, progressDialog } from "./dialog.js";
 import { currentTheme } from "./theme.js";
 import { cosmosRoute, cosmosRouteSet } from "./cosmos.js";
+import { assistantApiConfig, assistantApiSet, assistantModelVision, assistantModels } from "./assistant-store.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emitTo } = window.__TAURI__.event;
@@ -102,6 +103,20 @@ export function initSettings(options = {}) {
   ui.videoError = document.querySelector("#settings-video-error");
   ui.videoCloudBox = document.querySelector("#settings-video-cloud");
   ui.videoDir = document.querySelector("#settings-video-dir");
+  ui.assistantProtocol = document.querySelector("#settings-assistant-protocol");
+  ui.assistantUrl = document.querySelector("#settings-assistant-url");
+  ui.assistantKey = document.querySelector("#settings-assistant-key");
+  ui.assistantModel = document.querySelector("#settings-assistant-model");
+  ui.assistantModels = document.querySelector("#settings-assistant-models");
+  ui.assistantTemperature = document.querySelector("#settings-assistant-temperature");
+  ui.assistantMaxTokens = document.querySelector("#settings-assistant-maxtokens");
+  ui.assistantSystem = document.querySelector("#settings-assistant-system");
+  ui.assistantConfirm = document.querySelector("#settings-assistant-confirm");
+  ui.assistantVision = document.querySelector("#settings-assistant-vision");
+  ui.assistantModelsBtn = document.querySelector("#settings-assistant-models-btn");
+  ui.assistantTest = document.querySelector("#settings-assistant-test");
+  ui.assistantStatus = document.querySelector("#settings-assistant-status");
+  ui.assistantError = document.querySelector("#settings-assistant-error");
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -153,6 +168,23 @@ export function initSettings(options = {}) {
   ui.videoModel.addEventListener("change", saveVideoForm);
   ui.videoParallel.addEventListener("change", saveVideoForm);
   ui.videoReload.addEventListener("click", () => reloadVideoModels());
+  ui.assistantUrl.addEventListener("blur", () => void saveAssistantForm());
+  ui.assistantKey.addEventListener("blur", () => void saveAssistantForm());
+  ui.assistantTemperature.addEventListener("change", () => void saveAssistantForm());
+  ui.assistantMaxTokens.addEventListener("change", () => void saveAssistantForm());
+  ui.assistantSystem.addEventListener("blur", () => void saveAssistantForm());
+  ui.assistantConfirm.addEventListener("change", () => void saveAssistantForm());
+  ui.assistantVision.addEventListener("change", () => void saveAssistantForm());
+  ui.assistantModel.addEventListener("change", async () => {
+    ui.assistantVision.checked = await assistantModelVision(ui.assistantModel.value).catch(() => false);
+    await saveAssistantForm();
+  });
+  ui.assistantProtocol.addEventListener("change", async () => {
+    await saveAssistantForm();
+    await reloadAssistantModels();
+  });
+  ui.assistantModelsBtn.addEventListener("click", () => reloadAssistantModels());
+  ui.assistantTest.addEventListener("click", () => testAssistant());
   setupMoveEvents();
   setupCosmosEvents();
   setupRoute();
@@ -183,6 +215,7 @@ export async function refreshSettings() {
   refreshCosmos();
   refreshGen();
   refreshVideo();
+  refreshAssistant();
   paintRouteCard();
   renderRoute();
 }
@@ -1003,3 +1036,154 @@ function showRouteStatus(message) {
   }, 3000);
 }
 
+
+
+/* ---------- AI 助手 ---------- */
+
+let assistantConfig = null;
+
+function showAssistantStatus(message) {
+  ui.assistantStatus.textContent = message || "";
+  ui.assistantStatus.hidden = !message;
+}
+
+function showAssistantError(message) {
+  ui.assistantError.textContent = message;
+  ui.assistantError.hidden = !message;
+}
+
+function fillAssistantForm(config = assistantConfig) {
+  if (!config || !ui.assistantProtocol) return;
+  ui.assistantProtocol.value = ["anthropic", "gemini", "ollama", "custom"].includes(config.protocol)
+    ? config.protocol
+    : "openai";
+  ui.assistantUrl.value = config.baseUrl || "";
+  ui.assistantKey.value = config.apiKey || "";
+  ui.assistantModel.value = config.model || "";
+  ui.assistantTemperature.value = String(config.temperature ?? 0.4);
+  ui.assistantMaxTokens.value = String(config.maxTokens ?? 4096);
+  ui.assistantSystem.value = config.systemPrompt || "";
+  ui.assistantConfirm.checked = config.confirmTools !== false;
+  ui.assistantVision.checked = Boolean(config.supportsImages);
+}
+
+function readAssistantForm() {
+  const protocol = ui.assistantProtocol.value;
+  const baseUrl = ui.assistantUrl.value.trim();
+  let normalized = baseUrl;
+  if (protocol === "openai" || protocol === "custom") {
+    for (const suffix of ["/chat/completions", "/v1/models", "/models"]) {
+      if (normalized.endsWith(suffix)) normalized = normalized.slice(0, -suffix.length);
+    }
+  }
+  return {
+    protocol,
+    baseUrl: normalized.trim().replace(/\/$/, ""),
+    apiKey: ui.assistantKey.value.trim(),
+    model: ui.assistantModel.value.trim(),
+    temperature: Math.min(2, Math.max(0, Number(ui.assistantTemperature.value) || 0)),
+    maxTokens: Math.min(200000, Math.max(64, Math.round(Number(ui.assistantMaxTokens.value) || 4096))),
+    systemPrompt: ui.assistantSystem.value,
+    confirmTools: ui.assistantConfirm.checked,
+    supportsImages: ui.assistantVision.checked,
+  };
+}
+
+/* 温度和最大 token 填超范围会被夹进合法区间，界面上得显示真正会用的那个数，
+   否则框里写着 5、实际发出去的是 2。 */
+function syncAssistantNumbers(form) {
+  const temperature = String(form.temperature);
+  const maxTokens = String(form.maxTokens);
+  if (ui.assistantTemperature.value !== temperature) ui.assistantTemperature.value = temperature;
+  if (ui.assistantMaxTokens.value !== maxTokens) ui.assistantMaxTokens.value = maxTokens;
+}
+
+async function saveAssistantForm() {
+  if (!ui.assistantProtocol) return;
+  const next = readAssistantForm();
+  syncAssistantNumbers(next);
+  if (
+    assistantConfig &&
+    next.protocol === assistantConfig.protocol &&
+    next.baseUrl === assistantConfig.baseUrl &&
+    next.apiKey === assistantConfig.apiKey &&
+    next.model === assistantConfig.model &&
+    next.temperature === assistantConfig.temperature &&
+    next.maxTokens === assistantConfig.maxTokens &&
+    next.systemPrompt === assistantConfig.systemPrompt &&
+    next.confirmTools === assistantConfig.confirmTools &&
+    next.supportsImages === assistantConfig.supportsImages
+  ) {
+    return;
+  }
+  showAssistantError("");
+  try {
+    assistantConfig = await assistantApiSet(next);
+    fillAssistantForm(assistantConfig);
+  } catch (error) {
+    showAssistantError(String(error));
+  }
+}
+
+async function reloadAssistantModels() {
+  if (!ui.assistantModels) return;
+  const form = readAssistantForm();
+  showAssistantError("");
+  if (!form.baseUrl) {
+    ui.assistantModels.replaceChildren();
+    showAssistantStatus("先把接口地址填上");
+    return;
+  }
+  ui.assistantModelsBtn.disabled = true;
+  ui.assistantTest.disabled = true;
+  showAssistantStatus("读取模型…");
+  try {
+    assistantConfig = await assistantApiSet(form);
+    const names = await assistantModels(form);
+    ui.assistantModels.replaceChildren(...names.map((name) => new Option(name, name)));
+    showAssistantStatus(names.length ? `读到 ${names.length} 个模型` : "没读到模型，可以直接手填模型名");
+  } catch (error) {
+    showAssistantError(String(error));
+    showAssistantStatus("");
+  } finally {
+    ui.assistantModelsBtn.disabled = false;
+    ui.assistantTest.disabled = false;
+  }
+}
+
+async function testAssistant() {
+  showAssistantError("");
+  ui.assistantTest.disabled = true;
+  showAssistantStatus("测试连接…");
+  try {
+    assistantConfig = await assistantApiSet(readAssistantForm());
+    const names = await assistantModels(assistantConfig);
+    showAssistantStatus(
+      names.length
+        ? `连接正常，读到 ${names.length} 个模型`
+        : `连接正常（接口没给模型列表）· 当前模型：${assistantConfig.model || "未填"}`,
+    );
+  } catch (error) {
+    showAssistantError(String(error));
+    showAssistantStatus("");
+  } finally {
+    ui.assistantTest.disabled = false;
+  }
+}
+
+async function refreshAssistant() {
+  if (!ui.assistantProtocol) return;
+  showAssistantError("");
+  showAssistantStatus("");
+  try {
+    assistantConfig = await assistantApiConfig();
+    fillAssistantForm(assistantConfig);
+    const names = assistantConfig.baseUrl && assistantConfig.apiKey ? await assistantModels(assistantConfig) : [];
+    ui.assistantModels.replaceChildren(...names.map((name) => new Option(name, name)));
+    ui.assistantVision.checked = await assistantModelVision(assistantConfig.model).catch(
+      () => Boolean(assistantConfig.supportsImages),
+    );
+  } catch (error) {
+    showAssistantError(String(error));
+  }
+}

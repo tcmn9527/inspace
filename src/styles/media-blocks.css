@@ -1800,8 +1800,9 @@
   margin-right: 8px;
 }
 
-/* 组与组之间一条短竖线：工具条 | 缩放 | 导出 | 窗口按钮 */
+/* 组与组之间一条短竖线：缩放 | 工具条 | 导出 | 窗口按钮 */
 .canvas-zoom::before,
+.canvas-tools::before,
 .canvas-actions::before,
 .titlebar-right::before {
   content: "";
@@ -1813,8 +1814,15 @@
 }
 
 .canvas-zoom::before,
+.canvas-tools::before,
 .canvas-actions::before {
   margin-right: 6px;
+}
+
+/* 1.5 倍 DPR 下，工具条左边这条线正好压在半个物理像素上，被抗锯齿抹淡了；
+   往右挪 1/3 px 正好落到整像素边界，看起来就和右边那条一样实。 */
+.canvas-tools::before {
+  transform: translateX(0.334px);
 }
 
 .titlebar-right::before {

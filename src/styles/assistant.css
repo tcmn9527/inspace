@@ -1,0 +1,378 @@
+/* 右侧 AI 助手：和左侧画布栏一样是 flex 里的一列，画布会跟着变窄。
+   不用 fixed/absolute：舞台尺寸变化走 canvas.js 的 ResizeObserver，相机按差值补一半。 */
+
+.assistant-panel {
+  position: relative;
+  flex: 0 0 auto;
+  width: 420px;
+  min-width: 320px;
+  max-width: 780px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid color-mix(in srgb, var(--line) 25%, transparent);
+  background: var(--surface);
+  color: var(--fg);
+  z-index: 7;
+}
+
+.assistant-panel[hidden] {
+  display: none;
+}
+
+.assistant-float-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 38%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+.assistant-float-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.assistant-float-toggle[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent);
+}
+
+.assistant-float-toggle[aria-expanded="true"] .titlebar-side-bar {
+  opacity: 1;
+}
+
+.assistant-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 20%, transparent);
+}
+
+.assistant-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.assistant-model {
+  overflow: hidden;
+  max-width: 190px;
+  color: var(--muted, #8a8378);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.assistant-act {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.assistant-act:hover {
+  background: color-mix(in srgb, var(--line) 18%, transparent);
+}
+
+.assistant-status {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 16%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.assistant-status[hidden] {
+  display: none;
+}
+
+.assistant-status.is-error {
+  background: color-mix(in srgb, var(--danger, #c0392b) 10%, transparent);
+  color: var(--danger, #c0392b);
+}
+
+.assistant-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 12px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.assistant-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.assistant-messages::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+.assistant-empty {
+  margin: auto 0;
+  color: var(--muted, #8a8378);
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.assistant-msg {
+  max-width: 100%;
+  padding: 9px 11px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.assistant-msg.user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-bottom-right-radius: 3px;
+}
+
+.assistant-msg.assistant {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--line) 12%, transparent);
+  border-bottom-left-radius: 3px;
+}
+
+/* 流式输出时在末尾吊一个方块，让人看出话还没说完 */
+.assistant-msg.is-streaming::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: currentColor;
+  opacity: 0.45;
+  animation: assistant-caret 1s steps(1, end) infinite;
+}
+
+@keyframes assistant-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.assistant-tool {
+  align-self: flex-start;
+  width: 100%;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  padding: 4px 0 4px 9px;
+  color: var(--muted, #8a8378);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.assistant-tool.is-error {
+  border-left-color: var(--danger, #c0392b);
+  color: var(--danger, #c0392b);
+}
+
+.assistant-compose {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 10px 12px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 20%, transparent);
+}
+
+.assistant-compose-resize {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 2;
+}
+
+.assistant-compose-resize:hover,
+.assistant-compose.is-resizing .assistant-compose-resize {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.assistant-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.assistant-attachments[hidden] {
+  display: none;
+}
+
+.assistant-attachment {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.assistant-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.assistant-attachment-remove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg) 78%, transparent);
+  color: var(--bg);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.assistant-attach {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 38%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.assistant-attach:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.assistant-attach[hidden] {
+  display: none;
+}
+
+.assistant-compose.is-dragover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.assistant-input {
+  display: block;
+  width: 100%;
+  resize: none;
+  min-height: 58px;
+  max-height: 420px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.assistant-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.assistant-compose-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.assistant-context {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--muted, #8a8378);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-send,
+.assistant-stop {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.assistant-stop {
+  background: color-mix(in srgb, var(--danger, #c0392b) 85%, transparent);
+}
+
+.assistant-stop[hidden] {
+  display: none;
+}
+
+.assistant-send:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.assistant-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 8;
+}
+
+.assistant-resize:hover,
+.assistant-panel.is-resizing .assistant-resize {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}

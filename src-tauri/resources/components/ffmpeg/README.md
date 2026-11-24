@@ -10,12 +10,15 @@
 
 只带 `ffmpeg.exe` 就够了：探测编码和转音轨都是它一个命令干的，`ffprobe.exe`、`ffplay.exe` 带上纯属占地方。
 
-## 实测体积（本机 0.1.0，NSIS x64）
+## 实测体积（本机 0.0.1，x64）
 
-| 命令 | 安装包 |
-| --- | --- |
-| `npm run build` | 2.35 MB |
-| `npm run build:full` | 43.21 MB（129 MB 的 ffmpeg.exe 压进来了） |
+| 命令 | NSIS 安装包 | MSI 安装包 |
+| --- | --- | --- |
+| `npm run build` | 约 16 MB（不含 ffmpeg） | 约 16 MB |
+| `npm run build:full` | 50.4 MB（129 MB 的 ffmpeg.exe 压进来了） | 63.3 MB |
 
-两个包都叫 `inspace_0.1.0_x64-setup.exe`，后跑的覆盖先跑的，要留就自己改个名。
+安装包叫 `无限画布_0.0.1_x64-setup.exe` / `无限画布_0.0.1_x64_zh-CN.msi`，后跑的覆盖先跑的，要留就自己改个名。
+
+> 打包前记得把 `src-tauri/target/release/` 里跟本次无关的旧 dll 清掉：
+> 打包器会把落在那儿的历史文件一起塞进 MSI（曾经在 1.6GB 的 CUDA 目录上栽过）。
 

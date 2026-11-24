@@ -121,6 +121,19 @@ function placePanel(box, row) {
   box.style.top = `${Math.max(8, Math.min(rowRect.top - 5, window.innerHeight - rect.height - 8))}px`;
 }
 
+/* 可搜索菜单里的列表按剩余空间收紧：菜单本体不滚（搜索框得留在上面），
+   只收列表。窗口矮或者菜单贴着底边开时，不至于把最后几行切在窗口外面。 */
+function fitSearchList(panel, room) {
+  const list = panel.querySelector(".menu-list");
+  if (!list) return;
+  const listRect = list.getBoundingClientRect();
+  if (!listRect.height) return;
+  /* 除列表以外的固定部分：内边距、搜索框、标题 */
+  const chrome = panel.getBoundingClientRect().height - listRect.height;
+  const fit = Math.round(Math.max(88, Math.min(listRect.height, room - chrome)));
+  if (fit < listRect.height) list.style.maxHeight = `${fit}px`;
+}
+
 /* 三级浮层里的滑条：只负责一根轨道和实时回调，收起时由调用方的 onDone 落库 */
 function createSliderPanel({ value = 0, onChange } = {}) {
   const clamp = (v) => Math.min(1, Math.max(0, Number.isFinite(Number(v)) ? Number(v) : 0));
@@ -239,6 +252,11 @@ function openSlot(level, row, item, closeAll) {
   markOpenRow(row);
   el.hidden = false;
   placePanel(el, row);
+  /* 长列表先按视口剩余高度收一收，再摆一次：第一次量到的高度是没收拾过的 */
+  if (el.querySelector(".menu-list")) {
+    fitSearchList(el, window.innerHeight - el.getBoundingClientRect().top - 8);
+    placePanel(el, row);
+  }
 }
 
 /* 可搜索的子菜单（「新建文件」这类长列表）：开头一行搜索框，下面固定高列表。
@@ -514,9 +532,13 @@ export function openMenu(x, y, items, options = {}) {
   if (options.kind) menu.dataset.kind = options.kind;
   else delete menu.dataset.kind;
   menu.hidden = false;
+  /* 先按「打算摆的位置」算出还剩多少空间，把列表收进去，再真正落位 */
+  const tall = menu.getBoundingClientRect().height;
+  const top = Math.max(8, Math.min(y, window.innerHeight - tall - 8));
+  fitSearchList(menu, window.innerHeight - top - 8);
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(top, window.innerHeight - rect.height - 8))}px`;
   menu.style.right = "auto";
 }
 

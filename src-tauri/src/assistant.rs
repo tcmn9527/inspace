@@ -996,7 +996,7 @@ pub async fn assistant_chat(
     tools: Vec<ToolSpec>,
     session: Option<String>,
 ) -> Result<ChatReply, String> {
-    let config = load(&app.state::<DbState>());
+    let mut config = load(&app.state::<DbState>());
     if config.base_url.trim().is_empty() || config.model.trim().is_empty() {
         return Err("先在设置 → AI 助手里填好接口地址和模型".to_string());
     }
@@ -1007,6 +1007,18 @@ pub async fn assistant_chat(
         return Err("当前模型没开多模态：去设置 → AI 助手勾上「模型支持图片输入」".to_string());
     }
     CANCEL.store(false, Ordering::Relaxed);
+    /* 已装的技能只把清单塞进系统提示，正文留给 skill_read：
+       技能一多，正文全塞进来会把真正的对话挤出去 */
+    let skills = crate::assistant_skills::skills_prompt(&app);
+    if !skills.is_empty() {
+        config.system_prompt = if config.system_prompt.trim().is_empty() {
+            skills
+        } else {
+            format!("{}
+
+{}", config.system_prompt.trim_end(), skills)
+        };
+    }
     let session = session.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || match config.protocol.as_str() {
         "anthropic" => chat_anthropic_stream(&app, &session, &config, &messages, &tools),

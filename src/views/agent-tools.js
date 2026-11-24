@@ -927,6 +927,29 @@ const TOOL_DEFS = [
       },
     },
   ),
+  def(
+    "skill_list",
+    "列出已安装的助手技能：id、名字、一句话说明。技能是一份 SKILL.md，里面写着某类活该怎么干（比如公众号排版、小红书拆图）。先用它看有哪些，再看 skill_read。",
+  ),
+  def(
+    "skill_read",
+    "读某个技能的 SKILL.md 全文（前置说明 + 具体步骤）。用户点名要用某个技能、或任务正好对上某项技能时，先读它再照做。",
+    {
+      id: { type: "string", description: "技能 id，从 skill_list 里拿" },
+    },
+    ["id"],
+  ),
+  def(
+    "skill_save",
+    "把一套已经跑通的流程存成技能，下次直接复用：name 是技能名，description 一句话说明什么时候该用，content 是 SKILL.md 正文（步骤、注意点、用哪些工具）。同名会覆盖。",
+    {
+      name: { type: "string", description: "技能名，同时决定目录名" },
+      description: { type: "string", description: "一句话说明：什么情况下该用这个技能" },
+      content: { type: "string", description: "SKILL.md 正文，写成可照着做的步骤" },
+      id: { type: "string", description: "可选：覆盖已有技能时传它的 id" },
+    },
+    ["name", "content"],
+  ),
   def("note_read", "读笔记块的 Markdown 正文。", { id: ID }, ["id"]),
   def("note_write", "写笔记块的 Markdown 正文；引用外部 .md 的块会把正文写回原文件。", {
     id: ID,
@@ -1539,6 +1562,17 @@ async function dispatch(name, args) {
       );
     case "article_export":
       return onCanvas(args, () => articleExport(args.format || "wechat"));
+    case "skill_list":
+      return canvasAgent.skillsList();
+    case "skill_read":
+      return canvasAgent.skillRead(args.id);
+    case "skill_save":
+      return canvasAgent.skillSave({
+        id: args.id,
+        name: args.name,
+        description: args.description,
+        content: args.content,
+      });
     case "note_read":
       return onCanvas(args, () => canvasAgent.noteRead(args.id));
     case "note_write":

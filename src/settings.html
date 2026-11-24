@@ -220,6 +220,20 @@
                   </label>
                 </div>
               </div>
+
+              <div class="settings-assistant-group">
+                <p class="settings-assistant-group-title">技能</p>
+                <p class="settings-hint">
+                  一份技能就是一个 SKILL.md：写上某类活该怎么干（步骤、注意点、用哪些工具）。装上以后清单会进上下文，
+                  全文由助手按需读取，不会一上来就占满窗口。也可以在对话里让它用 skill_save 把跑通的流程存成技能。
+                </p>
+                <div class="settings-skill-list" id="settings-skill-list"></div>
+                <div class="settings-actions">
+                  <button class="plain-btn" id="settings-skill-import" type="button">导入 SKILL.md</button>
+                  <button class="plain-btn" id="settings-skill-dir" type="button">打开技能目录</button>
+                </div>
+                <input id="settings-skill-file" type="file" accept=".md,.markdown,text/markdown" multiple hidden />
+              </div>
             </div>
           </div>
         </section>

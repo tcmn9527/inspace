@@ -194,3 +194,17 @@ export const searchSpace = (query) => invoke("canvas_search", { query });
 export const exportWritePath = (dir, rel, data) =>
   invoke("canvas_export_write_path", { dir, rel, data });
 export const exportReveal = (path) => invoke("canvas_export_reveal", { path });
+
+/* 助手技能：一个目录一份 SKILL.md，列表只读 frontmatter，正文按需读 */
+export const skillsList = () => invoke("assistant_skills_list");
+export const skillsDir = () => invoke("assistant_skills_dir");
+export const skillRead = (id) => invoke("assistant_skill_read", { id });
+export const skillSave = (payload) =>
+  invoke("assistant_skill_save", {
+    id: payload.id || null,
+    name: payload.name || "",
+    description: payload.description || "",
+    content: payload.content || "",
+  });
+export const skillDelete = (id) => invoke("assistant_skill_delete", { id });
+export const skillImport = (from) => invoke("assistant_skill_import", { from });

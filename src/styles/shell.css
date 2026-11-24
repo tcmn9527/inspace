@@ -783,3 +783,48 @@
   margin: 0;
   accent-color: var(--accent);
 }
+
+/* 技能列表：一行一个，名字加粗、说明压一行，右边删除 */
+.settings-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.settings-skill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.settings-skill-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-skill-name {
+  margin: 0;
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.settings-skill-desc {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.settings-skill .plain-btn {
+  flex: 0 0 auto;
+}

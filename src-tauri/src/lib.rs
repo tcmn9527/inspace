@@ -1,4 +1,5 @@
 mod assistant;
+mod assistant_skills;
 mod canvas;
 mod capture;
 mod cosmos;
@@ -345,6 +346,12 @@ pub fn run() {
             assistant::assistant_model_vision,
             assistant::assistant_chat,
             assistant::assistant_cancel,
+            assistant_skills::assistant_skills_list,
+            assistant_skills::assistant_skills_dir,
+            assistant_skills::assistant_skill_read,
+            assistant_skills::assistant_skill_save,
+            assistant_skills::assistant_skill_delete,
+            assistant_skills::assistant_skill_import,
             mcp::mcp_register_tools,
             mcp::mcp_reply,
             mcp::mcp_info,

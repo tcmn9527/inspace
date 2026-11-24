@@ -1449,6 +1449,13 @@ export const canvasAgent = {
     if (result.blocks) out.blocks = result.blocks;
     return out;
   },
+  /* 助手技能：list 只给 id / name / description，read 才拿 SKILL.md 全文 */
+  skillsList: () => store.skillsList(),
+  skillsDir: () => store.skillsDir(),
+  skillRead: (id) => store.skillRead(id),
+  skillSave: (payload) => store.skillSave(payload),
+  skillDelete: (id) => store.skillDelete(id),
+  skillImport: (from) => store.skillImport(from),
   /* 小红书卡片：按 3:4 竖页切成一组 PNG，写进 exports/<画布名>/01.png… */
   exportCards: async (options = {}) => {
     const result = await exporter.exportCards({ width: options.width || 1080, ratio: options.ratio });

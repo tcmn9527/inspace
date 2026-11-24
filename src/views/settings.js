@@ -10,7 +10,7 @@
 import { choiceDialog, confirmDialog, progressDialog } from "./dialog.js";
 import { currentTheme } from "./theme.js";
 import { cosmosRoute, cosmosRouteSet } from "./cosmos.js";
-import { assistantApiConfig, assistantApiSet, assistantModelVision, assistantModels } from "./assistant-store.js";
+import { assistantApiConfig, assistantApiSet, assistantModelVision, assistantModels, skillDelete, skillsDir, skillsList, skillSave } from "./assistant-store.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emitTo } = window.__TAURI__.event;
@@ -117,6 +117,10 @@ export function initSettings(options = {}) {
   ui.assistantTest = document.querySelector("#settings-assistant-test");
   ui.assistantStatus = document.querySelector("#settings-assistant-status");
   ui.assistantError = document.querySelector("#settings-assistant-error");
+  ui.skillList = document.querySelector("#settings-skill-list");
+  ui.skillImport = document.querySelector("#settings-skill-import");
+  ui.skillDir = document.querySelector("#settings-skill-dir");
+  ui.skillFile = document.querySelector("#settings-skill-file");
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -185,6 +189,14 @@ export function initSettings(options = {}) {
   });
   ui.assistantModelsBtn.addEventListener("click", () => reloadAssistantModels());
   ui.assistantTest.addEventListener("click", () => testAssistant());
+  ui.skillImport?.addEventListener("click", () => ui.skillFile?.click());
+  ui.skillDir?.addEventListener("click", () => {
+    skillsDir().then((dir) => invoke("canvas_export_reveal", { path: dir })).catch((error) => showAssistantError(String(error)));
+  });
+  ui.skillFile?.addEventListener("change", () => {
+    void importSkillFiles(ui.skillFile.files);
+    ui.skillFile.value = "";
+  });
   setupMoveEvents();
   setupCosmosEvents();
   setupRoute();
@@ -1171,6 +1183,80 @@ async function testAssistant() {
   }
 }
 
+/* 技能列表：只显示名字和一句话说明，正文在文件里，要改就直接编辑文件 */
+function renderSkills(skills) {
+  if (!ui.skillList) return;
+  ui.skillList.replaceChildren();
+  if (!skills.length) {
+    const empty = document.createElement("p");
+    empty.className = "settings-hint";
+    empty.textContent = "还没有技能。导入一份 SKILL.md，或者打开技能目录把文件夹放进去。";
+    ui.skillList.append(empty);
+    return;
+  }
+  for (const skill of skills) {
+    const row = document.createElement("div");
+    row.className = "settings-skill";
+    const text = document.createElement("div");
+    text.className = "settings-skill-text";
+    const name = document.createElement("p");
+    name.className = "settings-skill-name";
+    name.textContent = skill.name;
+    const desc = document.createElement("p");
+    desc.className = "settings-skill-desc";
+    desc.textContent = skill.description || "（没有写说明，模型只能看到名字）";
+    text.append(name, desc);
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "plain-btn";
+    del.textContent = "删除";
+    del.addEventListener("click", async () => {
+      del.disabled = true;
+      try {
+        await skillDelete(skill.id);
+        await refreshSkills();
+      } catch (error) {
+        showAssistantError(String(error));
+        del.disabled = false;
+      }
+    });
+    row.append(text, del);
+    ui.skillList.append(row);
+  }
+}
+
+async function refreshSkills() {
+  if (!ui.skillList) return;
+  try {
+    renderSkills(await skillsList());
+  } catch (error) {
+    showAssistantError(String(error));
+  }
+}
+
+/* 导入：一份 .md 一个技能，文件名当名字；文件里已经有 frontmatter 就原样保留 */
+async function importSkillFiles(files) {
+  const list = [...(files || [])].filter((file) => /\.(md|markdown)$/i.test(file.name));
+  if (!list.length) {
+    showAssistantError("选 .md 或 .markdown 文件");
+    return;
+  }
+  showAssistantError("");
+  let done = 0;
+  for (const file of list) {
+    try {
+      const content = await file.text();
+      const name = file.name.replace(/\.(md|markdown)$/i, "").trim() || "未命名技能";
+      await skillSave({ name, description: "", content });
+      done += 1;
+    } catch (error) {
+      showAssistantError(`${file.name}：${error}`);
+    }
+  }
+  await refreshSkills();
+  if (done) showAssistantStatus(`已导入 ${done} 个技能`);
+}
+
 async function refreshAssistant() {
   if (!ui.assistantProtocol) return;
   showAssistantError("");
@@ -1183,6 +1269,7 @@ async function refreshAssistant() {
     ui.assistantVision.checked = await assistantModelVision(assistantConfig.model).catch(
       () => Boolean(assistantConfig.supportsImages),
     );
+    await refreshSkills();
   } catch (error) {
     showAssistantError(String(error));
   }

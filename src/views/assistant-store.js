@@ -19,3 +19,17 @@ export const assistantChat = (payload) =>
 /* 只置后端那个取消开关：正在读的流会在下一行到达时收住，
    已经发出去的那一段服务端照样跑完。 */
 export const assistantCancel = () => invoke("assistant_cancel");
+
+/* 技能：一个目录一份 SKILL.md。列表只读 frontmatter，正文按需 read。 */
+export const skillsList = () => invoke("assistant_skills_list");
+export const skillsDir = () => invoke("assistant_skills_dir");
+export const skillRead = (id) => invoke("assistant_skill_read", { id });
+export const skillSave = (payload) =>
+  invoke("assistant_skill_save", {
+    id: payload.id || null,
+    name: payload.name || "",
+    description: payload.description || "",
+    content: payload.content || "",
+  });
+export const skillDelete = (id) => invoke("assistant_skill_delete", { id });
+export const skillImport = (from) => invoke("assistant_skill_import", { from });

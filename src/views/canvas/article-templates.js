@@ -71,6 +71,16 @@ function styleOf(item) {
   return style;
 }
 
+/* 最长的那段文字基本就是正文，用它判断正文字号 */
+function bodySizeOf(textItems) {
+  if (!textItems.length) return 17;
+  const longest = textItems.reduce(
+    (best, item) => (String(item.text || "").length > String(best.text || "").length ? item : best),
+    textItems[0],
+  );
+  return Number(longest.fontSize) || 17;
+}
+
 export function extractTemplate(items, meta = {}) {
   const source = (Array.isArray(items) ? items : []).filter(
     (item) => item && !["connector", "page"].includes(item.type),
@@ -109,7 +119,9 @@ export function extractTemplate(items, meta = {}) {
     },
     typography: {
       title: sizes.length ? sizes[0] : 32,
-      body: sizes.length ? sizes[Math.min(sizes.length - 1, Math.floor(sizes.length / 2))] : 17,
+      /* 正文字号看「最长的那块文字」：模板里往往还有小签、页脚这类 11/12 号字，
+         按中位数取会把正文压到 12 号，生成出来的文章小得没法读 */
+      body: bodySizeOf(textItems),
       aligns: unique(textItems.map((item) => item.align)).slice(0, 4),
     },
     elements: unique(source.map((item) => item.type)).sort(),
@@ -210,9 +222,19 @@ function styleFromTemplate(template) {
   const blocks = template?.layout?.blocks || [];
   const pick = (role) => blocks.find((block) => block.role === role)?.style || {};
   const title = pick("title");
-  const body = pick("body");
+  const bodyTarget = Number(template?.typography?.body) || 17;
+  /* role 只分得出「标题 / 不是标题」，小签和页脚也落在 body 里。
+     正文样式取字号最接近 typography.body 的那块，别拿 12 号小签当正文 */
+  const bodyBlock = blocks
+    .filter((block) => block.role === "body")
+    .sort(
+      (a, b) =>
+        Math.abs((Number(a.style?.fontSize) || 0) - bodyTarget) -
+        Math.abs((Number(b.style?.fontSize) || 0) - bodyTarget),
+    )[0];
+  const body = bodyBlock?.style || {};
   const titleSize = Number(title.fontSize) || Number(template?.typography?.title) || 36;
-  const bodySize = Number(body.fontSize) || Number(template?.typography?.body) || 17;
+  const bodySize = bodyTarget || Number(body.fontSize) || 17;
   return {
     title,
     body,
@@ -250,7 +272,9 @@ export async function articleGenerate(spec = {}) {
     templateMeta = loaded.meta;
   }
 
-  const width = Math.max(320, round(template?.canvas?.width) || PLATFORM_WIDTH[platform] || 780);
+  /* 宽度按平台定：模板卡是展示用的（比公众号正文宽），
+     直接拿它的宽度生成文章，版式会散 */
+  const width = PLATFORM_WIDTH[platform] || 780;
   const style = styleFromTemplate(template);
   const space = await canvasAgent.spaceCreate(title);
   const created = [];

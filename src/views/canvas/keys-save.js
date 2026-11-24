@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：keys-save */
 
-import { active, activeBodySelectionText, blurMinimapFocus, cameraTimer, cancelPlanCalibration, clientToWorld, copyBodySelectionText, copyItems, current, deleteItems, errorTimer, findItem, insertPaths, isMinimapFocused, itemsTimer, modalOpen, nudgeSelected, paintingTarget, pasteCopiedBlocks, pictureStepMove, planCalibration, refreshMinimap, renderTree, resetZoom, select, selectAll, selectedIds, setCameraTimer, setErrorTimer, setItemsTimer, setLockedMany, setMeasureHeld, setPictureEditing, setTool, store, toPersisted, tool, ui } from "../canvas.js";
+import { active, activeBodySelectionText, blurMinimapFocus, cameraTimer, cancelPlanCalibration, clientToWorld, copyBodySelectionText, copyItems, current, deleteItems, errorTimer, findItem, insertPaths, isMinimapFocused, itemsTimer, modalOpen, nudgeSelected, paintingTarget, pasteCopiedBlocks, pictureStepMove, planCalibration, pushSelected, refreshMinimap, renderTree, resetZoom, select, selectAll, selectedIds, setCameraTimer, setErrorTimer, setItemsTimer, setLockedMany, setMeasureHeld, setPictureEditing, setTool, store, toPersisted, tool, ui } from "../canvas.js";
 
 /* ---------- 从资源管理器拖入 ---------- */
 
@@ -45,7 +45,8 @@ export async function onFilesDropped(paths, position) {
 
 /* ---------- 键盘 ---------- */
 
-/* 方向键挪选中项：一格 1px，Shift 走 10 倍。用世界坐标，缩放看不太清时按几下 Shift 就够了 */
+/* 方向键挪选中项：一格 1px，Shift 走 10 倍。用世界坐标，缩放看不太清时按几下 Shift 就够了。
+   Ctrl/⌘ + 方向键走另一套：同一列的块跟着一起推（见 containers.js 的 pushSelected） */
 export const NUDGE_KEYS = {
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
@@ -53,6 +54,8 @@ export const NUDGE_KEYS = {
   ArrowRight: [1, 0],
 };
 export const NUDGE_STEP = 1;
+/* Ctrl+方向键连带整排让位，步子给大一点，不然改高一块要按几十下 */
+export const PUSH_STEP = 10;
 
 export function onKeyDown(e) {
   if (!active || !current || modalOpen) return;
@@ -132,6 +135,15 @@ export function onKeyDown(e) {
     e.preventDefault();
     const allLocked = ids.every((id) => findItem(id)?.locked);
     setLockedMany(ids, !allLocked);
+    return;
+  }
+  /* Ctrl+方向键：带着挡在道上的一整排块一起挪。
+     改高/改宽一块以后，后面的面板不用再一个个手动腾位置 */
+  if (NUDGE_KEYS[e.key] && (e.ctrlKey || e.metaKey) && selectedIds.size && !isMinimapFocused()) {
+    e.preventDefault();
+    const [dx, dy] = NUDGE_KEYS[e.key];
+    const step = e.shiftKey ? PUSH_STEP * 5 : PUSH_STEP;
+    pushSelected(dx * step, dy * step);
     return;
   }
   if (NUDGE_KEYS[e.key] && selectedIds.size && !isMinimapFocused()) {

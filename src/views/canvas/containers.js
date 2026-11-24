@@ -169,13 +169,9 @@ export function toggleContainer(item) {
   showToast("已取消容器，这块回到普通矩形");
 }
 
-/* 方向键挪位：一次 1px，按住 Shift 走 10px。整组各加同样的偏移；
-   直线/箭头连端点一起挪，否则只动起点、线会变形。 */
-export function nudgeSelected(dx, dy) {
-  /* 方向和拖动一样：容器带着框里的块一起挪；固定宽度时整组夹回页内 */
-  const group = moveGroup();
-  dx = clampGroupDx(group, dx);
-  for (const { item, el } of group) {
+/* 整组一起偏移。直线/箭头连端点一起挪，否则只动起点、线会变形 */
+function shiftMembers(list, dx, dy) {
+  for (const { item, el } of list) {
     item.x += dx;
     item.y += dy;
     if (item.type === "line" || item.type === "arrow") {
@@ -184,8 +180,79 @@ export function nudgeSelected(dx, dy) {
     }
     syncItemElement(el, item);
   }
+}
+
+/* 方向键挪位：一次 1px，按住 Shift 走 10px。整组各加同样的偏移 */
+export function nudgeSelected(dx, dy) {
+  /* 方向和拖动一样：容器带着框里的块一起挪；固定宽度时整组夹回页内 */
+  const group = moveGroup();
+  dx = clampGroupDx(group, dx);
+  shiftMembers(group, dx, dy);
   updateSelection();
   scheduleItemsSave();
+}
+
+/* ---------- Ctrl+方向键：连带「挡在道上」的块一起推 ----------
+   把某块临时改高改宽后，后面的面板要一个个手动腾位置。
+   Ctrl+方向键把这活交回来：选中的块往哪边走，挡在那条道上、并且在另一根轴上
+   和它同一列/同一行的块就跟着走同样的距离，等于整排让位。
+   只认有交集的那一列：左边排文章、右边放参考图时，推文章不会顺手带走右边的图。 */
+
+function overlapLength(a1, a2, b1, b2) {
+  return Math.min(a1 + a2, b1 + b2) - Math.max(a1, b1);
+}
+
+/* 是不是在移动方向的前方：先看这一轴，再看另一轴有没有交集 */
+function inPushPath(box, span, dirX, dirY) {
+  if (dirY > 0) {
+    return box.y >= span.y + span.h - 0.5 && overlapLength(box.x, box.w, span.x, span.w) > 0;
+  }
+  if (dirY < 0) {
+    return box.y + box.h <= span.y + 0.5 && overlapLength(box.x, box.w, span.x, span.w) > 0;
+  }
+  if (dirX > 0) {
+    return box.x >= span.x + span.w - 0.5 && overlapLength(box.y, box.h, span.y, span.h) > 0;
+  }
+  if (dirX < 0) {
+    return box.x + box.w <= span.x + 0.5 && overlapLength(box.y, box.h, span.y, span.h) > 0;
+  }
+  return false;
+}
+
+/* 返回跟着走的块数（不含选中的那几块），调用方想提示就有数了 */
+export function pushSelected(dx, dy) {
+  const group = moveGroup();
+  if (!group.length) return 0;
+  const dirX = Math.sign(dx);
+  const dirY = Math.sign(dy);
+  const span = dragBounds(group, 0, 0);
+  const moving = new Set(group.map((member) => member.item.id));
+  const extra = [];
+  if (span) {
+    for (const item of current.items) {
+      if (item.type === "connector" || item.locked || moving.has(item.id)) continue;
+      const el = itemEls.get(item.id);
+      if (!el) continue;
+      if (!inPushPath(itemBounds(item, el), span, dirX, dirY)) continue;
+      moving.add(item.id);
+      extra.push({ item, el });
+      /* 被推的是容器：框里装着的块跟着框一起走 */
+      if (!isContainer(item)) continue;
+      for (const child of moveMembers(item, moving)) {
+        const childEl = itemEls.get(child.id);
+        if (!childEl) continue;
+        moving.add(child.id);
+        extra.push({ item: child, el: childEl });
+      }
+    }
+  }
+  const all = extra.length ? [...group, ...extra] : group;
+  /* 固定宽度时整排一起夹回页内，别推出页面 */
+  dx = clampGroupDx(all, dx);
+  shiftMembers(all, dx, dy);
+  updateSelection();
+  scheduleItemsSave();
+  return extra.length;
 }
 
 /* 吸附阈值按屏幕像素给：缩放多少倍手感都一样（6px 在 50% 缩放下等于 12 个世界像素） */

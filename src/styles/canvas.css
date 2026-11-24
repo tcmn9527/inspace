@@ -120,6 +120,19 @@
   cursor: pointer;
 }
 
+/* 面板标题右边的排序键：靠右放，图标按 asc / desc 翻个面 */
+.space-tree-sort {
+  margin-left: auto;
+}
+
+.space-tree-sort svg {
+  transition: transform 0.15s ease;
+}
+
+.space-tree-sort[data-sort="desc"] svg {
+  transform: rotate(180deg);
+}
+
 .space-tree-btn:hover {
   color: var(--fg);
   background: color-mix(in srgb, var(--fg) 10%, transparent);

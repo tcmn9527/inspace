@@ -26,6 +26,8 @@ export let treeCollapsed = new Set();
 export function setTreeCollapsed(value) { treeCollapsed = value; }
 export let treePanelCollapsed = new Set();
 export let treeSections = { canvas: true, panels: true };
+/* 面板树的编号顺序：asc = 小的在上（默认），desc = 大的在上 */
+export let treePanelSort = "asc";
 export let treeOrder = {};
 export let treeWidth = 220;
 /* 画布区固定高度（px）；null = 按内容自适应、最多占一半。拖分隔条后才有值 */
@@ -39,6 +41,7 @@ export function treeSavePrefs() {
     collapsed: [...treeCollapsed],
     panelCollapsed: [...treePanelCollapsed],
     sections: treeSections,
+    panelSort: treePanelSort,
     order: treeOrder,
     split: treeSplit,
   }));
@@ -61,6 +64,7 @@ export function initSpaceTree() {
   treeCollapsed = new Set(Array.isArray(prefs.collapsed) ? prefs.collapsed : []);
   treePanelCollapsed = new Set(Array.isArray(prefs.panelCollapsed) ? prefs.panelCollapsed : []);
   if (prefs.order && typeof prefs.order === "object") treeOrder = prefs.order;
+  if (prefs.panelSort === "desc") treePanelSort = "desc";
   if (prefs.sections && typeof prefs.sections === "object") {
     treeSections = {
       canvas: prefs.sections.canvas !== false,
@@ -379,6 +383,23 @@ export function treeSectionHeader(kind) {
     treeSavePrefs();
     renderTree();
   });
+  if (!isCanvas) {
+    /* 编号顺序：点一下翻，翻完记住 */
+    const sort = document.createElement("button");
+    sort.type = "button";
+    sort.className = "space-tree-btn space-tree-sort";
+    sort.dataset.sort = treePanelSort;
+    sort.title = treePanelSort === "desc" ? "编号倒序（点击改成正序）" : "编号正序（点击改成倒序）";
+    sort.setAttribute("aria-label", sort.title);
+    sort.innerHTML = '<svg viewBox="0 0 12 12" width="13" height="13" aria-hidden="true"><path d="M6 10V2M3.2 4.6L6 2l2.8 2.6" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    sort.addEventListener("click", (event) => {
+      event.stopPropagation();
+      treePanelSort = treePanelSort === "desc" ? "asc" : "desc";
+      treeSavePrefs();
+      renderTree();
+    });
+    row.append(sort);
+  }
   if (isCanvas) {
     const add = document.createElement("button");
     add.type = "button";
@@ -538,6 +559,13 @@ export function panelMoveEntries(item) {
   ];
 }
 
+/* 面板树按编号排：默认小的在上；倒序时大的在上，容器里的孩子一起翻。
+   编号（seq）是建块时发的，删掉块也不会重排，所以它比数组下标稳。 */
+function panelOrder(list) {
+  if (treePanelSort !== "desc") return list;
+  return [...list].sort((a, b) => (Number(b.seq) || 0) - (Number(a.seq) || 0));
+}
+
 export function renderPanelTree(body) {
   const items = current?.items || [];
   if (!items.length) return;
@@ -632,11 +660,11 @@ export function renderPanelTree(body) {
     body.append(row);
     if (isCont && expanded && !seen.has(item.id)) {
       seen.add(item.id);
-      for (const kid of kidsOf.get(item.id) || []) renderPanelRow(kid, depth + 1, seen);
+      for (const kid of panelOrder(kidsOf.get(item.id) || [])) renderPanelRow(kid, depth + 1, seen);
     }
   };
   const seen = new Set();
-  for (const item of items) {
+  for (const item of panelOrder(items)) {
     if (nested.has(item.id)) continue;
     renderPanelRow(item, 0, seen);
   }

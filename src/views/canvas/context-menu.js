@@ -565,6 +565,7 @@ export function showPropsCard(item) {
         <p class="dialog-message props-kind"></p>
         <p class="dialog-message props-seq"></p>
         <p class="dialog-message props-geometry"></p>
+        <p class="dialog-message props-count" hidden></p>
         <p class="dialog-message props-path" hidden></p>
       </div>
     `;
@@ -572,6 +573,7 @@ export function showPropsCard(item) {
     const kindEl = mask.querySelector(".props-kind");
     const seqEl = mask.querySelector(".props-seq");
     const geometryEl = mask.querySelector(".props-geometry");
+    const countEl = mask.querySelector(".props-count");
     const pathEl = mask.querySelector(".props-path");
     const closeBtn = mask.querySelector(".dialog-close");
     /* 类型名和这句说明排在同一行：名字加粗，说明用小一号的灰字 */
@@ -598,6 +600,15 @@ export function showPropsCard(item) {
       geometryEl.innerHTML =
         `坐标：(${Math.round(b.x)}, ${Math.round(b.y)})<br>` +
         `宽高：${Math.round(b.w)} × ${Math.round(b.h)}`;
+    }
+    /* 字数只对文字块有意义：按字符数算，不含空白和换行，
+       中文一个字算一个，emoji 这类代理对也当一个 */
+    if (item.type === "text") {
+      const plain = String(item.text || "").replace(/\s+/g, "");
+      countEl.textContent = `字数：${[...plain].length}`;
+      countEl.hidden = false;
+    } else {
+      countEl.hidden = true;
     }
     if (path) {
       pathEl.textContent = path;

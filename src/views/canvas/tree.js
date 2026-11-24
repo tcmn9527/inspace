@@ -463,17 +463,19 @@ export function panelTreeLabel(item) {
   return seq + (PANEL_TYPE_LABEL[item.type] || item.type);
 }
 
-export async function renamePanelTree(item) {
+/* 面板改名和画布一样就地编辑：行内换成输入框，不弹框。
+   提交空值就是退回「编号 + 类型」。 */
+export function renamePanelTree(item) {
+  if (!item) return;
   const fallback = panelTreeLabel(item).replace(/^#\d+\s*/, "");
-  const name = await promptDialog({
-    title: "重命名面板",
-    label: "留空恢复成编号 + 类型",
-    value: (item.treeName || "").trim() || fallback,
-    okText: "重命名",
-    validate: () => null,
-  });
-  if (name === null || name === undefined) return;
-  const trimmed = String(name).trim();
+  startTreeRename("panel", item.id, (item.treeName || "").trim() || fallback);
+}
+
+/* 就地改名提交时由 startTreeRename 调回来：写 treeName（空就是删掉） */
+export function renameTreePanel(id, name) {
+  const item = findItem(id);
+  if (!item) return;
+  const trimmed = String(name || "").trim();
   if (trimmed) item.treeName = trimmed.slice(0, 60);
   else delete item.treeName;
   scheduleItemsSave();
@@ -652,7 +654,7 @@ export function renderPanelTree(body) {
       openMenu(event.clientX, event.clientY, [
         ...panelMoveEntries(item),
         "-",
-        { label: "重命名", onClick: () => void renamePanelTree(item) },
+        { label: "重命名", onClick: () => renamePanelTree(item) },
         "-",
         ...itemMenuEntries(item, event.clientX, event.clientY),
       ], { label: text });

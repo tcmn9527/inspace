@@ -3,7 +3,7 @@
 import { agentRenameSpace } from "./agent-layer.js";
 import { commitEditing } from "./text-edit.js";
 import { setTreeCollapsed } from "./tree.js";
-import { current, edgeLabelEditor, editingId, flushBlockContents, flushCamera, flushItems, loadList, newId, renderTree, select, setCurrent, setTreeRenaming, showError, store, switchTo, treeCollapsed, treeRenaming, treeUi } from "../canvas.js";
+import { current, edgeLabelEditor, editingId, flushBlockContents, flushCamera, flushItems, loadList, newId, renderTree, renameTreePanel, select, setCurrent, setTreeRenaming, showError, store, switchTo, treeCollapsed, treeRenaming, treeUi } from "../canvas.js";
 
 /* ---------- .inspace 容器导入导出 ----------
    导出成标准 zip：画布包解压是一个画布目录，分组件包解压是一个子分组。
@@ -78,13 +78,17 @@ export function startTreeRename(kind, id, name) {
     settled = true;
     const value = input.value.trim();
     setTreeRenaming(null);
-    if (!commit || !value || value === name) {
+    /* 画布和分组不能叫空名字；面板可以——清空就是退回「编号 + 类型」 */
+    const empty = !value;
+    if (!commit || (empty && kind !== "panel") || value === name) {
       renderTree();
       return;
     }
     try {
       if (kind === "canvas") {
         await agentRenameSpace(id, value);
+      } else if (kind === "panel") {
+        renameTreePanel(id, value);
       } else {
         await renameTreeGroup(id, value);
       }

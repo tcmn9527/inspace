@@ -313,6 +313,10 @@ pub struct ChatMessage {
     pub tool_call_id: String,
     #[serde(default)]
     pub name: String,
+    /// 思考模式下模型吐的推理内容：DeepSeek 这类模型要求下一轮原样带回，
+    /// 少一个字就 400（reasoning_content in the thinking mode must be passed back）
+    #[serde(default)]
+    pub reasoning: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -341,6 +345,9 @@ pub struct ChatReply {
     /// 用户按了停止：text 是已经吐出来的那部分，工具调用作废
     #[serde(default)]
     pub canceled: bool,
+    /// 思考模式下这一轮的推理内容，前端要存下来下一轮带回
+    #[serde(default)]
+    pub reasoning: String,
 }
 
 fn parse_arguments(value: &Value) -> Value {
@@ -409,11 +416,16 @@ fn openai_messages(config: &ApiConfig, messages: &[ChatMessage]) -> Vec<Value> {
                         }
                     }))
                     .collect::<Vec<_>>();
-                out.push(json!({
+                let mut payload = json!({
                     "role": "assistant",
                     "content": if message.content.is_empty() { Value::Null } else { json!(message.content) },
                     "tool_calls": calls,
-                }));
+                });
+                /* 思考模式的模型要求把上一轮的推理原样带回来，否则下一轮直接 400 */
+                if !message.reasoning.is_empty() {
+                    payload["reasoning_content"] = json!(message.reasoning);
+                }
+                out.push(payload);
             }
             role if role == "user" && !message.images.is_empty() => {
                 let mut parts = vec![json!({ "type": "text", "text": message.content })];
@@ -675,11 +687,13 @@ fn chat_openai_stream(
     }
     let reader = open_stream(&url, config, body)?;
     let mut text = String::new();
+    let mut reasoning = String::new();
     let mut calls: std::collections::BTreeMap<usize, PartialCall> = std::collections::BTreeMap::new();
     for line in reader.lines() {
         if canceled() {
             return Ok(ChatReply {
                 text,
+                reasoning,
                 tool_calls: Vec::new(),
                 model: config.model.clone(),
                 canceled: true,
@@ -692,6 +706,15 @@ fn chat_openai_stream(
         }
         let Ok(data) = serde_json::from_str::<Value>(payload) else { continue };
         let Some(delta) = data.pointer("/choices/0/delta") else { continue };
+        /* 思考模式先吐 reasoning_content 再吐 content：推理只收集不回显，
+           下一轮要原样还给 API */
+        if let Some(chunk) = delta
+            .get("reasoning_content")
+            .or_else(|| delta.get("reasoning"))
+            .and_then(Value::as_str)
+        {
+            reasoning.push_str(chunk);
+        }
         if let Some(chunk) = delta.get("content").and_then(Value::as_str) {
             text.push_str(chunk);
             emit_delta(app, session, chunk);
@@ -718,6 +741,7 @@ fn chat_openai_stream(
     }
     Ok(ChatReply {
         text,
+        reasoning,
         tool_calls: finish_calls(calls.into_values().collect()),
         model: config.model.clone(),
         canceled: false,
@@ -756,6 +780,7 @@ fn chat_anthropic_stream(
         if canceled() {
             return Ok(ChatReply {
                 text,
+                reasoning: String::new(),
                 tool_calls: Vec::new(),
                 model: config.model.clone(),
                 canceled: true,
@@ -802,6 +827,7 @@ fn chat_anthropic_stream(
     }
     Ok(ChatReply {
         text,
+        reasoning: String::new(),
         tool_calls: finish_calls(calls.into_values().collect()),
         model: config.model.clone(),
         canceled: false,
@@ -849,6 +875,7 @@ fn chat_gemini_stream(
         if canceled() {
             return Ok(ChatReply {
                 text,
+                reasoning: String::new(),
                 tool_calls: Vec::new(),
                 model: config.model.clone(),
                 canceled: true,
@@ -877,6 +904,7 @@ fn chat_gemini_stream(
     }
     Ok(ChatReply {
         text,
+        reasoning: String::new(),
         tool_calls: finish_calls(calls),
         model: config.model.clone(),
         canceled: false,
@@ -910,6 +938,7 @@ fn chat_ollama_stream(
         if canceled() {
             return Ok(ChatReply {
                 text,
+                reasoning: String::new(),
                 tool_calls: Vec::new(),
                 model: config.model.clone(),
                 canceled: true,
@@ -943,6 +972,7 @@ fn chat_ollama_stream(
     }
     Ok(ChatReply {
         text,
+        reasoning: String::new(),
         tool_calls: finish_calls(calls),
         model: config.model.clone(),
         canceled: false,

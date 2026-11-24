@@ -131,12 +131,37 @@ function loadChats() {
   }
 }
 
+/* 老版本一轮会落两条 assistant（一条纯文本、一条带 tool_calls），
+   接口那边看着就是「assistant 连着 assistant」，直接 400。
+   读回来的时候合成一条，旧会话也能接着用。 */
+function mergeSplitAssistant(list) {
+  const out = [];
+  for (const msg of list) {
+    const prev = out[out.length - 1];
+    const split =
+      msg.role === "assistant" &&
+      prev?.role === "assistant" &&
+      !prev.toolCalls?.length &&
+      Boolean(msg.toolCalls?.length);
+    if (split) {
+      out[out.length - 1] = {
+        ...msg,
+        content: prev.content || msg.content,
+        reasoning: prev.reasoning || msg.reasoning,
+      };
+      continue;
+    }
+    out.push(msg);
+  }
+  return out;
+}
+
 function readStored() {
   if (!activeChat) return [];
   try {
     const raw = localStorage.getItem(chatKey());
     const parsed = raw ? JSON.parse(raw) : null;
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? mergeSplitAssistant(parsed) : [];
   } catch {
     return [];
   }
@@ -406,9 +431,13 @@ async function runChatLoop() {
     /* 用户点了停止：把已经流出来的半截留下，后面的工具调用一律不执行 */
     if (reply?.canceled || canceled) {
       const partial = String(reply?.text || "").trim();
-      messages.push({ role: "assistant", content: partial ? `${partial}
+      messages.push({
+        role: "assistant",
+        content: partial ? `${partial}
 
-（已停止）` : "（已停止）" });
+（已停止）` : "（已停止）",
+        reasoning: typeof reply?.reasoning === "string" ? reply.reasoning : "",
+      });
       render();
       saveStored();
       return;
@@ -416,13 +445,18 @@ async function runChatLoop() {
 
     const text = typeof reply?.text === "string" ? reply.text.trim() : "";
     const calls = Array.isArray(reply?.toolCalls) ? reply.toolCalls : [];
-    if (text) messages.push({ role: "assistant", content: text });
+    /* 思考模式的推理要跟着消息一起存：下一轮请求得原样带回，否则接口直接 400 */
+    const reasoning = typeof reply?.reasoning === "string" ? reply.reasoning : "";
+    /* 一轮只落一条 assistant：有工具调用就带着调用一起落，
+       拆成「一条纯文本 + 一条带调用」会让两条 assistant 连着出现，
+       接口那边也会认为消息序列不合法 */
     if (!calls.length) {
+      if (text) messages.push({ role: "assistant", content: text, reasoning });
       render();
       saveStored();
       return;
     }
-    messages.push({ role: "assistant", content: text, toolCalls: calls });
+    messages.push({ role: "assistant", content: text, toolCalls: calls, reasoning });
     render();
 
     for (const call of calls) {

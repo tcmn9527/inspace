@@ -597,6 +597,12 @@ export function createExporter({
             'font-size:0;line-height:0;">&nbsp;</section>',
         );
       } else if (node.kind === "media") {
+        /* 图片能带出来就带：公众号正文里配图是正文的一部分，
+           只在编辑器里补一张占位提示，等于把文章拆了 */
+        if (node.url) {
+          out.push(pictureHtml({ url: node.url }));
+          continue;
+        }
         const label = node.item.type === "image" ? "图片" : node.item.type === "video" ? "视频" : "附件";
         out.push(
           `<p style="margin:0 0 14px;padding:10px 12px;background:#f6f1e7;border-radius:6px;` +
@@ -1045,6 +1051,19 @@ export function createExporter({
     if (!items.length) throw new Error("这个画布还是空的，没东西可导出");
     const nodes = articleNodes(items);
     if (!nodes.length) throw new Error("这个画布只有连线，没有可成文的文字");
+
+    /* 图片块先压成 JPEG data URL：公众号正文最宽 677，宽 1200 足够，再大只是把 HTML 撑到十几兆 */
+    const canvasId = (getMeta() || {}).id || "";
+    for (const node of nodes) {
+      if (node.kind !== "media" || node.item?.type !== "image" || !node.item.src) continue;
+      try {
+        node.url = await articleImage(
+          await loadImageData(canvasId, node.item.src, Boolean(node.item.linked)),
+        );
+      } catch {
+        node.url = "";
+      }
+    }
 
     const body = renderWechatBody(nodes);
     return [

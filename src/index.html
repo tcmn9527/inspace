@@ -306,7 +306,8 @@
         </div>
 
         <aside class="assistant-panel" id="assistant-panel" aria-label="AI 助手" hidden>
-          <header class="assistant-head">
+          <!-- deep：标题、模型名这些子元素上按住也能拖窗口；里面的按钮会自动挡住拖动 -->
+          <header class="assistant-head" data-tauri-drag-region="deep">
             <div class="assistant-title">
               <span>AI 助手</span>
               <span class="assistant-model" id="assistant-model"></span>

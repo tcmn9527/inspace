@@ -61,6 +61,8 @@
   height: 38px;
   padding: 0 8px 0 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 20%, transparent);
+  /* 这块是拖窗口的区域：文字不让选，拖起来才像标题栏 */
+  user-select: none;
 }
 
 .assistant-title {

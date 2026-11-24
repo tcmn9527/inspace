@@ -266,6 +266,10 @@ export async function articleGenerate(spec = {}) {
       fontSize: block.fontSize,
       internal: false,
       align: block.align,
+      /* 排版稿不是一堆输入框：正文块默认无边框、无底色，
+         导出卡片时才不会每段都套一个方框 */
+      borderColor: "",
+      fillColor: "",
     };
     if (block.color) blockSpec.color = block.color;
     const item = await canvasAgent.blockCreate(blockSpec);
@@ -327,5 +331,11 @@ export async function articleExport(format = "wechat") {
   const kind = ["wechat", "toutiao", "xiaohongshu", "html", "png", "pdf"].includes(format)
     ? format
     : "wechat";
+  /* 小红书不做网页：按 3:4 竖页切成 1080×1440 的 PNG 组，
+     导出目录里 01.png 是封面，后面按顺序发内页 */
+  if (kind === "xiaohongshu") {
+    const cards = await canvasAgent.exportCards({ width: 1080 });
+    return { ...cards, platform: "xiaohongshu" };
+  }
   return canvasAgent.exportCanvas(kind, { quality: "high" });
 }

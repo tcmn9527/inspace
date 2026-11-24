@@ -464,6 +464,71 @@ pub async fn canvas_export_auto(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// 小红书卡片图：一次写一整个文件夹（01.png、02.png…）。
+/// 单张走 canvas_export_auto 会把名字里的斜杠抹成空格，建不了子目录，所以单开一条。
+#[derive(serde::Deserialize)]
+pub struct CardFile {
+    pub rel: String,
+    pub data: String,
+}
+
+#[tauri::command]
+pub fn canvas_export_cards(
+    state: tauri::State<'_, CanvasState>,
+    name: String,
+    files: Vec<CardFile>,
+) -> Result<String, String> {
+    if files.is_empty() {
+        return Err("没有要写的卡片".to_string());
+    }
+    let root = state.data.dir("exports");
+    fs::create_dir_all(&root).map_err(|e| format!("无法创建导出目录：{e}"))?;
+    let safe = name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], " ");
+    let safe = safe.trim().trim_matches('.').trim();
+    if safe.is_empty() || safe.contains("..") {
+        return Err("文件名不合法".to_string());
+    }
+    let folder = unique_card_dir(root.join(safe));
+    fs::create_dir_all(&folder).map_err(|e| format!("创建卡片目录失败：{e}"))?;
+    for file in &files {
+        let rel = Path::new(&file.rel);
+        let mut parts = rel.components();
+        let Some(Component::Normal(part)) = parts.next() else {
+            return Err("卡片文件名不合法".to_string());
+        };
+        if parts.next().is_some() {
+            return Err("卡片只能写在一层里".to_string());
+        }
+        let bytes = BASE64
+            .decode(file.data.as_bytes())
+            .map_err(|e| format!("卡片数据有误：{e}"))?;
+        if bytes.is_empty() {
+            return Err("卡片内容是空的".to_string());
+        }
+        fs::write(folder.join(part), &bytes).map_err(|e| format!("写入卡片失败：{e}"))?;
+    }
+    Ok(folder.to_string_lossy().to_string())
+}
+
+/// 目录撞名就加序号：同名再导一次是新的一批图，不该把上一批顶掉。
+fn unique_card_dir(path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+    let name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    for n in 2..1000 {
+        let candidate = parent.join(format!("{name} ({n})"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path
+}
+
 /// 客户版网页导出：按相对路径写文件，父目录自动建。
 /// 名字只许正常的路径段（不许 ..、隐藏文件、绝对路径），最后一定落在 dir 里面。
 /// 和分段导出不同，这里允许覆盖：每次导出一个新的时间戳子文件夹，同一批文件要能互相引用。

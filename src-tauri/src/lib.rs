@@ -335,6 +335,7 @@ pub fn run() {
             canvas::canvas_export_write,
             canvas::canvas_export_write_path,
             canvas::canvas_export_auto,
+            canvas::canvas_export_cards,
             canvas::canvas_export_reveal,
             capture::webview_capture,
             assistant::assistant_api_get,

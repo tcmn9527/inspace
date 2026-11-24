@@ -1571,6 +1571,108 @@ export function createExporter({
   }
 
 
+  /* 把一页贴到固定尺寸的白底上：下面空出来的部分补底色，不是透明的 */
+  function padTo(source, width, height, background) {
+    if (source.width === width && source.height === height) return source;
+    const out = document.createElement("canvas");
+    out.width = width;
+    out.height = height;
+    const ctx = out.getContext("2d");
+    ctx.fillStyle = background || "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(source, 0, 0);
+    return out;
+  }
+
+  /* 小红书卡片：整张画布按 3:4 竖页切开，一页一张 PNG。
+     切点优先落在块边界上——按固定高度硬切会把一段正文拦腰截断。 */
+  async function exportCards(options = {}) {
+    const items = getItems();
+    if (!items.length) throw new Error("这个画布还是空的，没东西可导出");
+    let box = contentBox(items);
+    if (!box) throw new Error("这个画布只有连线，没东西可导出");
+    /* 卡片四周留一圈底：文字紧贴画面边看着像被裁过 */
+    const pad = Math.max(12, Math.round(box.w * 0.045));
+    box = { x: box.x - pad, y: box.y - pad, w: box.w + pad * 2, h: box.h + pad * 2 };
+    const name = (getMeta().name || "画布").trim() || "画布";
+    const outWidth = Math.max(320, Number(options.width) || 1080);
+    const ratio = Number(options.ratio) || 4 / 3;
+    const scale = outWidth / box.w;
+    const pageH = box.w * ratio;
+    const bottom = box.y + box.h;
+
+    /* 所有块的上下边都能当切点，但只取页面靠下那一段里的，
+       否则每页都会被切得很短 */
+    const edges = [];
+    for (const item of items) {
+      if (!item || item.type === "connector" || item.type === "page") continue;
+      edges.push(item.y, item.y + item.h);
+    }
+    let cuts = [box.y];
+    while (cuts[cuts.length - 1] < bottom - 1) {
+      const top = cuts[cuts.length - 1];
+      let next = top + pageH;
+      if (next < bottom - 1) {
+        const low = top + pageH * 0.55;
+        const candidates = edges.filter((edge) => edge > low && edge <= top + pageH);
+        if (candidates.length) next = Math.max(...candidates);
+        next = Math.max(next, top + pageH * 0.3);
+      }
+      next = Math.min(next, bottom);
+      if (next <= top) break;
+      cuts.push(next);
+    }
+    /* 只比一页高一点点的时候并成一页：否则会多出一张几乎全白的第二张。
+       超出 15% 以上还是老实分页，硬并会把内容压出画面。 */
+    const contentH = bottom - box.y;
+    if (cuts.length === 3 && bottom - cuts[1] < pageH * 0.3 && contentH <= pageH * 1.15) {
+      cuts = [box.y, bottom];
+    }
+
+    const prepared = await prepareWorld();
+    const cards = [];
+    const total = cuts.length - 1;
+    /* 每页都出成一模一样的 3:4：内容不够一页就在下面补白，
+       不然最后一张会比别人矮一截，发出去像被裁过 */
+    const pageOut = Math.max(1, Math.round(pageH * scale));
+    const background = options.background || "#ffffff";
+    for (let index = 0; index < total; index += 1) {
+      const top = cuts[index];
+      const h = cuts[index + 1] - top;
+      const shot = await renderRegion(
+        prepared,
+        { x: box.x, y: top, w: box.w, h },
+        outWidth,
+        Math.max(1, Math.round(h * scale)),
+        scale,
+        (done, all) => {
+          options.onProgress?.({ index, total, tile: done, tiles: all });
+        },
+      );
+      /* 内容超过半页就补满 3:4；半页以下的（多见于并成一页的长图）
+         补到半页即可，再往上补就是一整片白 */
+      const targetH = Math.max(
+        shot.height,
+        shot.height >= pageOut * 0.55 ? pageOut : Math.round(pageOut * 0.55),
+      );
+      const canvas = padTo(shot, outWidth, targetH, background);
+      cards.push({
+        rel: `${String(index + 1).padStart(2, "0")}.png`,
+        data: canvas.toDataURL("image/png").split(",")[1],
+        width: outWidth,
+        height: canvas.height,
+      });
+    }
+    return {
+      format: "png",
+      name,
+      count: cards.length,
+      width: outWidth,
+      pageHeight: Math.round(pageH * scale),
+      cards,
+    };
+  }
+
   /* 按一块矩形面板的范围导出：框里所有块按层级合成，框外自然裁掉（装饰可以出血）。
      透明模式把面板自己整个摘掉，只留框里的内容；含底色模式只摘面板的外框和圆角。 */
   async function exportRegion(options = {}) {
@@ -1714,6 +1816,7 @@ export function createExporter({
   return {
     exportAs: run,
     exportSlices,
+    exportCards,
     exportRegion,
     exportPage,
     exportPagesPdf,

@@ -178,6 +178,9 @@ export const imageData = (id, src, linked) =>
 export const exportSave = (name, ext, data) => invoke("canvas_export_save", { name, ext, data });
 /* agent 导出：不弹框，直接写数据根下的 exports/ */
 export const exportAuto = (name, ext, data) => invoke("canvas_export_auto", { name, ext, data });
+
+/* 一批卡片一个文件夹（小红书那种 01.png、02.png）：单张走 exportAuto 建不了子目录 */
+export const exportCards = (name, files) => invoke("canvas_export_cards", { name, files });
 export const openExport = (path) => invoke("canvas_open_export", { path });
 /* 落图抓屏：抓窗口客户区当前画面，返回 PNG data URL；和屏幕像素一致 */
 export const captureViewport = () => invoke("webview_capture");

@@ -1449,6 +1449,21 @@ export const canvasAgent = {
     if (result.blocks) out.blocks = result.blocks;
     return out;
   },
+  /* 小红书卡片：按 3:4 竖页切成一组 PNG，写进 exports/<画布名>/01.png… */
+  exportCards: async (options = {}) => {
+    const result = await exporter.exportCards({ width: options.width || 1080, ratio: options.ratio });
+    const folder = await store.exportCards(
+      result.name,
+      result.cards.map((card) => ({ rel: card.rel, data: card.data })),
+    );
+    return {
+      path: folder,
+      format: "png",
+      count: result.count,
+      width: result.width,
+      pageHeight: result.pageHeight,
+    };
+  },
   clientWebExport: (dir, name) => {
     const target = String(dir || "").trim();
     if (!target) throw new Error("要给一个已经存在的导出文件夹 dir");

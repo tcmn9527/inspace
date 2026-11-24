@@ -15,6 +15,9 @@ const STORE_KEY = "inspace.assistant.open";
 const WIDTH_KEY = "inspace.assistant.width";
 const COMPOSE_HEIGHT_KEY = "inspace.assistant.compose-height";
 const MAX_ROUNDS = 8;
+/* 上下文长了先压一遍：30 条以上就摘要，保留最近 10 条原文 */
+const COMPRESS_AT = 30;
+const KEEP_RECENT = 10;
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -43,6 +46,10 @@ let config = null;
 let spaceKey = "";
 let images = [];
 
+/* 一个画布可以有多条会话：索引只存 id / 标题 / 时间，正文各存各的 key。 */
+let chats = [];
+let activeChat = "";
+
 /* 流式：后端每吐一段就发一条 assistant-delta，这里的 streamEl 直接追加文字，
    不走整页 render——整页重建会把滚动位置和光标打断。 */
 let streamSession = "";
@@ -57,11 +64,75 @@ function toolKey() {
   }
 }
 
-function chatKey() {
-  return `inspace.assistant.chat.${spaceKey || "global"}`;
+function chatScope() {
+  return spaceKey || "global";
+}
+
+function chatIndexKey() {
+  return `inspace.assistant.chats.${chatScope()}`;
+}
+
+function chatKey(id = activeChat) {
+  return `inspace.assistant.chat.${chatScope()}.${id || "default"}`;
+}
+
+function newChatId() {
+  return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/* 会话标题就取第一条用户消息的前 18 个字，不用再教用户起名字 */
+function titleOf(list) {
+  const first = (list || []).find((msg) => msg.role === "user" && String(msg.content || "").trim());
+  const text = String(first?.content || "").trim().replace(/\s+/g, " ");
+  return text ? text.slice(0, 18) : "";
+}
+
+function saveChats() {
+  try {
+    localStorage.setItem(chatIndexKey(), JSON.stringify({ activeId: activeChat, sessions: chats }));
+  } catch {
+    /* 索引存不下不影响这一轮对话 */
+  }
+}
+
+/* 老版本一条会话就存在不带 id 的 key 里：第一次打开时搬进「默认会话」，
+   不搬用户会以为聊天记录全没了。 */
+function loadChats() {
+  let index = null;
+  try {
+    index = JSON.parse(localStorage.getItem(chatIndexKey()) || "null");
+  } catch {
+    index = null;
+  }
+  if (!index || !Array.isArray(index.sessions) || !index.sessions.length) {
+    const id = newChatId();
+    let legacy = [];
+    try {
+      legacy = JSON.parse(localStorage.getItem(`inspace.assistant.chat.${chatScope()}`) || "[]");
+    } catch {
+      legacy = [];
+    }
+    const sessions = [{ id, title: titleOf(legacy) || "默认会话", updatedAt: Date.now() }];
+    if (Array.isArray(legacy) && legacy.length) {
+      try {
+        localStorage.setItem(chatKey(id), JSON.stringify(legacy));
+        localStorage.removeItem(`inspace.assistant.chat.${chatScope()}`);
+      } catch {
+        /* 搬不动就留着旧 key，不影响新会话 */
+      }
+    }
+    chats = sessions;
+    activeChat = id;
+    saveChats();
+  } else {
+    chats = index.sessions;
+    activeChat = chats.some((chat) => chat.id === index.activeId) ? index.activeId : chats[0].id;
+    if (index.activeId !== activeChat) saveChats();
+  }
 }
 
 function readStored() {
+  if (!activeChat) return [];
   try {
     const raw = localStorage.getItem(chatKey());
     const parsed = raw ? JSON.parse(raw) : null;
@@ -71,12 +142,87 @@ function readStored() {
   }
 }
 
+/* 只留文字：图片是 data URL，几张就能把 localStorage 撑爆，
+   重新打开会话时图也发不回模型，索性不存，正文里留个记号。 */
 function saveStored() {
+  if (!activeChat) return;
+  const light = messages.slice(-80).map((msg) => {
+    if (!msg.images?.length) return msg;
+    const { images: dropped, ...rest } = msg;
+    const head = String(rest.content || "").trim();
+    const mark = `[${dropped.length} 张图片]`;
+    return { ...rest, content: head ? `${head}\n${mark}` : mark };
+  });
   try {
-    localStorage.setItem(chatKey(), JSON.stringify(messages.slice(-80)));
+    localStorage.setItem(chatKey(), JSON.stringify(light));
   } catch {
     /* 存不下不影响这一轮对话 */
   }
+  const chat = chats.find((item) => item.id === activeChat);
+  if (!chat) return;
+  chat.updatedAt = Date.now();
+  const title = titleOf(messages);
+  if (title && title !== chat.title) {
+    chat.title = title;
+    renderChats();
+  }
+  saveChats();
+}
+
+function renderChats() {
+  if (!ui.chatSelect) return;
+  ui.chatSelect.replaceChildren();
+  for (const chat of chats) {
+    ui.chatSelect.append(new Option(chat.title || "新会话", chat.id));
+  }
+  ui.chatSelect.value = activeChat;
+  ui.chatSelect.disabled = chats.length < 2;
+}
+
+function createChat() {
+  if (running) return;
+  const id = newChatId();
+  chats.push({ id, title: "新会话", updatedAt: Date.now() });
+  activeChat = id;
+  messages = [];
+  saveChats();
+  renderChats();
+  render();
+  setStatus("");
+  ui.input.focus();
+}
+
+function switchChat(id) {
+  if (!id || id === activeChat || running) return;
+  activeChat = id;
+  saveChats();
+  messages = readStored();
+  renderChats();
+  render();
+  setStatus("");
+}
+
+function deleteChat() {
+  if (running || !activeChat) return;
+  const rest = chats.filter((chat) => chat.id !== activeChat);
+  try {
+    localStorage.removeItem(chatKey());
+  } catch {
+    /* 删不掉也继续，至少索引里不再有它 */
+  }
+  if (!rest.length) {
+    chats = [];
+    activeChat = "";
+    createChat();
+    return;
+  }
+  chats = rest;
+  activeChat = chats[chats.length - 1].id;
+  saveChats();
+  messages = readStored();
+  renderChats();
+  render();
+  setStatus("");
 }
 
 function setStatus(text, error = false) {
@@ -176,10 +322,65 @@ function listenStream() {
   });
 }
 
+/* 老的工具结果最占 token：一条文件读回来就几千字。
+   只压最老的那几条，最近 6 条原样留着——模型可能还要接着用。 */
+function trimOldToolResults() {
+  const indexes = messages.map((msg, index) => (msg.role === "tool" ? index : -1)).filter((i) => i >= 0);
+  const keep = new Set(indexes.slice(-6));
+  messages.forEach((msg, index) => {
+    if (msg.role !== "tool" || keep.has(index)) return;
+    const text = String(msg.content || "");
+    if (text.length <= 1200) return;
+    msg.content = `${text.slice(0, 700)}\n…（原 ${text.length} 字，已压缩）…`;
+  });
+}
+
+/* 条数太多就请模型把早期对话压成一段备忘：
+   用户要什么、改过哪些块、定了什么风格、还差哪一步。
+   摘要失败就只做工具结果瘦身，不让对话卡住。 */
+async function compressHistory() {
+  if (messages.length <= COMPRESS_AT) return;
+  const recent = messages.slice(-KEEP_RECENT);
+  const older = messages.slice(0, messages.length - KEEP_RECENT);
+  const lines = older
+    .filter((msg) => msg.role !== "tool" || String(msg.content || "").trim())
+    .map((msg) => `${msg.role}: ${String(msg.content || "").slice(0, 500)}`);
+  setStatus("上下文有点长，先压一遍…");
+  try {
+    const reply = await assistantChat({
+      messages: [
+        {
+          role: "user",
+          content: [
+            "把下面这段画布助手的历史对话压成不超过 300 字的备忘，只输出备忘本身：",
+            "1. 用户的目标是什么；2. 已经建过或改过哪些画布、块、模板；",
+            "3. 定下来的风格、尺寸、命名；4. 还差哪一步没做完。",
+            "",
+            lines.join("\n"),
+          ].join("\n"),
+        },
+      ],
+      tools: [],
+      session: `digest-${Date.now()}`,
+    });
+    const digest = String(reply?.text || "").trim();
+    if (!digest) return;
+    messages = [
+      { role: "assistant", content: `（之前对话的摘要，接着往下做）\n${digest}` },
+      ...recent,
+    ];
+    saveStored();
+    render();
+  } catch {
+    /* 压缩失败不是错误：保留原文继续跑，顶多这次多吃点 token */
+  }
+}
+
 async function runChatLoop() {
   const tools = TOOL_LIST.filter((tool) => !HIDDEN_TOOLS.has(tool.name));
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     if (canceled) return;
+    if (round > 0) trimOldToolResults();
     setStatus(`第 ${round + 1} / ${MAX_ROUNDS} 轮 · 生成中…`);
 
     const session = `chat-${Date.now()}-${round}`;
@@ -276,6 +477,7 @@ async function send(text) {
     if (!config?.configured || !config?.model) {
       throw new Error("还没配好 AI 助手：去设置 → AI 助手填接口地址、Key 和模型");
     }
+    await compressHistory();
     await runChatLoop();
   } catch (error) {
     setStatus(String(error?.message || error || "调用失败"), true);
@@ -356,6 +558,8 @@ export function initAssistantPanel() {
     stop: document.querySelector("#assistant-stop"),
     context: document.querySelector("#assistant-context"),
     resize: document.querySelector("#assistant-resize"),
+    chatSelect: document.querySelector("#assistant-chat-select"),
+    chatDelete: document.querySelector("#assistant-chat-del"),
   };
   if (!ui.panel || !ui.toggle) return;
 
@@ -372,12 +576,9 @@ export function initAssistantPanel() {
 
   ui.toggle.addEventListener("click", () => setOpen(ui.panel.hidden));
   ui.close.addEventListener("click", () => setOpen(false));
-  ui.newChat.addEventListener("click", () => {
-    messages = [];
-    render();
-    saveStored();
-    setStatus("");
-  });
+  ui.newChat.addEventListener("click", createChat);
+  ui.chatSelect?.addEventListener("change", () => switchChat(ui.chatSelect.value));
+  ui.chatDelete?.addEventListener("click", deleteChat);
   ui.form.addEventListener("submit", (event) => {
     event.preventDefault();
     void send(ui.input.value);
@@ -416,7 +617,18 @@ export function initAssistantPanel() {
     ui.form.classList.remove("is-dragover");
     void addImages(event.dataTransfer?.files);
   });
-  window.addEventListener("inspace:space-changed", refreshContext);
+  /* 换画布 = 换一整套会话：这一张画布的聊天记录不该跟着带到下一张 */
+  window.addEventListener("inspace:space-changed", () => {
+    const key = toolKey();
+    if (key !== spaceKey) {
+      spaceKey = key;
+      loadChats();
+      messages = readStored();
+      renderChats();
+      render();
+    }
+    refreshContext();
+  });
 
   listenStream();
   assistantApiGet()
@@ -430,7 +642,9 @@ export function initAssistantPanel() {
     });
 
   spaceKey = toolKey();
+  loadChats();
   messages = readStored();
+  renderChats();
   render();
   refreshContext();
   setupResize();

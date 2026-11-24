@@ -105,6 +105,49 @@
   background: color-mix(in srgb, var(--line) 18%, transparent);
 }
 
+/* 会话条：一个下拉选历史，右边一个删除。放在标题下面，
+   不跟消息混在一起，切画布时换的是这一条。 */
+.assistant-chats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 8px;
+}
+
+.assistant-chat-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font-size: 12px;
+}
+
+.assistant-chat-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.assistant-chat-del {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.assistant-chat-del:hover {
+  border-color: color-mix(in srgb, #c0392b 55%, transparent);
+  color: #c0392b;
+}
+
 .assistant-status {
   flex: 0 0 auto;
   padding: 7px 12px;

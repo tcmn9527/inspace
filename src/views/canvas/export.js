@@ -37,6 +37,7 @@ export const exporter = {
   ...rawExporter,
   exportAs: (...args) => withAllVisible(() => rawExporter.exportAs(...args)),
   exportSlices: (...args) => withAllVisible(() => rawExporter.exportSlices(...args)),
+  exportCards: (...args) => withAllVisible(() => rawExporter.exportCards(...args)),
   exportRegion: (...args) => withAllVisible(() => rawExporter.exportRegion(...args)),
   snapshot: (...args) => withAllVisible(() => rawExporter.snapshot(...args)),
 };

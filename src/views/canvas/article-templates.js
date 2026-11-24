@@ -276,7 +276,8 @@ export async function articleGenerate(spec = {}) {
      直接拿它的宽度生成文章，版式会散 */
   const width = PLATFORM_WIDTH[platform] || 780;
   const style = styleFromTemplate(template);
-  const space = await canvasAgent.spaceCreate(title);
+  /* parent 给了就建在那个分组里：推广稿、模板、草稿各归各的目录 */
+  const space = await canvasAgent.spaceCreate(title, spec.parent);
   const created = [];
 
   const place = async (block) => {

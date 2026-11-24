@@ -895,6 +895,7 @@ const TOOL_DEFS = [
     "一条调用排好整篇文章：新建画布，按标题 / 小标题 / 正文落文字块，位置、宽度和块高按字数自动算，不会互相压字。给了 template 就沿用那张模板画布的标题与正文字号、颜色，否则用内置版式。返回每个块的 id 和角色，想改哪块再用 block_update。排完用 article_export 导出。",
     {
       title: { type: "string", description: "文章标题，同时作为新画布的名字" },
+      parent: { type: "string", description: "可选：把这篇文章建在哪个分组里（分组名或 id）" },
       template: { type: "string", description: "可选：文章模板画布的名字或 id" },
       platform: {
         type: "string",
@@ -1555,6 +1556,7 @@ async function dispatch(name, args) {
       return onCanvas(args, () =>
         articleGenerate({
           title: args.title,
+          parent: args.parent,
           template: args.template,
           platform: args.platform,
           sections: args.sections,

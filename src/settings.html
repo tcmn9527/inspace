@@ -95,14 +95,15 @@
               </label>
               <label class="settings-field">
                 <span>模型名</span>
-                <input
-                  id="settings-gen-api-model"
-                  type="text"
-                  list="settings-gen-api-models"
-                  spellcheck="false"
-                  placeholder="点「重新读取模型」后挑一个，也可以手填"
-                />
-                <datalist id="settings-gen-api-models"></datalist>
+                <div class="model-picker">
+                  <input id="settings-gen-api-model" type="text" spellcheck="false" placeholder="点箭头挑一个，也可以手填" />
+                  <button class="model-picker-toggle" id="settings-gen-api-model-toggle" type="button" aria-label="选择模型">
+                    <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                      <path d="M2.5 4.5L6 8L9.5 4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </button>
+                  <div class="model-picker-panel" id="settings-gen-api-model-panel" hidden></div>
+                </div>
               </label>
               <label class="settings-field">
                 <span>API Key</span>
@@ -152,14 +153,15 @@
                 </label>
                 <label class="settings-field">
                   <span>模型</span>
-                  <input
-                    id="settings-video-model"
-                    type="text"
-                    list="settings-video-models"
-                    spellcheck="false"
-                    placeholder="点「读取模型列表」后挑一个，也可以手填"
-                  />
-                  <datalist id="settings-video-models"></datalist>
+                  <div class="model-picker">
+                    <input id="settings-video-model" type="text" spellcheck="false" placeholder="点箭头挑一个，也可以手填" />
+                    <button class="model-picker-toggle" id="settings-video-model-toggle" type="button" aria-label="选择模型">
+                      <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                        <path d="M2.5 4.5L6 8L9.5 4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    <div class="model-picker-panel" id="settings-video-model-panel" hidden></div>
+                  </div>
                 </label>
                 <label class="settings-field">
                   <span>并行数</span>
@@ -201,8 +203,15 @@
                 </label>
                 <label class="settings-field">
                   <span>模型</span>
-                  <input id="settings-assistant-model" type="text" list="settings-assistant-models" spellcheck="false" placeholder="读取模型后选择，或手填" />
-                  <datalist id="settings-assistant-models"></datalist>
+                  <div class="model-picker">
+                    <input id="settings-assistant-model" type="text" spellcheck="false" placeholder="点箭头挑一个，也可以手填" />
+                    <button class="model-picker-toggle" id="settings-assistant-model-toggle" type="button" aria-label="选择模型">
+                      <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                        <path d="M2.5 4.5L6 8L9.5 4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    <div class="model-picker-panel" id="settings-assistant-model-panel" hidden></div>
+                  </div>
                 </label>
                 <div class="settings-actions">
                   <button class="plain-btn" id="settings-assistant-models-btn" type="button">读取模型</button>

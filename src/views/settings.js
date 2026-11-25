@@ -11,11 +11,16 @@ import { choiceDialog, confirmDialog, progressDialog } from "./dialog.js";
 import { currentTheme } from "./theme.js";
 import { cosmosRoute, cosmosRouteSet } from "./cosmos.js";
 import { assistantApiConfig, assistantApiSet, assistantModelVision, assistantModels, skillDelete, skillsList } from "./assistant-store.js";
+import { createModelPicker } from "./model-picker.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emitTo } = window.__TAURI__.event;
 
 const ui = {};
+/* 三处模型选择器（AI 图片 / AI 视频 / AI 助手），在 initSettings 里建 */
+let genModelPicker = null;
+let videoModelPicker = null;
+let assistantModelPicker = null;
 let statusTimer = 0;
 let currentRoot = "";
 let mcpInfo = null;
@@ -88,7 +93,8 @@ export function initSettings(options = {}) {
   ui.genApiProtocol = document.querySelector("#settings-gen-api-protocol");
   ui.genApiUrl = document.querySelector("#settings-gen-api-url");
   ui.genApiModel = document.querySelector("#settings-gen-api-model");
-  ui.genApiModels = document.querySelector("#settings-gen-api-models");
+  ui.genApiModelToggle = document.querySelector("#settings-gen-api-model-toggle");
+  ui.genApiModelPanel = document.querySelector("#settings-gen-api-model-panel");
   ui.genApiHint = document.querySelector("#settings-gen-api-hint");
   ui.genApiKey = document.querySelector("#settings-gen-api-key");
   ui.genApiParallel = document.querySelector("#settings-gen-api-parallel");
@@ -99,7 +105,8 @@ export function initSettings(options = {}) {
   ui.videoUrl = document.querySelector("#settings-video-url");
   ui.videoKey = document.querySelector("#settings-video-key");
   ui.videoModel = document.querySelector("#settings-video-model");
-  ui.videoModels = document.querySelector("#settings-video-models");
+  ui.videoModelToggle = document.querySelector("#settings-video-model-toggle");
+  ui.videoModelPanel = document.querySelector("#settings-video-model-panel");
   ui.videoHint = document.querySelector("#settings-video-hint");
   ui.videoParallel = document.querySelector("#settings-video-parallel");
   ui.videoReload = document.querySelector("#settings-video-reload");
@@ -111,7 +118,8 @@ export function initSettings(options = {}) {
   ui.assistantUrl = document.querySelector("#settings-assistant-url");
   ui.assistantKey = document.querySelector("#settings-assistant-key");
   ui.assistantModel = document.querySelector("#settings-assistant-model");
-  ui.assistantModels = document.querySelector("#settings-assistant-models");
+  ui.assistantModelToggle = document.querySelector("#settings-assistant-model-toggle");
+  ui.assistantModelPanel = document.querySelector("#settings-assistant-model-panel");
   ui.assistantTemperature = document.querySelector("#settings-assistant-temperature");
   ui.assistantMaxTokens = document.querySelector("#settings-assistant-maxtokens");
   ui.assistantSystem = document.querySelector("#settings-assistant-system");
@@ -122,6 +130,30 @@ export function initSettings(options = {}) {
   ui.assistantStatus = document.querySelector("#settings-assistant-status");
   ui.assistantError = document.querySelector("#settings-assistant-error");
   ui.skillList = document.querySelector("#settings-skill-list");
+
+  /* 模型选择器：点箭头就把接口重新问一遍（load 每次展开都会跑），
+     所以不管设置页是刚打开还是放了很久，看到的都是当下支持的模型 */
+  genModelPicker = createModelPicker({
+    input: ui.genApiModel,
+    toggle: ui.genApiModelToggle,
+    panel: ui.genApiModelPanel,
+    load: () => invoke("gen_api_models", { config: readGenApiForm() }),
+    onPick: () => void saveGenApiForm(),
+  });
+  videoModelPicker = createModelPicker({
+    input: ui.videoModel,
+    toggle: ui.videoModelToggle,
+    panel: ui.videoModelPanel,
+    load: () => invoke("gen_video_models", { config: readVideoForm() }),
+    onPick: () => void saveVideoForm(),
+  });
+  assistantModelPicker = createModelPicker({
+    input: ui.assistantModel,
+    toggle: ui.assistantModelToggle,
+    panel: ui.assistantModelPanel,
+    load: () => assistantModels(readAssistantForm()),
+    onPick: () => void saveAssistantForm(),
+  });
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -152,7 +184,7 @@ export function initSettings(options = {}) {
     /* 换了协议就是换了服务商：旧模型名不一定还在，清掉让人重挑，
        免得拿着上一家的模型名去发请求，报一串看不懂的 404 */
     ui.genApiModel.value = "";
-    ui.genApiModels.replaceChildren();
+    genModelPicker?.setItems([]);
     paintGenApi();
     await saveGenApiForm();
     await reloadGenApiModels();
@@ -161,7 +193,7 @@ export function initSettings(options = {}) {
   ui.videoProtocol.addEventListener("change", async () => {
     /* 换协议就是换了一家，旧模型名不一定还在 */
     ui.videoModel.value = "";
-    ui.videoModels.replaceChildren();
+    videoModelPicker?.setItems([]);
     paintVideoUrl();
     await saveVideoForm();
     await reloadVideoModels();
@@ -752,14 +784,13 @@ function fillGenApiForm() {
   paintGenApi();
 }
 
-/* 模型名改成可编辑的输入框：万相、MiniMax 这些没有 /models 接口，
-   只能给一份内置清单，用户还得能自己填新模型。清单挂成候选，不挡手填。 */
+/* 把读到的模型交给选择器当候选。输入框仍然可编辑：万相、方舟、MiniMax 这些
+   没有 /models 接口，内置清单一更新就跟不上，得让用户自己能填。 */
 function fillModelOptions(names) {
   const current = genApi.model || "";
   const list = [...new Set(names)];
   if (current && !list.includes(current)) list.unshift(current);
-  ui.genApiModels.replaceChildren();
-  for (const name of list) ui.genApiModels.append(new Option(name, name));
+  genModelPicker?.setItems(list);
   if (!ui.genApiModel.value.trim()) {
     ui.genApiModel.value = current || list[0] || "";
   }
@@ -910,8 +941,7 @@ function fillVideoModels(names) {
   const current = videoApi.model || "";
   const list = [...new Set(names)];
   if (current && !list.includes(current)) list.unshift(current);
-  ui.videoModels.replaceChildren();
-  for (const name of list) ui.videoModels.append(new Option(name, name));
+  videoModelPicker?.setItems(list);
   if (!ui.videoModel.value.trim()) {
     ui.videoModel.value = current || list[0] || "";
   }
@@ -1226,11 +1256,11 @@ async function saveAssistantForm() {
 }
 
 async function reloadAssistantModels() {
-  if (!ui.assistantModels) return;
+  if (!ui.assistantModel) return;
   const form = readAssistantForm();
   showAssistantError("");
   if (!form.baseUrl) {
-    ui.assistantModels.replaceChildren();
+    assistantModelPicker?.setItems([]);
     showAssistantStatus("先把接口地址填上");
     return;
   }
@@ -1240,7 +1270,8 @@ async function reloadAssistantModels() {
   try {
     assistantConfig = await assistantApiSet(form);
     const names = await assistantModels(form);
-    ui.assistantModels.replaceChildren(...names.map((name) => new Option(name, name)));
+    assistantModelPicker?.setItems(names);
+    if (!ui.assistantModel.value.trim() && names.length) ui.assistantModel.value = names[0];
     showAssistantStatus(names.length ? `读到 ${names.length} 个模型` : "没读到模型，可以直接手填模型名");
   } catch (error) {
     showAssistantError(String(error));
@@ -1329,7 +1360,7 @@ async function refreshAssistant() {
     assistantConfig = await assistantApiConfig();
     fillAssistantForm(assistantConfig);
     const names = assistantConfig.baseUrl && assistantConfig.apiKey ? await assistantModels(assistantConfig) : [];
-    ui.assistantModels.replaceChildren(...names.map((name) => new Option(name, name)));
+    assistantModelPicker?.setItems(names);
     ui.assistantVision.checked = await assistantModelVision(assistantConfig.model).catch(
       () => Boolean(assistantConfig.supportsImages),
     );

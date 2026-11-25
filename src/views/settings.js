@@ -88,6 +88,8 @@ export function initSettings(options = {}) {
   ui.genApiProtocol = document.querySelector("#settings-gen-api-protocol");
   ui.genApiUrl = document.querySelector("#settings-gen-api-url");
   ui.genApiModel = document.querySelector("#settings-gen-api-model");
+  ui.genApiModels = document.querySelector("#settings-gen-api-models");
+  ui.genApiHint = document.querySelector("#settings-gen-api-hint");
   ui.genApiKey = document.querySelector("#settings-gen-api-key");
   ui.genApiParallel = document.querySelector("#settings-gen-api-parallel");
   ui.genApiReload = document.querySelector("#settings-gen-api-reload");
@@ -97,6 +99,8 @@ export function initSettings(options = {}) {
   ui.videoUrl = document.querySelector("#settings-video-url");
   ui.videoKey = document.querySelector("#settings-video-key");
   ui.videoModel = document.querySelector("#settings-video-model");
+  ui.videoModels = document.querySelector("#settings-video-models");
+  ui.videoHint = document.querySelector("#settings-video-hint");
   ui.videoParallel = document.querySelector("#settings-video-parallel");
   ui.videoReload = document.querySelector("#settings-video-reload");
   ui.videoStatus = document.querySelector("#settings-video-status");
@@ -148,11 +152,19 @@ export function initSettings(options = {}) {
   ui.genApiModel.addEventListener("change", saveGenApiForm);
   ui.genApiParallel.addEventListener("change", saveGenApiForm);
   ui.genApiProtocol.addEventListener("change", async () => {
+    /* 换了协议就是换了服务商：旧模型名不一定还在，清掉让人重挑，
+       免得拿着上一家的模型名去发请求，报一串看不懂的 404 */
+    ui.genApiModel.value = "";
+    ui.genApiModels.replaceChildren();
+    paintGenApi();
     await saveGenApiForm();
     await reloadGenApiModels();
   });
   ui.genApiReload.addEventListener("click", reloadGenApiModels);
   ui.videoProtocol.addEventListener("change", async () => {
+    /* 换协议就是换了一家，旧模型名不一定还在 */
+    ui.videoModel.value = "";
+    ui.videoModels.replaceChildren();
     paintVideoUrl();
     await saveVideoForm();
     await reloadVideoModels();
@@ -681,6 +693,40 @@ async function clearCosmosTextures() {
 let genApi = { enabled: true, protocol: "images", baseUrl: "", apiKey: "", model: "", parallel: 2 };
 let genBusy = false;
 
+/* 七种协议：前两种是 OpenAI 的形状，其余各家按官方接口来。
+   地址留空就用该协议的官方默认，所以占位符写的就是那个默认值。 */
+const GEN_API_PROTOCOLS = new Set([
+  "images",
+  "chat",
+  "gemini",
+  "dashscope",
+  "ark",
+  "minimax",
+  "custom",
+]);
+
+const GEN_API_URL_HINTS = {
+  images: "https://api.openai.com/v1",
+  chat: "https://api.openai.com/v1",
+  gemini: "https://generativelanguage.googleapis.com",
+  dashscope: "https://dashscope.aliyuncs.com",
+  ark: "https://ark.cn-beijing.volces.com/api/v3",
+  minimax: "https://api.minimax.cn",
+  custom: "https://你的网关/完整生成地址",
+};
+
+/* 每个协议自己要交代的事：地址怎么填、能不能带参考图、模型在哪取。
+   写在提示行里，省得用户一个个试出来。 */
+const GEN_API_HINTS = {
+  images: "填到 /v1 为止，程序自己拼 /images/generations 和 /images/edits。支持参考图与局部重绘（可带遮罩）。",
+  chat: "填到 /v1 为止，走 /chat/completions 多模态。能带参考图，但尺寸由模型定，控制不了。",
+  gemini: "地址可留空（用官方）。模型挑 gemini-*-image 那几档能带参考图，imagen-* 只吃文生图；比例按最接近的一档取。",
+  dashscope: "地址可留空（用官方）。文生图是原生异步，出图要轮询几十秒；参考图只收公网 URL，画布里的本地图发不进去。想用 qwen-image 走兼容模式，请选 OpenAI Images 协议、地址填 …/compatible-mode/v1。",
+  ark: "填到 /api/v3 为止。形状同 OpenAI Images；参考图只收公网 URL，画布里的本地图发不进去。",
+  minimax: "地址可留空（用国内站）。同步返回；参考图走 subject_reference，一次只带一张。",
+  custom: "接口地址填完整的生成地址（不再拼路径）。按 OpenAI 图片的 JSON 格式发，不带参考图。",
+};
+
 function showGenApiError(message) {
   ui.genApiError.textContent = message;
   ui.genApiError.hidden = !message;
@@ -692,37 +738,52 @@ function showGenApiStatus(message) {
 }
 
 function apiProblem(config = genApi) {
-  if (!config.baseUrl.trim()) return "接口地址";
+  /* 除自定义之外都有官方默认地址，地址留空不算缺（和后端 problem() 保持一致） */
+  if (config.protocol === "custom" && !config.baseUrl.trim()) return "接口地址";
   if (!config.model.trim()) return "模型名";
   if (!(config.apiKey || "").trim()) return "API Key";
   return "";
 }
 
+/* 协议换了，提示行和地址占位符跟着换 —— 各家的默认地址和能不能带图都不一样 */
+function paintGenApi() {
+  const protocol = ui.genApiProtocol.value;
+  ui.genApiUrl.placeholder = GEN_API_URL_HINTS[protocol] || "";
+  ui.genApiHint.textContent = GEN_API_HINTS[protocol] || "";
+}
+
 function fillGenApiForm() {
-  ui.genApiProtocol.value = genApi.protocol === "chat" ? "chat" : "images";
+  ui.genApiProtocol.value = GEN_API_PROTOCOLS.has(genApi.protocol)
+    ? genApi.protocol
+    : "images";
   ui.genApiUrl.value = genApi.baseUrl || "";
   ui.genApiKey.value = genApi.apiKey || "";
   ui.genApiParallel.value = String(genApi.parallel || 2);
   fillModelOptions([]);
+  paintGenApi();
 }
 
-/* 模型下拉只有列表里那几项；已保存的模型即使这次没读回来也要先占一项，
-   别让用户以为自己配的模型没了。 */
+/* 模型名改成可编辑的输入框：万相、MiniMax 这些没有 /models 接口，
+   只能给一份内置清单，用户还得能自己填新模型。清单挂成候选，不挡手填。 */
 function fillModelOptions(names) {
   const current = genApi.model || "";
-  ui.genApiModel.replaceChildren();
   const list = [...new Set(names)];
   if (current && !list.includes(current)) list.unshift(current);
-  for (const name of list) ui.genApiModel.append(new Option(name, name));
-  ui.genApiModel.value = current || list[0] || "";
-  ui.genApiModel.disabled = !list.length || genBusy;
+  ui.genApiModels.replaceChildren();
+  for (const name of list) ui.genApiModels.append(new Option(name, name));
+  if (!ui.genApiModel.value.trim()) {
+    ui.genApiModel.value = current || list[0] || "";
+  }
+  ui.genApiModel.disabled = genBusy;
 }
 
 function readGenApiForm() {
   return {
     ...genApi,
     enabled: true,
-    protocol: ui.genApiProtocol.value === "chat" ? "chat" : "images",
+    protocol: GEN_API_PROTOCOLS.has(ui.genApiProtocol.value)
+      ? ui.genApiProtocol.value
+      : "images",
     baseUrl: ui.genApiUrl.value.trim(),
     model: ui.genApiModel.value.trim(),
     apiKey: ui.genApiKey.value,
@@ -753,13 +814,14 @@ async function saveGenApiForm() {
 
 async function reloadGenApiModels() {
   const form = readGenApiForm();
-  if (!form.baseUrl.trim()) {
-    fillModelOptions([]);
-    showGenApiError("先把接口地址填上");
+  /* 万相、方舟、MiniMax 没有列表接口，后端直接给内置清单，不用联网也不用 Key */
+  const offline =
+    form.protocol === "dashscope" || form.protocol === "minimax" || form.protocol === "ark";
+  if (form.protocol === "custom" && !form.baseUrl.trim()) {
+    showGenApiError("自定义协议要填完整的生成地址");
     return;
   }
-  if (!(form.apiKey || "").trim()) {
-    fillModelOptions([]);
+  if (!offline && !(form.apiKey || "").trim()) {
     showGenApiError("先把 API Key 填上");
     return;
   }
@@ -771,7 +833,7 @@ async function reloadGenApiModels() {
     const names = await invoke("gen_api_models", { config: form });
     fillModelOptions(names);
     showGenApiStatus(`读到 ${names.length} 个模型；挑一个就能出图`);
-    /* 下拉里预选的不一定是已保存的那个：把它落库，界面显示的就是真会用的 */
+    /* 清单里预选的不一定是已保存的那个：把它落库，界面显示的就是真会用的 */
     if (ui.genApiModel.value && ui.genApiModel.value !== genApi.model) {
       await saveGenApiForm();
       showGenApiStatus(`读到 ${names.length} 个模型；现在用的是 ${ui.genApiModel.value}`);
@@ -782,7 +844,8 @@ async function reloadGenApiModels() {
     showGenApiError(String(error));
   } finally {
     ui.genApiReload.disabled = false;
-    ui.genApiModel.disabled = !ui.genApiModel.options.length;
+    /* 模型框始终可编辑，读不到清单也能手填 */
+    ui.genApiModel.disabled = false;
   }
 }
 
@@ -793,14 +856,49 @@ async function refreshGen() {
   genApi.enabled = true;
   fillGenApiForm();
   const missing = apiProblem();
-  showGenApiStatus(missing ? `还差：${missing}` : `已连：${genApi.baseUrl} · ${genApi.model}`);
+  showGenApiStatus(
+    missing
+      ? `还差：${missing}`
+      : `已连：${genApi.baseUrl || GEN_API_URL_HINTS[genApi.protocol] || "官方默认地址"} · ${genApi.model}`,
+  );
 }
 
 /* ---------- 视频生成 API ----------
-   视频没有本地兜底，配置好就能用。三家协议：OpenAI videos 拉 /models；
-   海螺和 DashScope 没有列表接口，模型清单在后端内置。 */
+   视频没有本地兜底，配置好就能用。七种协议：OpenAI 兼容网关去 /models 拉模型，
+   其余六家的模型清单在后端内置（各家都没有统一的列表接口）。 */
 let videoApi = { protocol: "openai", baseUrl: "", apiKey: "", model: "" };
 let videoDefaultDir = "";
+
+const VIDEO_PROTOCOLS = new Set([
+  "openai",
+  "minimax",
+  "dashscope",
+  "veo",
+  "ark",
+  "kling",
+  "custom",
+]);
+
+const VIDEO_URL_HINTS = {
+  openai: "https://api.openai.com/v1",
+  minimax: "https://api.minimax.cn",
+  dashscope: "https://dashscope.aliyuncs.com",
+  veo: "https://generativelanguage.googleapis.com",
+  ark: "https://ark.cn-beijing.volces.com/api/v3",
+  kling: "https://api-beijing.klingai.com",
+  custom: "https://你的网关根地址",
+};
+
+/* 各家对首帧、时长、模型名的讲究不一样，写在提示行里省得用户试错 */
+const VIDEO_PROTOCOL_HINTS = {
+  openai: "填到 /v1 为止，走 /videos。首帧图用 multipart 传，能直接吃画布上的图。",
+  minimax: "地址可留空（用国内站）。首帧图吃 Data URL；时长按 6 秒 / 10 秒两档取。",
+  dashscope: "地址可留空（用官方）。万相和百炼托管的可灵都走这套；首帧只收公网 URL，画布里的本地图发不进去。",
+  veo: "地址可留空（用官方）。模型名要带 -preview 后缀；时长只认 4 / 6 / 8 秒，首帧吃 base64。",
+  ark: "填到 /api/v3 为止。比例和时长是接在提示词后面的 --ratio / --duration 写法，程序已经拼好。",
+  kling: "地址可留空（用北京站）。模型名照控制台填；时长只有 5 秒和 10 秒两档，首帧走 base64。",
+  custom: "接口地址填网关根地址（程序在后面拼 /videos），形状照 OpenAI videos。",
+};
 
 function showVideoError(message) {
   ui.videoError.textContent = message;
@@ -814,29 +912,27 @@ function showVideoStatus(message) {
 
 function paintVideoUrl() {
   const protocol = ui.videoProtocol.value;
-  ui.videoUrl.placeholder =
-    protocol === "minimax"
-      ? "https://api.minimax.cn"
-      : protocol === "dashscope"
-        ? "https://dashscope.aliyuncs.com"
-        : "https://api.openai.com/v1";
+  ui.videoUrl.placeholder = VIDEO_URL_HINTS[protocol] || "";
+  ui.videoHint.textContent = VIDEO_PROTOCOL_HINTS[protocol] || "";
 }
 
+/* 和图片侧一样：模型框可编辑，清单只当候选 */
 function fillVideoModels(names) {
   const current = videoApi.model || "";
-  ui.videoModel.replaceChildren();
   const list = [...new Set(names)];
   if (current && !list.includes(current)) list.unshift(current);
-  for (const name of list) ui.videoModel.append(new Option(name, name));
-  ui.videoModel.value = current || list[0] || "";
-  ui.videoModel.disabled = !list.length;
+  ui.videoModels.replaceChildren();
+  for (const name of list) ui.videoModels.append(new Option(name, name));
+  if (!ui.videoModel.value.trim()) {
+    ui.videoModel.value = current || list[0] || "";
+  }
+  ui.videoModel.disabled = false;
 }
 
 function fillVideoForm() {
-  ui.videoProtocol.value =
-    videoApi.protocol === "minimax" || videoApi.protocol === "dashscope"
-      ? videoApi.protocol
-      : "openai";
+  ui.videoProtocol.value = VIDEO_PROTOCOLS.has(videoApi.protocol)
+    ? videoApi.protocol
+    : "openai";
   ui.videoUrl.value = videoApi.baseUrl || "";
   ui.videoKey.value = videoApi.apiKey || "";
   ui.videoParallel.value = String(videoApi.parallel || 2);
@@ -891,7 +987,10 @@ async function saveVideoForm() {
 
 async function reloadVideoModels(quiet = false) {
   const form = readVideoForm();
-  if (form.protocol === "openai" && !(form.apiKey || "").trim() && !form.baseUrl) {
+  /* 只有 OpenAI 兼容网关和自定义要去拉 /models；其余都是后端内置清单，
+     不联网也不需要 Key */
+  const needsNetwork = form.protocol === "openai" || form.protocol === "custom";
+  if (needsNetwork && !(form.apiKey || "").trim() && !form.baseUrl) {
     fillVideoModels([]);
     showVideoStatus("");
     if (!quiet) showVideoError("先把接口地址或 API Key 填上");
@@ -915,7 +1014,7 @@ async function reloadVideoModels(quiet = false) {
     else showVideoError(String(error));
   } finally {
     ui.videoReload.disabled = false;
-    ui.videoModel.disabled = !ui.videoModel.options.length;
+    ui.videoModel.disabled = false;
   }
 }
 

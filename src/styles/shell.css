@@ -298,6 +298,12 @@
   border-color: var(--accent);
 }
 
+/* 协议说明贴着上面那行，左边缩进对齐输入框（64px 标签 + 10px 间距），
+   免得它横穿整行、把下面的字段挤散 */
+.settings-gen-api .settings-hint {
+  margin: 2px 0 10px 74px;
+}
+
 /* 视频本地引擎的四个文件行：名字、文件名（截断）、选择按钮 */
 .settings-video-files .settings-field {
   grid-template-columns: 64px minmax(0, 1fr) auto;

@@ -1,7 +1,16 @@
 /* 生图 API：设置里配好接口地址、Key 和模型名之后，出图不走本地扩散引擎，
-   而是把提示词（和参考图）发给远端。支持两种协议：
+   而是把提示词（和参考图）发给远端。协议按各家的官方接口来分：
    - images：OpenAI Images 风格，/images/generations 与 /images/edits（multipart，可带 mask）
    - chat：/chat/completions 多模态，提示词和图进消息，图片从返回里找
+   - gemini：Google Gemini 原生 generateContent（imagen-* 走 predict），图片是返回里的 inline_data
+   - dashscope：通义万相原生异步，提交拿 task_id 再轮询 /api/v1/tasks/{id}
+   - ark：火山方舟 Seedream，形状照 OpenAI Images，只是默认地址和尺寸写法不同
+   - minimax：MiniMax /v1/image_generation，同步返回 base64 或 URL
+   - custom：自定义网关，接口地址填完整的生成地址，按 OpenAI 图片的 JSON 格式发
+
+   带参考图这件事各家差别很大：OpenAI/Gemini/MiniMax 能直接吃本地图片数据，
+   通义万相和火山方舟只收公网可访问的 URL，所以那几个协议在带图时直接说明原因让用户换协议，
+   而不是把本地图硬塞过去再收一个看不懂的 400。
 
    请求是同步的（ureq），在后台线程里跑；取消只能等请求回来再认作废——
    这和放大那条路一样：网络那头掐不断，界面先按「已取消」显示。 */
@@ -70,8 +79,9 @@ impl ApiConfig {
 
     /// 缺哪样在 `problem()` 里说清楚。
     pub fn problem(&self) -> Option<String> {
-        if self.base_url.trim().is_empty() {
-            return Some("接口地址还没填".to_string());
+        /* 除自定义之外都有官方默认地址，地址留空不算缺 */
+        if self.protocol() == Protocol::Custom && self.base_url.trim().is_empty() {
+            return Some("接口地址还没填（自定义协议要填完整的生成地址）".to_string());
         }
         if self.model.trim().is_empty() {
             return Some("模型名还没填".to_string());
@@ -85,13 +95,30 @@ impl ApiConfig {
     fn protocol(&self) -> Protocol {
         match self.protocol.as_str() {
             "chat" => Protocol::Chat,
+            "gemini" => Protocol::Gemini,
+            "dashscope" => Protocol::DashScope,
+            "ark" => Protocol::Ark,
+            "minimax" => Protocol::Minimax,
+            "custom" => Protocol::Custom,
             _ => Protocol::Images,
         }
     }
 
-    /// 用户填的根地址可能带尾巴斜杠，拼路径前统一去掉。
+    /// 用户填的根地址可能带尾巴斜杠，拼路径前统一去掉；
+    /// 没填就落到该协议的官方地址（自定义协议除外，它必须自己填完整的）。
     fn base(&self) -> String {
-        self.base_url.trim().trim_end_matches('/').to_string()
+        let text = self.base_url.trim().trim_end_matches('/');
+        if !text.is_empty() {
+            return text.to_string();
+        }
+        match self.protocol() {
+            Protocol::Ark => "https://ark.cn-beijing.volces.com/api/v3",
+            Protocol::Gemini => "https://generativelanguage.googleapis.com",
+            Protocol::DashScope => "https://dashscope.aliyuncs.com",
+            Protocol::Minimax => "https://api.minimax.cn",
+            _ => "https://api.openai.com/v1",
+        }
+        .to_string()
     }
 }
 
@@ -99,6 +126,11 @@ impl ApiConfig {
 enum Protocol {
     Images,
     Chat,
+    Gemini,
+    DashScope,
+    Ark,
+    Minimax,
+    Custom,
 }
 
 pub fn load(db: &DbState) -> ApiConfig {
@@ -137,9 +169,15 @@ pub fn gen_api_set(
 ) -> Result<ApiConfig, String> {
     let mut next = config;
     next.protocol = match next.protocol.as_str() {
-        "chat" => "chat".to_string(),
-        _ => "images".to_string(),
-    };
+        "chat" => "chat",
+        "gemini" => "gemini",
+        "dashscope" => "dashscope",
+        "ark" => "ark",
+        "minimax" => "minimax",
+        "custom" => "custom",
+        _ => "images",
+    }
+    .to_string();
     next.base_url = next.base_url.trim().trim_end_matches('/').to_string();
     next.model = next.model.trim().to_string();
     next.api_key = next.api_key.trim().to_string();
@@ -164,13 +202,115 @@ pub async fn gen_api_models(config: ApiConfig) -> Result<Vec<String>, String> {
         .map_err(|e| format!("读取模型列表的任务起不来：{e}"))?
 }
 
-fn fetch_models(config: &ApiConfig) -> Result<Vec<String>, String> {
-    if config.base_url.trim().is_empty() {
-        return Err("先把接口地址填上".to_string());
+/* 地址校验：留空时除自定义外都用官方默认，所以不算错。 */
+fn check_base(config: &ApiConfig) -> Result<(), String> {
+    let text = config.base_url.trim();
+    if text.is_empty() {
+        if config.protocol() == Protocol::Custom {
+            return Err("自定义协议要填完整的生成地址".to_string());
+        }
+        return Ok(());
     }
-    if !config.base_url.trim().starts_with("http://") && !config.base_url.trim().starts_with("https://") {
+    if !text.starts_with("http://") && !text.starts_with("https://") {
         return Err("接口地址要以 http:// 或 https:// 开头".to_string());
     }
+    Ok(())
+}
+
+/// 通义万相的文生图模型。这份是快照，平台上新模型比这里快；
+/// 模型框可以手填，清单只是给个起点。
+fn dashscope_image_models() -> Vec<String> {
+    [
+        "wan2.5-t2i-preview",
+        "wan2.2-t2i-plus",
+        "wan2.2-t2i-flash",
+        "wan2.1-t2i-turbo",
+        "wan2.1-t2i-plus",
+        "wanx2.1-t2i-turbo",
+        "wanx2.1-t2i-plus",
+    ]
+    .iter()
+    .map(|name| name.to_string())
+    .collect()
+}
+
+fn minimax_image_models() -> Vec<String> {
+    ["image-01", "image-01-live"]
+        .iter()
+        .map(|name| name.to_string())
+        .collect()
+}
+
+/// 方舟的模型名是「版本号后缀」写法，控制台上换了版本这里就对不上，
+/// 所以模型框可以手填，这份清单只是给个起点。
+fn ark_image_models() -> Vec<String> {
+    [
+        "doubao-seedream-5-5-261028",
+        "doubao-seedream-5-0-pro-260628",
+        "doubao-seedream-4-0-250828",
+        "doubao-seedream-3-0-t2i-250415",
+    ]
+    .iter()
+    .map(|name| name.to_string())
+    .collect()
+}
+
+/// Gemini 的列表是 {models:[{name:"models/gemini-2.5-flash-image",...}]}，
+/// 名字前面带 "models/" 前缀，出图要的是后半截。
+/// 顺手只留能出图的那些（名字里带 image / imagen），省得在一长串文本模型里翻。
+fn gemini_models(config: &ApiConfig) -> Result<Vec<String>, String> {
+    check_base(config)?;
+    let url = format!("{}/v1beta/models", config.base());
+    let resp = agent()
+        .get(&url)
+        .set("x-goog-api-key", config.api_key.trim())
+        .call()
+        .map_err(|error| match error {
+            ureq::Error::Status(401, _) | ureq::Error::Status(403, _) => {
+                "服务器能连上，但 API Key 被拒了（401/403），检查一下 Key".to_string()
+            }
+            ureq::Error::Status(code, resp) => {
+                let body = read_body(resp).unwrap_or_default();
+                format!("服务器回了 HTTP {code}：{}", trim_text(&body, 300))
+            }
+            other => format!("连不上：{other}"),
+        })?;
+    let text = read_body(resp)?;
+    let value: Value =
+        serde_json::from_str(&text).map_err(|e| format!("接口返回的不是 JSON：{e}｜{}", trim_text(&text, 300)))?;
+    let mut names: Vec<String> = value
+        .get("models")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| row.get("name").and_then(Value::as_str))
+                .map(|name| name.trim_start_matches("models/").to_string())
+                .filter(|name| {
+                    let lower = name.to_ascii_lowercase();
+                    lower.contains("image") || lower.starts_with("imagen")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names.dedup();
+    if names.is_empty() {
+        return Err("这个 Key 下没有能出图的模型（名字里带 image 的一个都没读到）".to_string());
+    }
+    Ok(names)
+}
+
+fn fetch_models(config: &ApiConfig) -> Result<Vec<String>, String> {
+    /* 万相、方舟和 MiniMax 没有公开的「列出模型」接口，直接给一份常用清单；
+       Gemini 有列表但字段形状不同，单独走一条。其余按 OpenAI 的 GET /models。 */
+    match config.protocol() {
+        Protocol::DashScope => return Ok(dashscope_image_models()),
+        Protocol::Minimax => return Ok(minimax_image_models()),
+        Protocol::Ark => return Ok(ark_image_models()),
+        Protocol::Gemini => return gemini_models(config),
+        _ => {}
+    }
+    check_base(config)?;
     let url = format!("{}/models", config.base());
     let request = agent().get(&url);
     let request = if config.api_key.trim().is_empty() {
@@ -243,9 +383,15 @@ pub fn generate(config: &ApiConfig, req: &GenRequest, canceled: &std::sync::atom
     let width = req.width.unwrap_or(1024).clamp(64, 4096);
     let height = req.height.unwrap_or(1024).clamp(64, 4096);
     let prompt = req.prompt.trim();
+    check_base(config)?;
     let result = match config.protocol() {
         Protocol::Images => images_request(config, mode, prompt, width, height, req),
         Protocol::Chat => chat_request(config, mode, prompt, req),
+        Protocol::Gemini => gemini_request(config, mode, prompt, width, height, req),
+        Protocol::DashScope => dashscope_request(config, mode, prompt, width, height),
+        Protocol::Ark => ark_request(config, mode, prompt, width, height),
+        Protocol::Minimax => minimax_request(config, mode, prompt, width, height, req),
+        Protocol::Custom => custom_request(config, mode, prompt, width, height),
     }?;
     if canceled.load(std::sync::atomic::Ordering::Relaxed) {
         return Err("已取消".to_string());
@@ -359,8 +505,343 @@ fn chat_request(
     payload_from(resp)
 }
 
+/* ---------- 各家的出图请求 ---------- */
+
+/// 各家只认固定几档比例，按实际宽高比挑最接近的一档。
+fn aspect_of(width: i32, height: i32, options: &[&'static str]) -> &'static str {
+    let want = width.max(1) as f64 / height.max(1) as f64;
+    let mut best: &'static str = options[0];
+    let mut best_gap = f64::MAX;
+    for option in options.iter().copied() {
+        let (w, h) = option.split_once(':').unwrap_or(("1", "1"));
+        let w: f64 = w.parse().unwrap_or(1.0);
+        let h: f64 = h.parse().unwrap_or(1.0);
+        let gap = (w / h - want).abs();
+        if gap < best_gap {
+            best_gap = gap;
+            best = option;
+        }
+    }
+    best
+}
+
+/// Google Gemini。imagen-* 走 :predict，其余（nano banana 那些）走 generateContent，
+/// 图片藏在 candidates[].content.parts[].inlineData.data 里。
+fn gemini_request(
+    config: &ApiConfig,
+    mode: Mode,
+    prompt: &str,
+    width: i32,
+    height: i32,
+    req: &GenRequest,
+) -> Result<ImagePayload, String> {
+    let base = config.base();
+    let model = config.model.trim();
+    let (url, body) = if model.to_ascii_lowercase().starts_with("imagen") {
+        if mode != Mode::Text {
+            return Err("Imagen 只吃文生图：要带参考图就把模型换成 gemini-*-image 那几档".to_string());
+        }
+        (
+            format!("{base}/v1beta/models/{model}:predict"),
+            serde_json::json!({
+                "instances": [{ "prompt": prompt }],
+                "parameters": {
+                    "sampleCount": 1,
+                    "aspectRatio": aspect_of(width, height, &["1:1", "4:3", "3:4", "16:9", "9:16"]),
+                },
+            }),
+        )
+    } else {
+        let mut parts = vec![serde_json::json!({ "text": prompt })];
+        if mode != Mode::Text {
+            if req.images.is_empty() {
+                return Err("参考图编辑没有参考图".to_string());
+            }
+            for image in req.images.iter().take(16) {
+                parts.push(serde_json::json!({
+                    "inline_data": {
+                        "mime_type": "image/png",
+                        "data": BASE64.encode(base64_image(image)?),
+                    }
+                }));
+            }
+        }
+        (
+            format!("{base}/v1beta/models/{model}:generateContent"),
+            serde_json::json!({
+                "contents": [{ "parts": parts }],
+                "generationConfig": { "responseModalities": ["TEXT", "IMAGE"] },
+            }),
+        )
+    };
+    let text = serde_json::to_string(&body).map_err(|e| format!("请求拼不起来：{e}"))?;
+    let request = agent()
+        .post(&url)
+        .set("x-goog-api-key", config.api_key.trim())
+        .set("Content-Type", "application/json");
+    let value = send(request, text.as_bytes(), &url)?;
+    gemini_payload(&value)
+}
+
+fn gemini_payload(value: &Value) -> Result<ImagePayload, String> {
+    if let Some(rows) = value.get("candidates").and_then(Value::as_array) {
+        for row in rows {
+            if let Some(parts) = row.pointer("/content/parts").and_then(Value::as_array) {
+                for part in parts {
+                    /* 同一份响应里字段名有驼峰和蛇形两种写法，两个都认 */
+                    let data = part
+                        .pointer("/inlineData/data")
+                        .or_else(|| part.pointer("/inline_data/data"))
+                        .and_then(Value::as_str)
+                        .filter(|text| !text.is_empty());
+                    if let Some(data) = data {
+                        return Ok(ImagePayload::Base64(data.to_string()));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(rows) = value.get("predictions").and_then(Value::as_array) {
+        for row in rows {
+            if let Some(data) = row
+                .get("bytesBase64Encoded")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+            {
+                return Ok(ImagePayload::Base64(data.to_string()));
+            }
+        }
+    }
+    let message = value
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !message.is_empty() {
+        return Err(format!("接口没有返回图片：{message}"));
+    }
+    /* 被安全策略拦下时既没有图也没有 error.message，只有 finishReason */
+    if let Some(reason) = value
+        .pointer("/candidates/0/finishReason")
+        .and_then(Value::as_str)
+    {
+        return Err(format!("接口没有返回图片（finishReason={reason}）"));
+    }
+    Err(format!(
+        "接口没有返回图片：{}",
+        trim_text(&value.to_string(), 300)
+    ))
+}
+
+/// 通义万相。原生是异步的：提交拿 task_id，再轮询 /api/v1/tasks/{id}。
+/// 它的参考图只收公网 URL，画布里的图是本地 base64，所以带图时直接说清楚。
+fn dashscope_request(
+    config: &ApiConfig,
+    mode: Mode,
+    prompt: &str,
+    width: i32,
+    height: i32,
+) -> Result<ImagePayload, String> {
+    if mode != Mode::Text {
+        return Err("通义万相只收公网可访问的图片 URL，画布里的参考图是本地数据，发不进去；要带参考图换 OpenAI / Gemini / MiniMax 协议".to_string());
+    }
+    let base = config.base();
+    let url = format!("{base}/api/v1/services/aigc/text2image/image-synthesis");
+    let body = serde_json::json!({
+        "model": config.model.trim(),
+        "input": { "prompt": prompt },
+        /* 万相的尺寸用星号分隔，不是 x */
+        "parameters": { "size": format!("{width}*{height}"), "n": 1 },
+    });
+    let text = serde_json::to_string(&body).map_err(|e| format!("请求拼不起来：{e}"))?;
+    let request = agent()
+        .post(&url)
+        .set("Authorization", &format!("Bearer {}", config.api_key.trim()))
+        .set("X-DashScope-Async", "enable")
+        .set("Content-Type", "application/json");
+    let value = send(request, text.as_bytes(), &url)?;
+    let task_id = value
+        .pointer("/output/task_id")
+        .and_then(Value::as_str)
+        .map(|id| id.to_string())
+        .ok_or_else(|| {
+            format!(
+                "接口没有返回任务 id：{}",
+                trim_text(&value.to_string(), 300)
+            )
+        })?;
+    /* 出图几十秒到几分钟：3 秒问一次，最多等 5 分钟 */
+    let poll_url = format!("{base}/api/v1/tasks/{task_id}");
+    let started = std::time::Instant::now();
+    loop {
+        if started.elapsed() > Duration::from_secs(300) {
+            return Err("等太久了（超过 5 分钟），去百炼控制台看一眼任务状态".to_string());
+        }
+        std::thread::sleep(Duration::from_secs(3));
+        let request = agent()
+            .get(&poll_url)
+            .set("Authorization", &format!("Bearer {}", config.api_key.trim()));
+        let value = send_get(request, &poll_url)?;
+        let status = value
+            .pointer("/output/task_status")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        match status {
+            "SUCCEEDED" => {
+                let url = value
+                    .pointer("/output/results/0/url")
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.is_empty())
+                    .ok_or_else(|| {
+                        format!(
+                            "任务成功了但没给图片地址：{}",
+                            trim_text(&value.to_string(), 300)
+                        )
+                    })?;
+                return Ok(ImagePayload::Url(url.to_string()));
+            }
+            "FAILED" | "CANCELED" | "UNKNOWN" => {
+                let message = value
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                return Err(if message.is_empty() {
+                    format!("万相任务失败（{status}）")
+                } else {
+                    format!("万相任务失败：{message}")
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 火山方舟 Seedream：形状照 OpenAI Images，只是地址和尺寸写法按方舟来。
+fn ark_request(
+    config: &ApiConfig,
+    mode: Mode,
+    prompt: &str,
+    width: i32,
+    height: i32,
+) -> Result<ImagePayload, String> {
+    if mode != Mode::Text {
+        return Err("火山方舟的参考图要公网可访问的 URL，画布里的图是本地数据；要带参考图换 OpenAI / Gemini / MiniMax 协议".to_string());
+    }
+    let url = format!("{}/images/generations", config.base());
+    let body = serde_json::json!({
+        "model": config.model.trim(),
+        "prompt": prompt,
+        /* Seedream 认 WxH，也认 1K/2K/4K；按用户要的尺寸发最直观 */
+        "size": format!("{width}x{height}"),
+        "response_format": "url",
+        /* 默认是带水印的，出图要干净的 */
+        "watermark": false,
+    });
+    let text = serde_json::to_string(&body).map_err(|e| format!("请求拼不起来：{e}"))?;
+    let request = auth(agent().post(&url), config).set("Content-Type", "application/json");
+    let value = send(request, text.as_bytes(), &url)?;
+    payload_from(value)
+}
+
+/// MiniMax image-01。同步返回，图在 data.image_base64[] 或 data.image_urls[] 里；
+/// 出错时 HTTP 还是 200，错误码藏在 base_resp.status_code。
+fn minimax_request(
+    config: &ApiConfig,
+    mode: Mode,
+    prompt: &str,
+    width: i32,
+    height: i32,
+    req: &GenRequest,
+) -> Result<ImagePayload, String> {
+    let url = format!("{}/v1/image_generation", config.base());
+    let mut body = serde_json::json!({
+        "model": config.model.trim(),
+        "prompt": prompt,
+        "aspect_ratio": aspect_of(width, height, &["1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9"]),
+        "response_format": "base64",
+        "n": 1,
+    });
+    if mode != Mode::Text {
+        let first = req
+            .images
+            .first()
+            .ok_or_else(|| "参考图编辑没有参考图".to_string())?;
+        /* subject_reference 只收一张，data URL 可以直接塞 */
+        body["subject_reference"] = serde_json::json!([{
+            "type": "character",
+            "image_file": to_data_url(first)?,
+        }]);
+    }
+    let text = serde_json::to_string(&body).map_err(|e| format!("请求拼不起来：{e}"))?;
+    let request = auth(agent().post(&url), config).set("Content-Type", "application/json");
+    let value = send(request, text.as_bytes(), &url)?;
+    if let Some(code) = value.pointer("/base_resp/status_code").and_then(Value::as_i64) {
+        if code != 0 {
+            let message = value
+                .pointer("/base_resp/status_msg")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            return Err(format!("MiniMax 回了错误 {code}：{message}"));
+        }
+    }
+    if let Some(data) = value
+        .pointer("/data/image_base64/0")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        return Ok(ImagePayload::Base64(data.to_string()));
+    }
+    if let Some(url) = value
+        .pointer("/data/image_urls/0")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        return Ok(ImagePayload::Url(url.to_string()));
+    }
+    payload_from(value)
+}
+
+/// 自定义网关：接口地址就是完整的生成地址，按 OpenAI 图片的 JSON 格式发一份。
+fn custom_request(
+    config: &ApiConfig,
+    mode: Mode,
+    prompt: &str,
+    width: i32,
+    height: i32,
+) -> Result<ImagePayload, String> {
+    if mode != Mode::Text {
+        return Err("自定义协议按 OpenAI 图片的 JSON 格式发请求，不带参考图；要带参考图换 OpenAI Images 协议".to_string());
+    }
+    let url = config.base_url.trim().trim_end_matches('/').to_string();
+    if url.is_empty() {
+        return Err("自定义协议要填完整的生成地址".to_string());
+    }
+    let body = serde_json::json!({
+        "model": config.model.trim(),
+        "prompt": prompt,
+        "n": 1,
+        "size": format!("{width}x{height}"),
+    });
+    let text = serde_json::to_string(&body).map_err(|e| format!("请求拼不起来：{e}"))?;
+    let request = auth(agent().post(&url), config).set("Content-Type", "application/json");
+    let value = send(request, text.as_bytes(), &url)?;
+    payload_from(value)
+}
+
 fn send(request: ureq::Request, body: &[u8], url: &str) -> Result<Value, String> {
-    let resp = request.send_bytes(body).map_err(|error| match error {
+    let resp = request
+        .send_bytes(body)
+        .map_err(|error| error_of(error, url))?;
+    json_body(resp)
+}
+
+/// 轮询要发 GET，POST 那条 `send` 用不上。
+fn send_get(request: ureq::Request, url: &str) -> Result<Value, String> {
+    let resp = request.call().map_err(|error| error_of(error, url))?;
+    json_body(resp)
+}
+
+fn error_of(error: ureq::Error, url: &str) -> String {
+    match error {
         ureq::Error::Status(code, resp) => {
             let text = read_body(resp).unwrap_or_default();
             let detail = trim_text(&text, 500);
@@ -371,9 +852,13 @@ fn send(request: ureq::Request, body: &[u8], url: &str) -> Result<Value, String>
             }
         }
         other => format!("请求发不出去（{url}）：{other}"),
-    })?;
+    }
+}
+
+fn json_body(resp: ureq::Response) -> Result<Value, String> {
     let text = read_body(resp)?;
-    serde_json::from_str(&text).map_err(|e| format!("接口返回的不是 JSON：{e}｜{}", trim_text(&text, 300)))
+    serde_json::from_str(&text)
+        .map_err(|e| format!("接口返回的不是 JSON：{e}｜{}", trim_text(&text, 300)))
 }
 
 fn read_body(resp: ureq::Response) -> Result<String, String> {

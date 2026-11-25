@@ -81,15 +81,28 @@
                 <select id="settings-gen-api-protocol">
                   <option value="images">OpenAI Images（/images/generations、/images/edits）</option>
                   <option value="chat">OpenAI Chat（/chat/completions 多模态）</option>
+                  <option value="gemini">Google Gemini（nano banana / Imagen）</option>
+                  <option value="dashscope">DashScope 通义万相（原生异步）</option>
+                  <option value="ark">火山方舟 Seedream（豆包）</option>
+                  <option value="minimax">MiniMax image-01</option>
+                  <option value="custom">自定义（填完整的生成地址）</option>
                 </select>
               </label>
+              <p class="settings-hint" id="settings-gen-api-hint"></p>
               <label class="settings-field">
                 <span>接口地址</span>
                 <input id="settings-gen-api-url" type="text" spellcheck="false" placeholder="https://api.openai.com/v1" />
               </label>
               <label class="settings-field">
                 <span>模型名</span>
-                <select id="settings-gen-api-model"></select>
+                <input
+                  id="settings-gen-api-model"
+                  type="text"
+                  list="settings-gen-api-models"
+                  spellcheck="false"
+                  placeholder="点「重新读取模型」后挑一个，也可以手填"
+                />
+                <datalist id="settings-gen-api-models"></datalist>
               </label>
               <label class="settings-field">
                 <span>API Key</span>
@@ -113,7 +126,7 @@
             <p class="settings-title">AI 视频</p>
             <div class="settings-video-cloud" id="settings-video-cloud">
               <p class="settings-hint">
-                文生视频、图生视频都走远端 API，没有本地模型这一档。海螺和 OpenAI 协议直接吃画布上的首帧图；万相和百炼可灵只收公网图片 URL，本地首帧暂不支持。任务提交后服务端停不掉，按秒计费。并行数 = 同时最多跑几条（1–10）。
+                文生视频、图生视频都走远端 API，没有本地模型这一档。任务提交后服务端停不掉，按秒计费。并行数 = 同时最多跑几条（1–10）。
               </p>
               <div class="settings-gen-api settings-video-form">
                 <label class="settings-field">
@@ -122,8 +135,13 @@
                     <option value="openai">OpenAI videos（Sora / 兼容网关）</option>
                     <option value="minimax">MiniMax 海螺</option>
                     <option value="dashscope">DashScope（通义万相 / 百炼可灵）</option>
+                    <option value="veo">Google Veo</option>
+                    <option value="ark">火山方舟 Seedance（即梦）</option>
+                    <option value="kling">可灵 Kling 官方</option>
+                    <option value="custom">自定义（OpenAI 协议网关）</option>
                   </select>
                 </label>
+                <p class="settings-hint" id="settings-video-hint"></p>
                 <label class="settings-field">
                   <span>接口地址</span>
                   <input id="settings-video-url" type="text" spellcheck="false" placeholder="留空用该协议的官方默认地址" />
@@ -134,7 +152,14 @@
                 </label>
                 <label class="settings-field">
                   <span>模型</span>
-                  <select id="settings-video-model"></select>
+                  <input
+                    id="settings-video-model"
+                    type="text"
+                    list="settings-video-models"
+                    spellcheck="false"
+                    placeholder="点「读取模型列表」后挑一个，也可以手填"
+                  />
+                  <datalist id="settings-video-models"></datalist>
                 </label>
                 <label class="settings-field">
                   <span>并行数</span>

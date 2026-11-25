@@ -1,5 +1,5 @@
 /* 文生视频 / 图生视频：本地跑不动视频扩散，整条路走远端 API。
-   三家协议都长成「提交任务 → 轮询状态 → 下载 mp4」，只是字段和鉴权各异：
+   各家的形状都是「提交任务 → 轮询状态 → 下载 mp4」，只是字段和鉴权各异：
 
    - openai：POST {base}/videos（带首帧图时 multipart 的 input_reference）
              GET {base}/videos/{id}，GET {base}/videos/{id}/content
@@ -10,6 +10,13 @@
                 （X-DashScope-Async: enable；万相和百炼托管的可灵都走这套）
                 GET {base}/api/v1/tasks/{task_id} 拿 video_url
                 DashScope 的图生视频只收公网图片 URL，本地首帧暂时不支持。
+   - veo：POST {base}/v1beta/models/{model}:predictLongRunning，拿回来的是操作名
+          GET {base}/v1beta/{operation}，成片地址下载时还要带 Key
+   - ark：POST {base}/contents/generations/tasks（参数接在提示词后面的 --flag 写法）
+          GET {base}/contents/generations/tasks/{id}，成片在 content.video_url
+   - kling：POST {base}/v1/videos/text2video 或 image2video（首帧走 base64）
+            GET {base}/v1/videos/{kind}/{task_id}，成片在 task_result.videos[].url
+   - custom：自定义网关，形状照 OpenAI（根地址自己填），用于兼容自建/中转
 
    任务提交出去之后服务端停不掉：取消只是本地不再等，费用已经发生。 */
 
@@ -86,13 +93,21 @@ impl VideoApiConfig {
             return text.to_string();
         }
         match self.protocol.as_str() {
-            "minimax" => "https://api.minimax.cn".to_string(),
-            "dashscope" => "https://dashscope.aliyuncs.com".to_string(),
-            _ => "https://api.openai.com/v1".to_string(),
+            "minimax" => "https://api.minimax.cn",
+            "dashscope" => "https://dashscope.aliyuncs.com",
+            "veo" => "https://generativelanguage.googleapis.com",
+            "ark" => "https://ark.cn-beijing.volces.com/api/v3",
+            "kling" => "https://api-beijing.klingai.com",
+            _ => "https://api.openai.com/v1",
         }
+        .to_string()
     }
 
     fn problem(&self) -> Option<String> {
+        /* 自定义协议没有官方默认地址，必须自己填；其余留空就用默认 */
+        if self.protocol == "custom" && self.base_url.trim().is_empty() {
+            return Some("接口地址还没填（自定义协议要填网关根地址）".to_string());
+        }
         if self.api_key.trim().is_empty() {
             return Some("API Key 还没填".to_string());
         }
@@ -270,10 +285,15 @@ pub fn gen_video_api_set(
 ) -> Result<VideoApiConfig, String> {
     let mut next = config;
     next.protocol = match next.protocol.as_str() {
-        "minimax" => "minimax".to_string(),
-        "dashscope" => "dashscope".to_string(),
-        _ => "openai".to_string(),
-    };
+        "minimax" => "minimax",
+        "dashscope" => "dashscope",
+        "veo" => "veo",
+        "ark" => "ark",
+        "kling" => "kling",
+        "custom" => "custom",
+        _ => "openai",
+    }
+    .to_string();
     next.base_url = next.base_url.trim().trim_end_matches('/').to_string();
     next.api_key = next.api_key.trim().to_string();
     next.model = next.model.trim().to_string();
@@ -289,17 +309,58 @@ pub fn gen_video_api_set(
     Ok(next)
 }
 
-/// 模型列表：OpenAI 兼容网关去 /models 拉；海螺和 DashScope 没有列表接口，
-/// 给内置清单（随官方文档更新）。模型名不让手填。
+/// 模型列表：OpenAI 兼容网关去 /models 拉；其余没有列表接口，给内置清单
+/// （随官方文档更新）。模型框可以手填，清单只是给个起点。
 #[tauri::command]
 pub async fn gen_video_models(config: VideoApiConfig) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || match config.protocol.as_str() {
         "minimax" => Ok(minimax_models()),
         "dashscope" => Ok(dashscope_models()),
+        "veo" => Ok(veo_models()),
+        "ark" => Ok(ark_models()),
+        "kling" => Ok(kling_models()),
         _ => fetch_openai_models(&config),
     })
     .await
     .map_err(|e| format!("读取模型列表的任务起不来：{e}"))?
+}
+
+fn veo_models() -> Vec<String> {
+    [
+        "veo-3.1-generate-preview",
+        "veo-3.1-fast-generate-preview",
+        "veo-3.1-lite-generate-preview",
+        "veo-3.0-generate-preview",
+        "veo-2.0-generate-001",
+    ]
+    .iter()
+    .map(|name| name.to_string())
+    .collect()
+}
+
+/// 方舟的模型是「版本号后缀」写法，换模型得按控制台上的 Model ID 填。
+fn ark_models() -> Vec<String> {
+    [
+        "doubao-seedance-1-0-pro-250528",
+        "doubao-seedance-1-0-lite-t2v-250428",
+        "doubao-seedance-1-0-lite-i2v-250428",
+    ]
+    .iter()
+    .map(|name| name.to_string())
+    .collect()
+}
+
+fn kling_models() -> Vec<String> {
+    [
+        "kling-v3",
+        "kling-v2-6",
+        "kling-v2-5-turbo",
+        "kling-v2-1-master",
+        "kling-v1-6",
+    ]
+    .iter()
+    .map(|name| name.to_string())
+    .collect()
 }
 
 fn minimax_models() -> Vec<String> {
@@ -554,6 +615,9 @@ fn execute(
     let task_id = match config.protocol.as_str() {
         "minimax" => minimax_submit(config, req, &model)?,
         "dashscope" => dashscope_submit(config, req, &model)?,
+        "veo" => veo_submit(config, req, &model)?,
+        "ark" => ark_submit(config, req, &model)?,
+        "kling" => kling_submit(config, req, &model)?,
         _ => openai_submit(config, req, &model)?,
     };
     set_task(core, block, &task_id);
@@ -573,6 +637,9 @@ fn execute(
         let result = match config.protocol.as_str() {
             "minimax" => minimax_poll(config, &task_id)?,
             "dashscope" => dashscope_poll(config, &task_id)?,
+            "veo" => veo_poll(config, &task_id)?,
+            "ark" => ark_poll(config, &task_id)?,
+            "kling" => kling_poll(config, &task_id)?,
             _ => openai_poll(config, &task_id)?,
         };
         match result {
@@ -930,7 +997,275 @@ fn aspect_ratio_of(width: i32, height: i32) -> &'static str {
     }
 }
 
-/* ---------- 下载 ---------- */fn download(
+/* ---------- Google Veo ----------
+   提交走 :predictLongRunning，拿回来的是一个操作名（models/…/operations/…），
+   轮询就把这个名字原样拼回 /v1beta/ 后面；成片地址还要再带 Key 才能下载。 */
+
+fn veo_submit(
+    config: &VideoApiConfig,
+    req: &VideoRequest,
+    model: &str,
+) -> Result<String, String> {
+    let url = format!(
+        "{}/v1beta/models/{model}:predictLongRunning",
+        config.base()
+    );
+    let (width, height) = video_size(req);
+    let duration = req.seconds.unwrap_or(8).clamp(4, 8);
+    let mut instance = json!({ "prompt": req.prompt.trim() });
+    if let Some(text) = req
+        .image
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        let bytes = image_bytes(text)?;
+        instance["image"] = json!({
+            "bytesBase64Encoded": BASE64.encode(&bytes),
+            "mimeType": "image/png",
+        });
+    }
+    let body = json!({
+        "instances": [instance],
+        "parameters": {
+            "aspectRatio": aspect_ratio_of(width, height),
+            "durationSeconds": duration,
+        },
+    });
+    let text = serde_json::to_string(&body).map_err(|e| format!("请求拼不起来：{e}"))?;
+    let resp = agent()
+        .post(&url)
+        .set("x-goog-api-key", config.api_key.trim())
+        .set("Content-Type", "application/json")
+        .send_bytes(text.as_bytes())
+        .map_err(|error| api_error("提交视频任务", error))?;
+    let value = read_json(resp)?;
+    value
+        .get("name")
+        .and_then(Value::as_str)
+        .map(|name| name.to_string())
+        .ok_or_else(|| {
+            format!(
+                "接口没有返回任务名：{}",
+                trim_text(&value.to_string(), 300)
+            )
+        })
+}
+
+fn veo_poll(config: &VideoApiConfig, operation: &str) -> Result<Poll, String> {
+    let url = format!("{}/v1beta/{operation}", config.base());
+    let resp = agent()
+        .get(&url)
+        .set("x-goog-api-key", config.api_key.trim())
+        .call()
+        .map_err(|error| api_error("查询视频任务", error))?;
+    let value = read_json(resp)?;
+    if !value.get("done").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(Poll::Pending("生成中".to_string()));
+    }
+    /* 老形状在 generateVideoResponse.generatedSamples[0].video.uri，
+       新形状在 generatedVideos[0].video.uri，两个都认 */
+    let uri = value
+        .pointer("/response/generateVideoResponse/generatedSamples/0/video/uri")
+        .or_else(|| value.pointer("/response/generatedVideos/0/video/uri"))
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty());
+    if let Some(uri) = uri {
+        return Ok(Poll::Done(uri.to_string()));
+    }
+    let message = value
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or("任务结束了但没有视频地址");
+    Err(message.to_string())
+}
+
+/* ---------- 火山方舟 Seedance ----------
+   创建任务 POST /contents/generations/tasks，轮询 GET 同路径 + /{id}，
+   成片在 content.video_url。参数不是独立的 JSON 字段，而是接在提示词后面的
+   --ratio / --duration / --watermark 写法，这是方舟自己的约定。 */
+
+fn ark_submit(
+    config: &VideoApiConfig,
+    req: &VideoRequest,
+    model: &str,
+) -> Result<String, String> {
+    let url = format!("{}/contents/generations/tasks", config.base());
+    let (width, height) = video_size(req);
+    let duration = req.seconds.unwrap_or(5).clamp(3, 12);
+    let frame = req
+        .image
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    let mut prompt = req.prompt.trim().to_string();
+    prompt.push_str(&format!(" --duration {duration} --watermark false"));
+    /* 带首帧时画面比例由首帧决定，再塞 ratio 反而会被判冲突 */
+    if frame.is_none() {
+        prompt.push_str(&format!(" --ratio {}", aspect_ratio_of(width, height)));
+    }
+    let mut content = vec![json!({ "type": "text", "text": prompt })];
+    if let Some(image) = frame {
+        content.push(json!({
+            "type": "image_url",
+            "image_url": { "url": to_data_url(image)? },
+        }));
+    }
+    let body = json!({ "model": model, "content": content });
+    let text = serde_json::to_string(&body).map_err(|e| format!("请求拼不起来：{e}"))?;
+    let resp = http_post(&url, config)
+        .set("Content-Type", "application/json")
+        .send_bytes(text.as_bytes())
+        .map_err(|error| api_error("提交视频任务", error))?;
+    let value = read_json(resp)?;
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .map(|id| id.to_string())
+        .ok_or_else(|| {
+            format!(
+                "接口没有返回任务 id：{}",
+                trim_text(&value.to_string(), 300)
+            )
+        })
+}
+
+fn ark_poll(config: &VideoApiConfig, task_id: &str) -> Result<Poll, String> {
+    let url = format!("{}/contents/generations/tasks/{task_id}", config.base());
+    let resp = http_get(&url, config)
+        .call()
+        .map_err(|error| api_error("查询视频任务", error))?;
+    let value = read_json(resp)?;
+    let status = value.get("status").and_then(Value::as_str).unwrap_or("");
+    match status {
+        "succeeded" => {
+            let url = value
+                .pointer("/content/video_url")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .ok_or_else(|| {
+                    format!(
+                        "任务成功了但没给视频地址：{}",
+                        trim_text(&value.to_string(), 300)
+                    )
+                })?;
+            Ok(Poll::Done(url.to_string()))
+        }
+        "failed" | "cancelled" => {
+            let message = value
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("远端任务失败");
+            Err(message.to_string())
+        }
+        "queued" => Ok(Poll::Pending("排队中".to_string())),
+        _ => Ok(Poll::Pending("生成中".to_string())),
+    }
+}
+
+/* ---------- 可灵 Kling 官方 ----------
+   文生视频 /v1/videos/text2video、图生视频 /v1/videos/image2video，
+   轮询是各自路径 + /{task_id}。两条路的查询地址不一样，所以把类型编进
+   任务 id 里带着走（"image2video:xxx"），轮询时再拆开。 */
+
+fn kling_submit(
+    config: &VideoApiConfig,
+    req: &VideoRequest,
+    model: &str,
+) -> Result<String, String> {
+    let frame = req
+        .image
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    let kind = if frame.is_some() {
+        "image2video"
+    } else {
+        "text2video"
+    };
+    let url = format!("{}/v1/videos/{kind}", config.base());
+    let (width, height) = video_size(req);
+    /* 可灵只认 5 秒和 10 秒两档 */
+    let duration = if req.seconds.unwrap_or(5) > 5 { "10" } else { "5" };
+    let mut body = json!({
+        "model_name": model,
+        "prompt": req.prompt.trim(),
+        "duration": duration,
+        "aspect_ratio": aspect_ratio_of(width, height),
+    });
+    if let Some(image) = frame {
+        /* 可灵要 base64 本体，不要 data: 前缀 */
+        body["image"] = json!(BASE64.encode(image_bytes(image)?));
+    }
+    let text = serde_json::to_string(&body).map_err(|e| format!("请求拼不起来：{e}"))?;
+    let resp = http_post(&url, config)
+        .set("Content-Type", "application/json")
+        .send_bytes(text.as_bytes())
+        .map_err(|error| api_error("提交视频任务", error))?;
+    let value = read_json(resp)?;
+    if let Some(code) = value.get("code").and_then(Value::as_i64) {
+        if code != 0 {
+            let message = value
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            return Err(format!("可灵回了错误 {code}：{message}"));
+        }
+    }
+    let id = value
+        .pointer("/data/task_id")
+        .or_else(|| value.pointer("/data/id"))
+        .and_then(Value::as_str)
+        .map(|id| id.to_string())
+        .ok_or_else(|| {
+            format!(
+                "接口没有返回任务 id：{}",
+                trim_text(&value.to_string(), 300)
+            )
+        })?;
+    Ok(format!("{kind}:{id}"))
+}
+
+fn kling_poll(config: &VideoApiConfig, task: &str) -> Result<Poll, String> {
+    let (kind, id) = task.split_once(':').unwrap_or(("text2video", task));
+    let url = format!("{}/v1/videos/{kind}/{id}", config.base());
+    let resp = http_get(&url, config)
+        .call()
+        .map_err(|error| api_error("查询视频任务", error))?;
+    let value = read_json(resp)?;
+    let status = value
+        .pointer("/data/task_status")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    match status {
+        "succeed" | "succeeded" | "SUCCESS" => {
+            let url = value
+                .pointer("/data/task_result/videos/0/url")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .ok_or_else(|| {
+                    format!(
+                        "任务成功了但没给视频地址：{}",
+                        trim_text(&value.to_string(), 300)
+                    )
+                })?;
+            Ok(Poll::Done(url.to_string()))
+        }
+        "failed" | "FAILED" => {
+            let message = value
+                .pointer("/data/task_status_msg")
+                .and_then(Value::as_str)
+                .unwrap_or("远端任务失败");
+            Err(message.to_string())
+        }
+        "submitted" | "queued" => Ok(Poll::Pending("排队中".to_string())),
+        _ => Ok(Poll::Pending("生成中".to_string())),
+    }
+}
+
+/* ---------- 下载 ---------- */
+
+fn download(
     core: &Core,
     app: &tauri::AppHandle,
     config: &VideoApiConfig,
@@ -943,7 +1278,9 @@ fn aspect_ratio_of(width: i32, height: i32) -> &'static str {
         .build();
     let mut request = agent.get(url);
     for (name, value) in match config.protocol.as_str() {
-        "openai" => openai_download_headers(config),
+        "openai" | "custom" => openai_download_headers(config),
+        /* Veo 的下载地址也要带 Key，否则 403 */
+        "veo" => vec![("x-goog-api-key".to_string(), config.api_key.trim().to_string())],
         _ => Vec::new(),
     } {
         request = request.set(&name, &value);

@@ -751,6 +751,7 @@ gen_run {id, prompt} 默认等到出完再回（远端一张几十秒）。返�
 一根不接是文生图；接一张当底图重绘，是图生图；接多张一起当参考，是参考图编辑。
 - mode 明写才盖得住推断：auto / t2i / i2i / edit / inpaint。「只有一张、但它是画风锚点不是底图」必须明写 edit。
 - 远端只发提示词、尺寸和参考图（Images 协议尽量带 mask）：i2i / inpaint 都降级成「参考图 + 提示词」，别承诺「只改一点」。
+- 能不能带参考图看协议：images / chat / gemini / minimax 吃本地图；**dashscope（通义万相）和 ark（火山方舟）只收公网图片 URL**，带参考图会直接报错让你换协议，别硬试。
 - 输入图是每次点「开始」现取的：上游改了、线改了，下一张就跟着变。
 - 一次最多带 16 张参考图，多余的会被截掉。
 
@@ -776,11 +777,15 @@ gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一�
     body: `## 视频生成：文生视频 / 图生视频
 
 ### 只走远端 API
-本地视频模型已经移除，生成一律走设置 → AI 视频里配好的接口，需要协议、Key 和模型。三家协议：
+本地视频模型已经移除，生成一律走设置 → AI 视频里配好的接口，需要协议、Key 和模型。七种协议：
 - **openai**（OpenAI videos 兼容：Sora 2、Azure、聚合网关、vLLM-Omni）：
   提交 POST /videos，带首帧图时 multipart 的 input_reference，轮询 /videos/{id}，/content 下载。
 - **minimax**（海螺）：/v1/video_generation，首帧走 first_frame_image，直接吃 base64 Data URL。
 - **dashscope**（通义万相、百炼托管的可灵）：异步任务，**图生视频只收公网图片 URL**，本地首帧会被拒。
+- **veo**（Google Veo）：:predictLongRunning 拿操作名，轮询 /v1beta/{operation}；时长只认 4/6/8 秒，首帧吃 base64。
+- **ark**（火山方舟 Seedance / 即梦）：POST /contents/generations/tasks，比例时长是接在提示词后面的 --ratio / --duration 写法。
+- **kling**（可灵官方）：/v1/videos/text2video 或 image2video，首帧走 base64，时长只有 5/10 秒两档。
+- **custom**：自定义网关，形状照 OpenAI videos，根地址自己填。
 
 ### gen_video：提交并等出片
 ~~~json

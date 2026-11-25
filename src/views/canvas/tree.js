@@ -33,6 +33,8 @@ export let treeWidth = 220;
 /* 画布区固定高度（px）；null = 按内容自适应、最多占一半。拖分隔条后才有值 */
 export let treeSplit = null;
 export function setTreeSplit(value) { treeSplit = value; }
+/* 两个滚动区（画布区/面板区）停在哪：跟其它偏好一起存，重开软件还在原处 */
+let treeScrollPref = { canvas: 0, panels: 0 };
 
 export function treeSavePrefs() {
   localStorage.setItem(TREE_KEY, JSON.stringify({
@@ -44,6 +46,8 @@ export function treeSavePrefs() {
     panelSort: treePanelSort,
     order: treeOrder,
     split: treeSplit,
+    /* 两个滚动区停在哪：重开软件还在原处，不用再翻半天找刚才那块 */
+    scroll: treeScrollPref,
   }));
 }
 
@@ -74,8 +78,30 @@ export function initSpaceTree() {
   if (Number.isFinite(Number(prefs.split)) && Number(prefs.split) > 0) {
     treeSplit = Math.round(Number(prefs.split));
   }
+  /* 上次停在哪：重开软件直接接着往下看 */
+  if (prefs.scroll && typeof prefs.scroll === "object") {
+    treeScrollPref = {
+      canvas: Math.max(0, Number(prefs.scroll.canvas) || 0),
+      panels: Math.max(0, Number(prefs.scroll.panels) || 0),
+    };
+  }
   treeSetHidden(Boolean(prefs.hidden));
 
+  /* 滚到哪儿就记哪儿：停了再存，别在滚动的每一帧都写 localStorage */
+  let scrollTimer = 0;
+  treeUi.body.addEventListener(
+    "scroll",
+    () => {
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        scrollTimer = 0;
+        const at = treeScrollOf(treeUi.body);
+        treeScrollPref = { canvas: at.canvas || 0, panels: at.panels || 0 };
+        treeSavePrefs();
+      }, 240);
+    },
+    { passive: true, capture: true },
+  );
 
   treeUi.hide.addEventListener("click", () => treeSetHidden(!treeUi.aside.hidden));
   treeUi.body.addEventListener("contextmenu", (event) => {
@@ -225,6 +251,11 @@ export function renderTree() {
      （scheduleItemsSave 顺手调这里）都把面板列表弹回顶部，
      刚滚到选中行又被甩走，看着就像「树不跟着选中走」 */
   const keepScroll = treeScrollOf(body);
+  /* 头一回渲染时树还是空的，接不住位置，这时用上次留下的（重开软件还在原处）。
+     之后都用实时位置，不然用户刚滚的地方会被旧的偏好顶回去。
+     判据是「重建前有没有滚动区」，不是「位置是不是 0」——
+     用户滚回顶部时位置也是 0，那仍然是实时位置，得听他的 */
+  const restore = body.querySelector(".space-tree-part") ? keepScroll : treeScrollPref;
   body.textContent = "";
   /* 画布区和面板区各占一块、各自滚动；中间的分隔条可以上下拖，调两边的高度 */
   const canvasPart = document.createElement("div");
@@ -304,7 +335,7 @@ export function renderTree() {
   panelsPart.append(treeSectionHeader("panels"));
   if (treeSections.panels) renderPanelTree(panelsPart);
   body.append(panelsPart);
-  applyTreeScroll(body, keepScroll);
+  applyTreeScroll(body, restore);
 }
 
 /* 重建前/后接住两个滚动区的位置：画布区与面板区各自滚，按 data-part 记 */

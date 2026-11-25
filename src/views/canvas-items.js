@@ -8,6 +8,7 @@ export * from "./canvas-items/plan.js";
 export * from "./canvas-items/makes.js";
 export * from "./canvas-items/gen-makes.js";
 export * from "./canvas-items/core.js";
+export * from "./canvas-items/scroll-memory.js";
 export * from "./canvas-items/dom-connectors.js";
 export * from "./canvas-items/dom-elements.js";
 export * from "./canvas-items/dom-files.js";

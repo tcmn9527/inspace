@@ -44,6 +44,8 @@ export function createItemElement(item, mediaSrc, options = {}) {
     card.className = "canvas-note-card";
     const body = document.createElement("div");
     body.className = "md-body canvas-note-body";
+    /* 正文比卡片高时这块能滚：滚到哪儿记在块自己身上 */
+    body.dataset.scrollKey = "note";
     body.innerHTML = renderMarkdown(item.source);
     card.append(body);
     el.append(card);
@@ -336,6 +338,8 @@ export function createItemElement(item, mediaSrc, options = {}) {
     }
     const rows = document.createElement("div");
     rows.className = "canvas-quote-rows";
+    /* 清单长了要能滚：位置跟着块一起记 */
+    rows.dataset.scrollKey = "quote";
     table.append(headRow, rows);
     const total = document.createElement("div");
     total.className = "canvas-quote-total";

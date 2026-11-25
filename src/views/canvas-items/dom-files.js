@@ -2,6 +2,7 @@
 
 import { FILE_DOC_SVG, PREVIEW_RENDER_CHARS, TABLE_EXTS, chevronSvg } from "./dom-elements.js";
 import { hydrateNoteImages, scheduleItemsSave } from "../canvas.js";
+import { setScrollKey, markScrollSilent, watchScrollRegion, restoreScrollMemory } from "./scroll-memory.js";
 import { renderMarkdown } from "../markdown.js";
 import { sanitizeInlineHtml } from "../inline-html.js";
 import { createDelimitedTable, formatSize } from "./dom-media.js";
@@ -67,6 +68,9 @@ export function mountWhenVisible(card, build, release) {
     body = build();
     if (wait.isConnected) wait.replaceWith(body);
     else card.append(body);
+    /* 正文是懒挂的：建块的时候它还不存在，滚动位置也就没地方放。
+       正文刚挂上来这一刻补一次，位置才能跟着块一起活过来 */
+    restoreScrollMemory(card);
     return true;
   };
   card.__unmountBody = () => {
@@ -599,6 +603,10 @@ window.addEventListener("message", (event) => {
   const next = `${Math.round(height)}px`;
   if (spacer.style.height !== next) spacer.style.height = next;
   pushEbookScroll(frame);
+  /* 正文高度刚定下来，这一章的滚动位置这时候才放得准：
+     高度还是旧章的时候算出来的比例是错的，等新高度到了再放一次 */
+  const region = frame.closest?.(".canvas-ebook-scroll");
+  if (region) watchScrollRegion(region);
 });
 
 /* 电子书阅读块：书上架前先读一遍目录，读到第几章记在这块自己身上。
@@ -653,6 +661,8 @@ export function createEbookCard(item, options) {
      右键走应用的块菜单。书页被钉在这块视口上（sticky），只照外层给的偏移滚自己。 */
   const scroll = document.createElement("div");
   scroll.className = "canvas-ebook-scroll";
+  /* 书页按章记：每章的滚动位置各存一份，翻回上一章还在上次读到的地方 */
+  scroll.dataset.scrollKey = `ebook:${item.chapter || 0}`;
   const spacer = document.createElement("div");
   spacer.className = "canvas-ebook-spacer";
   const frame = document.createElement("iframe");
@@ -744,7 +754,11 @@ export function createEbookCard(item, options) {
     /* 连点下一章时只认最后一次：慢的那次回来别把新章盖回去 */
     if (mine !== seq || !card.isConnected || !chapter) return;
     frame.srcdoc = chapter.html;
-    /* 新一章从顶上看起；外层这条滚动条不会自己归零，等帧报新尺寸时再把 0 压回帧里 */
+    /* 新一章从顶上看起；外层这条滚动条不会自己归零，等帧报新尺寸时再把 0 压回帧里。
+       先换键名再归零：顺序反了的话，这一下归零会被记到上一章名下，
+       下一章读完了再翻回去，上一章的位置就没了 */
+    setScrollKey(scroll, `ebook:${at}`);
+    markScrollSilent(scroll);
     scroll.scrollTop = 0;
     state.hidden = true;
     item.chapter = at;
@@ -998,6 +1012,9 @@ export function createXlsxBody(item, options) {
   const scroller = document.createElement("div");
   scroller.className = "canvas-file-xlsx-scroll";
   scroller.hidden = true;
+  /* 表格区能滚：滚到哪儿记在这块自己身上。
+     键名在 renderWorkbook 里换成按表分的：各表各记各的滚动位置 */
+  scroller.dataset.scrollKey = "xlsx";
 
   wrap.append(tabs, state, scroller);
   attachPlainCopy(scroller);
@@ -1041,6 +1058,9 @@ async function loadXlsxPreview(wrap, tabs, scroller, state, item, options) {
     state.hidden = true;
     tabs.hidden = false;
     scroller.hidden = false;
+    /* 表格刚画出来时高度还没稳（上面那句 setScrollKey 放的可能是老位置）：
+       可见之后再放一次，这时量到的才是真高度 */
+    watchScrollRegion(scroller);
   } catch (error) {
     failXlsx(state, scroller, error);
   }
@@ -1088,9 +1108,15 @@ export function renderWorkbook(scroller, tabs, buffer, state) {
     tab.addEventListener("click", () => {
       panels.forEach((p, i) => (p.hidden = i !== idx));
       for (const t of tabs.children) t.classList.toggle("is-active", t === tab);
+      /* 换表就是换了一份内容：键名跟着表名走，各表各记各的滚动位置，
+         切回来时回到这张表上次看到的地方 */
+      setScrollKey(scroller, `xlsx:${sheet.name}`);
     });
     tabs.append(tab);
   });
+  /* 刚打开时显示的是第一张表：键名也要按表名走，跟切表时用的是同一套，
+     否则第一次打开记的位置和切回来时的位置对不上号 */
+  setScrollKey(scroller, `xlsx:${sheets[0].name}`);
 }
 
 /* 一张表 -> 一张 <table>。按 ref 的矩形逐格取，空格留空，合并格用 span 还原。 */
@@ -1657,6 +1683,8 @@ export function renderPptx(scroller, doc, state) {
 
   const stage = document.createElement("div");
   stage.className = "canvas-file-pptx-stage";
+  /* 幻灯片比卡片高时舞台能滚：滚到哪儿记在这块自己身上 */
+  stage.dataset.scrollKey = "pptx:stage";
 
   const thumbs = document.createElement("div");
   thumbs.className = "canvas-file-pptx-thumbs";
@@ -1677,6 +1705,10 @@ export function renderPptx(scroller, doc, state) {
     });
     built[current].main.apply(); /* 主动算一次：隐藏→显示不一定触发 ResizeObserver */
     counter.textContent = `第 ${current + 1} / ${n} 张`;
+    /* 舞台换页就是换了一份内容：键名跟着页码走，每页各记各的滚动位置。
+       缩略图条不记：它的横向位置是 scrollIntoView 按当前页推出来的，
+       记下来反而会跟这一下互相打架 */
+    setScrollKey(stage, `pptx:stage:${current}`);
     const activeThumb = thumbs.children[current];
     if (activeThumb && activeThumb.scrollIntoView) {
       activeThumb.scrollIntoView({ block: "nearest", inline: "nearest" });

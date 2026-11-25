@@ -17,6 +17,7 @@ import { NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTU
 import { QUOTE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, VIDEO_DEFAULT_HEIGHT, VIDEO_DEFAULT_WIDTH, VIDEO_MIN_HEIGHT, VIDEO_MIN_WIDTH, absolutePathOf, capturePagePin, collectPictureImageSrcs, connectorGeometry, connectorLabelPoint, createConnectorElement, createItemElement, fileBlockSize, fitImageSize, formatSize, itemBounds, setFileToggleMode, makeAudio, makeBox, makeConnector, makeEbook } from "./canvas-items.js";
 import { makeFile, makeGen, makeImage, makeLine, makeNote, makePage, makePicture, makePlan, makeProduct, makeQuote, makeText, makeVideo, makeVideoGen, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmd, normalizePictureCmds, normalizePictureSymbols } from "./canvas-items.js";
 import { pictureCmdHit, pictureImageSrc, pictureLayerCensus, pictureTopLayers, pinConnectorSides, pinEbookPage, planPixelsPerMm, refreshQuoteCard, releaseEbookPage, remapPictureImageSrcs, renderMissing, renderPictureCmd, routeConnectorPreview, setPictureMedia, snapGenSize, stretchEbookPage, syncConnectorElement, syncItemElement, toPersisted, videoControlOf } from "./canvas-items.js";
+import { initScrollMemory, restoreScrollMemory, setScrollKey, markScrollSilent, watchScrollRegion } from "./canvas-items.js";
 import * as store from "./canvas-store.js";
 import { LOCK_BADGE_SVG, addOverlayBox, loneSelected, refreshTitlebarPath, updateSelection } from "./canvas/selection.js";
 
@@ -89,6 +90,7 @@ export { revealFileBlock, revealItem, revealSelectionInTree, revealTarget, route
 export { select, selectAll, setConnectTarget, setConnectorBend, setCosmosCamera, setFontSize, setHoverId, setLocked, setLockedMany, setMeasureHeld, setPageOrderFlow, setPageRatio, setPictureEditing, setTextAlign, setTool, showError, showToast, snapGenSize, snapLineAngle, snapOffset, snapResize };
 export { srcInUse, stageCenterWorld, stageTargetAt, startDraw, startEdgeLabelEdit, startFileEdit, startNoteEdit, startPlanCalibration, startTextEdit, startTreeRename, stopGen, stopVideo, store, stretchEbookPage, syncConnector, syncConnectorElement, syncGen, syncItemElement, syncSelectedClasses, syncVideoPanel, tidySelected, toPersisted, toPngDataUrl, toggleContainer, toolMenuEntries };
 export { treeCollapsed, treeData, treeGroupList, treePanelCollapsed, treeSavePrefs, treeUi, updateMarquee, updatePorts, updateSelection, videoBusyId, videoControlOf, videoRunOf, withAllVisible, worldToStage };
+export { initScrollMemory, restoreScrollMemory, setScrollKey, markScrollSilent, watchScrollRegion };
 
 const { invoke } = window.__TAURI__.core;
 
@@ -293,6 +295,8 @@ export function initCanvas() {
   });
 
   initSpaceTree();
+  /* 面板里内容滚动条的记忆：装一次，之后画布里所有带 data-scroll-key 的区域都归它管 */
+  initScrollMemory(ui.world);
   bindZoomHold(ui.zoomIn, ZOOM_STEP);
   bindZoomHold(ui.zoomOut, -ZOOM_STEP);
   /* 菜单在 document 上挂着「点外部就收起」：这一下点击冒泡到那里，

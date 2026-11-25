@@ -31,6 +31,22 @@ export function normalizeEnd(raw) {
 /* 块之间的叠放层级；连线不进这一套，固定在最底层 */
 export const layerOf = (raw) => (Number.isFinite(raw.z) ? Math.trunc(raw.z) : null);
 
+/* 面板内部滚动条的位置：{ 槽位: {x, y} }，x/y 是滚过的比例（0~1）。
+   跟块一起落盘：关掉软件再打开，这块面板还停在上次读到的那一段。
+   只认「槽位 -> 比例」这一种形状，别的丢掉。
+   比例全零的不记：那就是「在顶上」，记下来是废话。 */
+function normalizeScrolls(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out = {};
+  for (const [slot, value] of Object.entries(raw)) {
+    if (!value || typeof value !== "object") continue;
+    const x = num(value.x, 0);
+    const y = num(value.y, 0);
+    if (x <= 0 && y <= 0) continue;
+    out[slot.slice(0, 32)] = { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 export function normalizeItem(raw) {
   const item = normalizeBlock(raw);
@@ -54,6 +70,9 @@ export function normalizeBlock(raw) {
   if (type !== "connector" && typeof raw.treeName === "string" && raw.treeName.trim()) {
     base.treeName = raw.treeName.trim().slice(0, 60);
   }
+  /* 面板内部滚动条的位置：跟块一起落盘，重开画布还在原处 */
+  const scrolls = normalizeScrolls(raw.scrolls);
+  if (type !== "connector" && scrolls) base.scrolls = scrolls;
   if (type === "connector") {
     const from = normalizeEnd(raw.from);
     const to = normalizeEnd(raw.to);

@@ -1,6 +1,6 @@
 /* 从 canvas.js 拆出：render */
 
-import { attachGenPanel, attachPictureTools, attachPlanBlock, attachProductCard, attachQuoteCard, attachVideoPanel, audioCache, connectorGeometry, createConnectorElement, createItemElement, current, docxUrlCache, ebookKey, ebookTocCache, filePreviewCache, flushFileEditor, hydrateNoteImages, imageCache, isContainer, itemBounds, itemEls, mediaMissing, noteEditor, openVideoProblem, pdfUrlCache, pinConnectorSides, pptxUrlCache, previewKey, previewPath, productItems, refreshCulling, refreshGenFeeds, refreshMinimap, refreshQuoteCard, renderMissing, renderTree, replaceSelection, scheduleCulling, scheduleItemsSave, selectedIds, setNoteEditor, setPreviewPath, store, syncConnectorElement, syncItemElement, treePanelCollapsed, treeSavePrefs, treeUi, ui, updateSelection, videoCache, xlsxUrlCache } from "../canvas.js";
+import { attachGenPanel, attachPictureTools, attachPlanBlock, attachProductCard, attachQuoteCard, attachVideoPanel, audioCache, connectorGeometry, createConnectorElement, createItemElement, current, docxUrlCache, ebookKey, ebookTocCache, filePreviewCache, flushFileEditor, hydrateNoteImages, imageCache, isContainer, itemBounds, itemEls, mediaMissing, noteEditor, openVideoProblem, pdfUrlCache, pinConnectorSides, pptxUrlCache, previewKey, previewPath, productItems, refreshCulling, refreshGenFeeds, refreshMinimap, refreshQuoteCard, renderMissing, renderTree, replaceSelection, restoreScrollMemory, scheduleCulling, scheduleItemsSave, selectedIds, setNoteEditor, setPreviewPath, store, syncConnectorElement, syncItemElement, treePanelCollapsed, treeSavePrefs, treeUi, ui, updateSelection, videoCache, xlsxUrlCache } from "../canvas.js";
 
 /* ---------- 渲染 ---------- */
 
@@ -162,6 +162,9 @@ export function addItemElement(item) {
     refreshQuoteCard(el, item, productItems());
   }
   if (item.type === "plan") attachPlanBlock(el, item);
+  /* 面板里内容滚动条的位置：放回上次读到的那一段。
+     重的正文（PDF/Office）是懒挂的，等它真挂上来时再放一次 */
+  restoreScrollMemory(el);
   scheduleCulling();
   return el;
 }

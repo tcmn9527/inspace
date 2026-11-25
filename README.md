@@ -22,10 +22,14 @@
 ```bash
 npm install
 npm run tauri dev      # 开发模式，Vite 端口 1430
-npm run build          # 打包（不含 ffmpeg 组件）
-npm run ffmpeg:prepare # 下载 ffmpeg 组件到 src-tauri/resources/components/ffmpeg
-npm run build:full     # 内置 ffmpeg 的完整安装包
+npm run build          # 打包安装包（自带 ffmpeg，装完机不用再折腾）
+npm run ffmpeg:prepare # 只准备 ffmpeg 组件到 src-tauri/resources/components/ffmpeg
 ```
+
+打包固定包含 ffmpeg：`npm run build` 会先跑 `ffmpeg:prepare` 把 `ffmpeg.exe` 放进
+`src-tauri/resources/components/ffmpeg/`，`tauri.conf.json` 的 bundle.resources 把它装进
+`components\ffmpeg\`，后端探测 ffmpeg 时第一档就是那儿。离线打包可以先自己下载
+ffmpeg.exe，再 `FFMPEG_EXE=<路径> npm run ffmpeg:prepare`。
 
 ## 目录
 

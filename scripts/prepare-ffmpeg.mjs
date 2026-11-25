@@ -1,6 +1,6 @@
-/* 完整版安装包的前置步骤：把 ffmpeg.exe 放到 src-tauri/resources/components/ffmpeg/。
+/* 打包的前置步骤：把 ffmpeg.exe 放到 src-tauri/resources/components/ffmpeg/。
  *
- * 打包时 tauri.full.conf.json 会把这个文件原样放进安装目录的 components\ffmpeg\，
+ * tauri.conf.json 的 bundle.resources 会把这个文件原样放进安装目录的 components\ffmpeg\，
  * 后端 ffmpeg::locate 的第一档就是那里，所以装完机不需要用户再折腾。
  *
  * 三种拿法，按省事程度排：

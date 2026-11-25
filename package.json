@@ -1,14 +1,13 @@
 {
   "name": "inspace",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
     "dev": "node scripts/msvc-env.mjs tauri dev",
-    "build": "node scripts/msvc-env.mjs tauri build",
     "ffmpeg:prepare": "node scripts/prepare-ffmpeg.mjs",
-    "build:full": "node scripts/prepare-ffmpeg.mjs && node scripts/msvc-env.mjs tauri build --config src-tauri/tauri.full.conf.json"
+    "build": "node scripts/prepare-ffmpeg.mjs && node scripts/msvc-env.mjs tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

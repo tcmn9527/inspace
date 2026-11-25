@@ -4,8 +4,8 @@
  * 用法：
  *   if (!(await confirmDialog({ message: "删除这个块？", danger: true }))) return;
  *
- * 键盘：Enter = 确定，Esc = 取消。点遮罩空白处也算取消。
- */
+ * 键盘：Enter = 确定，Esc = 取消。点遮罩空白处也算取消
+ * （choiceDialog 可以传 dismissible: false 关掉这一条，见那里）。 */
 
 let openDialog = null;
 
@@ -186,6 +186,10 @@ export function choiceDialog({
   message = "",
   note = "",
   options = [],
+  /* 点遮罩空白处算不算取消。默认算（各处选择框的老习惯）；
+     拖文件进来问「拷贝还是引用」那种要设成 false —— 那一下点外面就是把这批文件
+     一起丢了，用户常常只是手滑点到框边上，看着就像「拖进来的文件自己没了」。 */
+  dismissible = true,
 } = {}) {
   openDialog?.(false);
 
@@ -268,9 +272,11 @@ export function choiceDialog({
     };
 
     closeBtn.addEventListener("click", () => finish(null));
-    mask.addEventListener("pointerdown", (e) => {
-      if (!dialog.contains(e.target)) finish(null);
-    });
+    if (dismissible) {
+      mask.addEventListener("pointerdown", (e) => {
+        if (!dialog.contains(e.target)) finish(null);
+      });
+    }
 
     document.body.append(mask);
     document.addEventListener("keydown", onKey, true);

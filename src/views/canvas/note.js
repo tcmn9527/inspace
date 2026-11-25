@@ -31,6 +31,9 @@ export async function startNoteEdit(id) {
         title: "请确认编辑对象",
         message: `「${item.name}」引用的是 ${item.path}。这次编辑要改哪一份？`,
         note: "改源文件会把正文直接写回那份 .md；复制进画布则把正文收进块里，原文件不动，之后随便改。",
+        /* 只能点 × 或 Esc 收起：点框外就当作答会静默取消，
+           双击引用的笔记像没反应一样。要退得让人知道自己按了「算了」。 */
+        dismissible: false,
         options: [
           { value: "write", label: "修改源文件", hint: "直接写回那份 Markdown" },
           { value: "copy", label: "复制进画布", hint: "原文件不动，之后随便改" },
@@ -236,6 +239,8 @@ export async function startFileEdit(id) {
           title: "请确认编辑对象",
           message: `「${item.name}」引用的是 ${item.src}。这次编辑要改哪一份？`,
           note: "改源文件会把整份正文写回那个文件；复制进画布则先把副本收进画布，原文件不动，之后随便改。",
+          /* 同上：点框外就当作答会让双击像没反应，只留 × 和 Esc 两条退出路 */
+          dismissible: false,
           options: [
             { value: "write", label: "修改源文件", hint: "直接写回那份文本" },
             { value: "copy", label: "复制进画布", hint: "原文件不动，编辑画布里的副本" },

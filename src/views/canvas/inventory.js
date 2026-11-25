@@ -450,13 +450,16 @@ export async function addEbookBlock(path, point, mode) {
 /* ---------- 文件块 ---------- */
 
 /* 插东西之前问一句占不占这份磁盘。一批文件只问一次，答案整批通用。
- * 取消返回 null，这批就都不插。 */
+ * 取消返回 null，这批就都不插。
+ * 这个框只能点右上角 × 或按 Esc 收起：点框外就当作答会把整批文件一起丢掉，
+ * 而拖动时手一抖很容易点到框边上（2026-11-25 用户提的）。 */
 export async function askInsertMode(count) {
   const who = count > 1 ? `本批 ${count} 个文件` : "这个文件";
   return choiceDialog({
     title: count > 1 ? `插入 ${count} 个文件` : "插入文件",
     message: `${who}要拷进画布，还是只引用原文件？`,
     note: "拷进来是在磁盘上再存一份，画布自带；只引用不占地方，但原文件挪走或删掉后这里就只剩个占位。",
+    dismissible: false,
     options: [
       { value: "copy", label: "拷进画布", hint: "占磁盘，画布自带这份文件" },
       { value: "link", label: "只引用原文件", hint: "不占磁盘，原文件得留在原地" },

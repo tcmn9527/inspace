@@ -413,7 +413,10 @@ export function refreshGenFeeds() {
 /* 这一轮没出成：把上一次那张接回来显示。文件还在盘上，取景窗不该空着。 */
 export function keepLastGenImage(id) {
   const item = findItem(id);
-  patchGenRun(id, { imageUrl: item && item.src ? imageCache.get(item.src) || "" : "" });
+  /* 块不在当前画布（用户切走了）：手上没有它的 src，就别去动 imageUrl，
+     留着刚才那次真实结果——切回来还要靠它显示 */
+  if (!item) return;
+  patchGenRun(id, { imageUrl: item.src ? imageCache.get(item.src) || "" : "" });
 }
 
 /* 面板的进料口就是连线：谁用线连到这块，谁就是输入图。
@@ -480,6 +483,8 @@ export function runOrStopGen(id) {
     previewUrl: "",
     imageUrl: "",
     error: "",
+    /* 记下这一轮属于哪个画布：跑完时可能已经切到别处了 */
+    canvasId: current?.meta.id || "",
   });
   refreshGenPanel(id);
   void startGenRun(item);
@@ -594,45 +599,57 @@ export async function placeGenImage(id) {
 }
 
 export async function onGenDone(payload) {
-  const item = findItem(payload.block);
-  if (!item) {
-    dropGenRun(payload.block);
-    return;
-  }
+  const id = payload.block;
+  const run = genRunOf(id);
   const dataUrl = payload.dataUrl || "";
-  patchGenRun(payload.block, {
+  /* 结果要落回「发起这一轮的那个画布」：出图是后台跑的，跑完时用户多半已经切走了。
+     那时候 findItem 查不到块——那不叫「块被删了」，只是不在眼前。 */
+  const canvasId = run.canvasId || current?.meta.id || "";
+  patchGenRun(id, {
     phase: dataUrl ? "idle" : "failed",
-    step: payload.steps || item.steps,
+    step: payload.steps || 0,
     seconds: payload.seconds || 0,
     previewUrl: "",
     imageUrl: dataUrl,
     error: dataUrl ? "" : "出图失败：结果是空的",
   });
-  refreshGenPanel(payload.block);
+  refreshGenPanel(id);
   if (!dataUrl) {
-    keepLastGenImage(payload.block);
-    refreshGenPanel(payload.block);
+    keepLastGenImage(id);
+    refreshGenPanel(id);
     return;
   }
-  const canvasId = current?.meta.id;
   const comma = dataUrl.indexOf(",");
   if (!canvasId || comma < 0) return;
   try {
     const rel = await store.saveCanvasImage(canvasId, dataUrl.slice(comma + 1), "png");
-    if (!current || current.meta.id !== canvasId) return;
-    const target = findItem(payload.block);
-    if (!target) {
-      void store.deleteCanvasImage(canvasId, rel, false).catch(() => {});
+    /* 存图也要等，这期间可能又切了一次：按「此刻那块在不在眼前」决定怎么落 */
+    if (current && current.meta.id === canvasId) {
+      const target = findItem(id);
+      if (!target) {
+        /* 块在那个画布里被删了，刚存的图没用了 */
+        void store.deleteCanvasImage(canvasId, rel, false).catch(() => {});
+        dropGenRun(id);
+        return;
+      }
+      const old = target.src;
+      target.src = rel;
+      imageCache.set(rel, dataUrl);
+      /* 上一张没人指着了才回收：跟删块同一套，当场进回收站 */
+      if (old && old !== rel && !srcInUse(old)) {
+        void store.deleteCanvasImage(canvasId, old, false).catch(() => {});
+      }
+      scheduleItemsSave();
       return;
     }
-    const old = target.src;
-    target.src = rel;
-    imageCache.set(rel, dataUrl);
-    /* 上一张没人指着了才回收：跟删块同一套，当场进回收站 */
-    if (old && old !== rel && !srcInUse(old)) {
-      void store.deleteCanvasImage(canvasId, old, false).catch(() => {});
+    /* 那块不在眼前：只改那个画布里这一块的一条 src。
+       不能走整份读-改-写——用户可能正在那画布上动别的块，会被盖掉。
+       旧图这里不回收：srcInUse 查的是当前画布，拿它去判会把别人在用的图删了。 */
+    const ok = await store.patchCanvasItem(canvasId, id, { src: rel });
+    if (!ok) {
+      void store.deleteCanvasImage(canvasId, rel, false).catch(() => {});
+      dropGenRun(id);
     }
-    scheduleItemsSave();
   } catch (error) {
     showError(error);
   }
@@ -644,13 +661,16 @@ export function setupGenEvents() {
   const on = (name, handler) => {
     Promise.resolve(listen(name, (event) => handler(event?.payload))).catch(() => {});
   };
+  /* 这几条都**不能**拿 findItem 判断块在不在：出图是后台跑的，用户随时可能切到
+     别的画布，那时 findItem 一律返回 null，进度和成品就被当成「块没了」丢掉。
+     运行态 runs 是按块 id 存的，跨画布本来就在；面板刷新对「块不在眼前」也容错。 */
   on("gen-progress", (payload) => {
-    if (!payload || !findItem(payload.block)) return;
+    if (!payload?.block) return;
     patchGenRun(payload.block, { phase: "running", step: payload.step, steps: payload.steps });
     refreshGenPanel(payload.block);
   });
   on("gen-preview", (payload) => {
-    if (!payload || !findItem(payload.block)) return;
+    if (!payload?.block) return;
     patchGenRun(payload.block, {
       phase: "running",
       step: payload.step,
@@ -663,11 +683,7 @@ export function setupGenEvents() {
     if (payload) void onGenDone(payload);
   });
   on("gen-failed", (payload) => {
-    if (!payload) return;
-    if (!findItem(payload.block)) {
-      dropGenRun(payload.block);
-      return;
-    }
+    if (!payload?.block) return;
     patchGenRun(payload.block, {
       phase: payload.canceled ? "canceled" : "failed",
       error: payload.error || "",

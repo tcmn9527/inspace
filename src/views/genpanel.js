@@ -16,6 +16,9 @@ const IDLE_RUN = {
   previewUrl: "",
   imageUrl: "",
   error: "",
+  /* 这一轮是在哪个画布里发起的：出图是后台跑的，跑完时用户可能已经切走了，
+     结果得落回发起时那一份，不能按「当前打开的画布」算 */
+  canvasId: "",
 };
 
 export function genRunOf(id) {

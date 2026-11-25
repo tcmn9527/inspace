@@ -955,6 +955,47 @@ pub fn canvas_save_items(
     write_json(&path, &items)
 }
 
+/// 只改一块上的几个字段，别的块一个字节都不动。
+/// 生图是后台跑的：出图时用户很可能已经切到别的画布了，结果还得落回发起时那一份，
+/// 走整份读-改-写会把用户同时在那画布上的改动盖掉，所以单独开这一条。
+/// 返回这块在不在（不在了就说明被删了，调用方该把结果丢掉）。
+#[tauri::command]
+pub fn canvas_patch_item(
+    id: String,
+    block: String,
+    patch: Value,
+    state: tauri::State<'_, CanvasState>,
+) -> Result<bool, String> {
+    let Some(patch) = patch.as_object() else {
+        return Err("patch 必须是个对象".to_string());
+    };
+    let dir = resolve_dir(&state, &id)?;
+    let path = dir.join(ITEMS_FILE);
+    let Ok(text) = fs::read_to_string(&path) else {
+        // 还没落过盘就是还没有块
+        return Ok(false);
+    };
+    let mut items: Value =
+        serde_json::from_str(&text).map_err(|e| format!("items.json 读不出来：{e}"))?;
+    let Some(list) = items.as_array_mut() else {
+        return Err("items.json 不是数组".to_string());
+    };
+    let Some(item) = list
+        .iter_mut()
+        .find(|it| it.get("id").and_then(Value::as_str) == Some(block.as_str()))
+    else {
+        return Ok(false);
+    };
+    let Some(target) = item.as_object_mut() else {
+        return Ok(false);
+    };
+    for (key, value) in patch {
+        target.insert(key.clone(), value.clone());
+    }
+    write_json(&path, &items)?;
+    Ok(true)
+}
+
 #[tauri::command]
 pub fn canvas_save_camera(
     id: String,

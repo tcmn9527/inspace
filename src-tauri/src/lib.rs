@@ -236,6 +236,7 @@ pub fn run() {
             canvas::canvas_create,
             canvas::canvas_open,
             canvas::canvas_save_items,
+            canvas::canvas_patch_item,
             canvas::canvas_search,
             canvas::canvas_save_camera,
             canvas::canvas_set_page_width,

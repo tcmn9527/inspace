@@ -8,6 +8,9 @@ export const canvasTree = () => invoke("canvas_tree");
 export const createCanvas = (name, parent) => invoke("canvas_create", { name, parent: parent || null });
 export const openCanvas = (id) => invoke("canvas_open", { id });
 export const saveCanvasItems = (id, items) => invoke("canvas_save_items", { id, items });
+/* 只改一块的几个字段：后台跑完的生图结果要落回「发起时那个画布」，
+   而那画布可能已经不在前台了，不能走整份覆盖 */
+export const patchCanvasItem = (id, block, patch) => invoke("canvas_patch_item", { id, block, patch });
 export const saveCanvasCamera = (id, camera) => invoke("canvas_save_camera", { id, camera });
 /* 固定页面宽度：传 null 退回无限画布 */
 export const saveCanvasPageWidth = (id, pageWidth) => invoke("canvas_set_page_width", { id, pageWidth });

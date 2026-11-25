@@ -742,7 +742,7 @@ block_create {type:"gen", x, y, w, h, prompt, imageW, imageH, mode}。
 
 ### gen_run：一条命令出一张
 gen_run {id, prompt} 默认等到出完再回（远端一张几十秒）。返回里 phase 回到 idle、seconds 是这一张花了多久，src 是这张图在这个画布 images/ 里的相对路径。
-- 并行上限在设置 → 图片生成里配（1–10），满了会报「API 并行已满」，先 gen_cancel 或等一个跑完。
+- 并行上限在设置 → AI 图片里配（1–10），满了会报「API 并行已满」，先 gen_cancel 或等一个跑完。
 - 想边跑边干别的就 wait:false 只起一轮，之后看 phase。
 - timeout 默认 300 秒、最大 600；到点返回 timedOut:true，图还在后台跑，用 gen_status 接着问。
 
@@ -768,7 +768,7 @@ gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一�
 - gen_cancel {id} 只是「回来不要这张」，HTTP 请求本身掐不断；界面立刻显示已取消，请求回来那张作废丢弃。
 
 ### 配置归用户
-接口地址、Key、模型名、并行数都只在设置 → 图片生成里改：agent 不代填、也读不到 Key。要提醒用户去补配置时，就把 apiProblem 那句话原样转述。`,
+接口地址、Key、模型名、并行数都只在设置 → AI 图片里改：agent 不代填、也读不到 Key。要提醒用户去补配置时，就把 apiProblem 那句话原样转述。`,
   },
   {
     id: "video",
@@ -776,7 +776,7 @@ gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一�
     body: `## 视频生成：文生视频 / 图生视频
 
 ### 只走远端 API
-本地视频模型已经移除，生成一律走设置 → 视频生成里配好的接口，需要协议、Key 和模型。三家协议：
+本地视频模型已经移除，生成一律走设置 → AI 视频里配好的接口，需要协议、Key 和模型。三家协议：
 - **openai**（OpenAI videos 兼容：Sora 2、Azure、聚合网关、vLLM-Omni）：
   提交 POST /videos，带首帧图时 multipart 的 input_reference，轮询 /videos/{id}，/content 下载。
 - **minimax**（海螺）：/v1/video_generation，首帧走 first_frame_image，直接吃 base64 Data URL。
@@ -788,7 +788,7 @@ gen_screenshot {id} 返回一张 PNG——成品，或者正在跑时的那一�
   "firstFrame": "<图片块 id 或 PNG base64>", "seconds": 6, "ratio": "16:9" }
 ~~~
 - firstFrame 给块 id（图片块、画面块、已出图的生图面板）或直接给 base64；不给就是文生视频。
-- 可以并行跑多条（条数在设置 → 视频生成里配，1–10），同时在跑的条数超过上限会直接报回。
+- 可以并行跑多条（条数在设置 → AI 视频里配，1–10），同时在跑的条数超过上限会直接报回。
 - 平台任务通常 1-5 分钟。默认等 600 秒；到点返回 timedOut:true，任务还在平台跑，用 gen_video_status 接着看。
 - 返回的 path 是 gen/videos/ 下的缓存文件绝对路径（截图/预览可以直接用它）。
 

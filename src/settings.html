@@ -35,8 +35,8 @@
       <nav class="settings-nav" id="settings-nav" aria-label="设置分类">
         <button class="settings-nav-item" data-pane="theme" type="button">主题</button>
         <button class="settings-nav-item" data-pane="data" type="button">数据文件夹</button>
-        <button class="settings-nav-item" data-pane="gen" type="button">图片生成</button>
-        <button class="settings-nav-item" data-pane="video" type="button">视频生成</button>
+        <button class="settings-nav-item" data-pane="gen" type="button">AI 图片</button>
+        <button class="settings-nav-item" data-pane="video" type="button">AI 视频</button>
         <button class="settings-nav-item" data-pane="assistant" type="button">AI 助手</button>
         <button class="settings-nav-item" data-pane="cosmos" type="button" hidden>宇宙主题</button>
         <button class="settings-nav-item" data-pane="mcp" type="button">Agent 连接（MCP）</button>
@@ -74,7 +74,7 @@
 
         <section class="settings-pane" data-pane="gen" hidden>
           <div class="settings-card" id="settings-gen-card">
-            <p class="settings-title">图片生成</p>
+            <p class="settings-title">AI 图片</p>
             <div class="settings-gen-api" id="settings-gen-api">
               <label class="settings-field">
                 <span>协议</span>
@@ -110,7 +110,7 @@
 
         <section class="settings-pane" data-pane="video" hidden>
           <div class="settings-card" id="settings-video-card">
-            <p class="settings-title">视频生成</p>
+            <p class="settings-title">AI 视频</p>
             <div class="settings-video-cloud" id="settings-video-cloud">
               <p class="settings-hint">
                 文生视频、图生视频都走远端 API，没有本地模型这一档。海螺和 OpenAI 协议直接吃画布上的首帧图；万相和百炼可灵只收公网图片 URL，本地首帧暂不支持。任务提交后服务端停不掉，按秒计费。并行数 = 同时最多跑几条（1–10）。

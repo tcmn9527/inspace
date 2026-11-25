@@ -848,7 +848,7 @@ const TOOL_DEFS = [
     id: { type: "string", description: "生图面板块 id；不给就停正在跑的那一块" },
   }),
   def("gen_place", "把一块生图面板最近出的那张落成一块独立图片块，落在面板右边。落出去的是复制：面板接着显示它那张、也接着能改词重出，图片块自己带一份文件，删哪一块都不影响另一块。", { id: ID }, ["id"]),
-  def("gen_video", "生成一条视频（文生视频 / 图生视频），走设置里配好的远端 API 协议（没有本地模型这一档）。并行条数在设置 → 视频生成里配（1–10）；平台是异步任务，通常 1-5 分钟。firstFrame 给画布块 id（图片块、画面块、已出图的生图面板）或直接给 PNG 的 base64/data URL，给了就是图生视频；DashScope 协议（万相/百炼可灵）只收公网图片 URL，本地首帧会被拒。给了 block（genvideo 面板 id）就按面板走：提示词/秒数/尺寸/首帧优先用面板上的，状态和结果也写回面板，出完可 gen_video_place 落块。返回视频缓存文件的绝对路径（gen/videos/ 下）。等太久到 timeout 返回 timedOut:true，任务还在平台那边跑，用 gen_video_status 接着看。", {
+  def("gen_video", "生成一条视频（文生视频 / 图生视频），走设置里配好的远端 API 协议（没有本地模型这一档）。并行条数在设置 → AI 视频里配（1–10）；平台是异步任务，通常 1-5 分钟。firstFrame 给画布块 id（图片块、画面块、已出图的生图面板）或直接给 PNG 的 base64/data URL，给了就是图生视频；DashScope 协议（万相/百炼可灵）只收公网图片 URL，本地首帧会被拒。给了 block（genvideo 面板 id）就按面板走：提示词/秒数/尺寸/首帧优先用面板上的，状态和结果也写回面板，出完可 gen_video_place 落块。返回视频缓存文件的绝对路径（gen/videos/ 下）。等太久到 timeout 返回 timedOut:true，任务还在平台那边跑，用 gen_video_status 接着看。", {
     prompt: { type: "string", description: "视频要什么：画面、动作、镜头；挂面板时可省略，用面板上的提示词" },
     block: { type: "string", description: "genvideo 面板块 id：给了就按面板的参数和首帧跑，状态/结果写回面板" },
     firstFrame: { type: "string", description: "首帧图：画布块 id，或 PNG 的 base64 / data URL；不给就是文生视频" },
@@ -863,7 +863,7 @@ const TOOL_DEFS = [
   def("gen_video_cancel", "取消正在等的一条视频任务。id 点名一块（并行时各停各的），不给就停正在跑的第一条。注意：任务提交后平台停不掉，费用照算，这里只是本地不再等。", {
     id: { type: "string", description: "genvideo 面板块 id；不给就停正在跑的那一条" },
   }),
-  def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen 图片生成、video 视频生成、mcp Agent 连接、shortcuts 快捷键。", {
+  def("open_settings", "打开设置窗口，可以指定页面：theme 主题、data 数据文件夹、gen AI 图片、video AI 视频、mcp Agent 连接、shortcuts 快捷键。", {
     page: {
       type: "string",
       enum: ["theme", "data", "gen", "video", "assistant", "mcp", "shortcuts"],

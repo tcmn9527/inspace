@@ -1284,7 +1284,7 @@ function renderSkills(skills) {
   if (!skills.length) {
     const empty = document.createElement("p");
     empty.className = "settings-hint";
-    empty.textContent = "还没有技能。在对话里让助手装一个，装好的会出现在这里。";
+    empty.textContent = "还没有技能。";
     ui.skillList.append(empty);
     return;
   }

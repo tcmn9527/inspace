@@ -10,7 +10,7 @@
 import { choiceDialog, confirmDialog, progressDialog } from "./dialog.js";
 import { currentTheme } from "./theme.js";
 import { cosmosRoute, cosmosRouteSet } from "./cosmos.js";
-import { assistantApiConfig, assistantApiSet, assistantModelVision, assistantModels, skillDelete, skillsDir, skillsList } from "./assistant-store.js";
+import { assistantApiConfig, assistantApiSet, assistantModelVision, assistantModels, skillDelete, skillsList } from "./assistant-store.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emitTo } = window.__TAURI__.event;
@@ -122,7 +122,6 @@ export function initSettings(options = {}) {
   ui.assistantStatus = document.querySelector("#settings-assistant-status");
   ui.assistantError = document.querySelector("#settings-assistant-error");
   ui.skillList = document.querySelector("#settings-skill-list");
-  ui.skillDir = document.querySelector("#settings-skill-dir");
 
   ui.pick.addEventListener("click", pickRoot);
   ui.reveal.addEventListener("click", reveal);
@@ -199,11 +198,6 @@ export function initSettings(options = {}) {
   });
   ui.assistantModelsBtn.addEventListener("click", () => reloadAssistantModels());
   ui.assistantTest.addEventListener("click", () => testAssistant());
-  /* 技能不在这儿装：安装走对话（助手有 skill_install / skill_save），
-     这一页只负责把装好的列出来、能删掉，外加一个看文件的入口 */
-  ui.skillDir?.addEventListener("click", () => {
-    skillsDir().then((dir) => invoke("canvas_export_reveal", { path: dir })).catch((error) => showAssistantError(String(error)));
-  });
   setupMoveEvents();
   setupCosmosEvents();
   setupRoute();
@@ -1281,13 +1275,9 @@ async function testAssistant() {
 function renderSkills(skills) {
   if (!ui.skillList) return;
   ui.skillList.replaceChildren();
-  if (!skills.length) {
-    const empty = document.createElement("p");
-    empty.className = "settings-hint";
-    empty.textContent = "还没有技能。";
-    ui.skillList.append(empty);
-    return;
-  }
+  /* 没有技能就什么都不画：上面那句「可以通过 AI 助手或者 MCP 安装技能」
+     已经说清了，再补一句「还没有技能」只是重复 */
+  if (!skills.length) return;
   for (const skill of skills) {
     const row = document.createElement("div");
     row.className = "settings-skill";

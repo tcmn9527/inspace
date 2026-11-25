@@ -222,10 +222,25 @@ pub fn assistant_skill_import(app: tauri::AppHandle, from: String) -> Result<Ski
     }
     let text = fs::read_to_string(&file).map_err(|e| format!("读不了 SKILL.md：{e}"))?;
     let (name, description) = frontmatter(&text);
-    let fallback = source
-        .file_name()
-        .map(|value| value.to_string_lossy().to_string())
-        .unwrap_or_else(|| "导入的技能".to_string());
+    /* 技能文件夹里那份文件固定叫 SKILL.md，拿它当技能名没意义：文件正好是
+       SKILL.md 时退到上一级目录名，其它 .md（「公众号排版.md」）才用自己的文件名。 */
+    let fallback = if source.is_dir() {
+        source
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+    } else {
+        let stem = source
+            .file_stem()
+            .map(|value| value.to_string_lossy().to_string());
+        match stem {
+            Some(stem) if !stem.eq_ignore_ascii_case("skill") => Some(stem),
+            _ => source
+                .parent()
+                .and_then(|dir| dir.file_name())
+                .map(|value| value.to_string_lossy().to_string()),
+        }
+    }
+    .unwrap_or_else(|| "导入的技能".to_string());
     let name = if name.is_empty() { fallback } else { name };
     assistant_skill_save(app, None, name, description, text)
 }

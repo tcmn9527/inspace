@@ -951,6 +951,17 @@ const TOOL_DEFS = [
     },
     ["name", "content"],
   ),
+  def(
+    "skill_install",
+    "把一个现成的技能装进来（用户下载了 SKILL.md 或技能文件夹时用）：path 给本机绝对路径，文件或文件夹都行；名字取 frontmatter 里的 name，没有就用文件名/文件夹名。装完在设置 → AI 助手 → 技能里能看到，也能在那里删。内容要现写就用 skill_save，不用这个。",
+    {
+      path: {
+        type: "string",
+        description: "本机 SKILL.md 的绝对路径，或装着 SKILL.md 的文件夹",
+      },
+    },
+    ["path"],
+  ),
   def("note_read", "读笔记块的 Markdown 正文。", { id: ID }, ["id"]),
   def("note_write", "写笔记块的 Markdown 正文；引用外部 .md 的块会把正文写回原文件。", {
     id: ID,
@@ -1575,6 +1586,8 @@ async function dispatch(name, args) {
         description: args.description,
         content: args.content,
       });
+    case "skill_install":
+      return canvasAgent.skillImport(args.path);
     case "note_read":
       return onCanvas(args, () => canvasAgent.noteRead(args.id));
     case "note_write":

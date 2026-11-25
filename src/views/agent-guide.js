@@ -943,7 +943,7 @@ article_export {format} 支持 wechat / toutiao / xiaohongshu / html / png / pdf
   {
     id: "skill",
     title: "技能",
-    body: `## 技能（3 个工具）
+    body: `## 技能（4 个工具）
 
 技能就是一份 SKILL.md：数据根 assistant/skills/<id>/SKILL.md，开头 frontmatter 写 name / description，
 后面是给模型看的指令正文。装上的技能只把「名字 + 一句话说明」放进系统提示，正文按需读。
@@ -953,8 +953,13 @@ article_export {format} 支持 wechat / toutiao / xiaohongshu / html / png / pdf
 - 任务正好对上某一项，先 skill_read 拿全文再照做，不要凭名字猜步骤；
 - 用户点名「用 XX 技能」时直接 skill_read 那一项。
 
-### 存新的
-一套流程跑通后，用户说「存成技能」就调 skill_save：
+### 装新的：两条路，别让用户自己在设置里点
+- **用户手上有文件**（下载的 SKILL.md，或装着 SKILL.md 的文件夹）→ skill_install {path}，
+  path 给本机绝对路径。名字取 frontmatter 的 name，没有就用文件名 / 文件夹名。
+- **流程刚跑通，用户说「存成技能」** → skill_save 现写一份（见下）。
+- 装完说一句「装好了，设置 → AI 助手 → 技能 里能看到，也能在那删」，别让用户去找导入按钮 —— 没有那个按钮。
+
+### 存新的（skill_save）
 - name 取一眼能看懂的名字（同时决定目录名）；
 - description 写「什么情况下该用」，以后能不能被认出来全靠这一句；
 - content 写成能照着做的步骤，带上用到的工具名和关键参数；

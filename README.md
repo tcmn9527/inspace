@@ -1,52 +1,29 @@
 # 无限画布 (inspace)
 
-一个基于 Tauri v2 的桌面应用：一个可无限扩展的画布，数据全部存在本机。
+<img width="1511" height="958" alt="1795699889077" src="https://github.com/user-attachments/assets/7a1da0ae-037d-475f-8491-b758ed5baa82" />
 
-前端是原生 ES 模块 + Vite，没有引入框架；后端在 `src-tauri/`，负责文件存储、媒体导入等。
+## 1：画布的随意缩放
+给AI随意发挥的场地，画布是最合适的，看起来就像无限大，无限缩放。
 
-## 功能
+## 2：任意文件都能放进去
 
-- **画布**
-  - 多个画布，相机缩放/平移位置各自会记住。
-  - 图元：图片、音频、视频、任意文件、笔记卡、电子书（epub/mobi）、文本框、方框、连线。
-  - 拖入文件时选择「拷贝进画布」或「引用原文件」；引用的 `.md` 在画布内编辑会写回原文件。
-  - 复制粘贴出来的块各带一份自己的副本，改新的不动旧的。
-  - 右下角鸟瞰窗跳视、左下角坐标条、拖动吸附对齐。
-  - 删除媒体副本走系统回收站。
-- **本地数据**：画布都存在一个数据根目录，默认在应用数据目录下的 `data/`，可在设置页整体更换（支持搬运并显示进度）。
+能承载任何文件，矩形块、圆形块、横线、箭头、文字块、涂画块、任意文本文件（markdown、txt、html、css、java等等能想到的文件都支持展示）、图片（各种格式都能拖进去展示）、音乐（任意音乐文件格式，还支持播放）、视频（任意视频格式，即使那个高清的50GB大小的mkt视频格式也支持拖进来播放）
 
-## 开发
+## 3：文生图、图生图、参考图编辑
 
-需要 Node.js 18+、Rust stable，以及 Tauri 在 Windows 上的构建依赖（WebView2、MSVC 工具链）。
+文生图、图生图以及参考图编辑，需要配置api
 
-```bash
-npm install
-npm run tauri dev      # 开发模式，Vite 端口 1430
-npm run build          # 打包安装包（自带 ffmpeg，装完机不用再折腾）
-npm run ffmpeg:prepare # 只准备 ffmpeg 组件到 src-tauri/resources/components/ffmpeg
-```
+## 4：软件内AI助手
 
-打包固定包含 ffmpeg：`npm run build` 会先跑 `ffmpeg:prepare` 把 `ffmpeg.exe` 放进
-`src-tauri/resources/components/ffmpeg/`，`tauri.conf.json` 的 bundle.resources 把它装进
-`components\ffmpeg\`，后端探测 ffmpeg 时第一档就是那儿。离线打包可以先自己下载
-ffmpeg.exe，再 `FFMPEG_EXE=<路径> npm run ffmpeg:prepare`。
+AI助手可以操控无限画布的所有功能
 
-## 目录
+## 5：功能全都对外，别的任意agent都能操作这个画布
 
-```
-src/                 前端
-  views/             各页面与画布图元/交互
-  styles.css         全部样式
-src-tauri/           Rust 后端
-  src/canvas.rs      画布读写、媒体与文件命令
-  src/ebook.rs       epub/mobi 解析
-  src/store.rs       数据根目录与迁移
-scripts/             构建辅助脚本
-```
+所有功能都已经通过mcp暴露给外部，外部任意agent都可以操作画布上的功能
 
-## 安装包
+## 6：画布不上云，纯本地，纯文件
 
-Releases 里提供两个 Windows x64 安装包：普通版需要系统里能装 WebView2（Win10/11 一般自带），完整版内置 ffmpeg 组件，拖入视频后无需额外配置。首次打开如果提示缺少 WebView2，装一下微软的运行时即可。
+每一个画布都是本地一个文件夹，文件夹中有配置文件，有图片，可以任意导出，也可以任意导入，也可以将导出的文件备份到任何地方
 
 ## 许可证
 

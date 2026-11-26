@@ -105,13 +105,34 @@ export function reassignContainerOwners(items) {
   }
 }
 
-/* 这块归不归 container 管：没主或认的就是它；认了别的容器、但那个容器
-   本身就在这个框里（嵌套）时算它管。拖动和树里的展开用同一套判定。 */
+/* 这块归不归 container 管：认的就是它 → 归它；认了别的容器、但那个容器本身在这个框里
+   （嵌套）→ 也算它管。
+   没主的（往框里新插的块、老数据）不能谁框着它就算谁的：两个容器重叠时会被
+   新容器抢走。正主取「最小（最内层）、一样大就先建的」那个容器；外层拖动时靠
+   「正主嵌在我里面」把内层的成员一起带走。拖动和树里的展开用同一套判定。 */
 export function ownedByContainer(item, container, box) {
   const owner = item.containerId;
-  if (!owner || owner === container.id) return true;
-  const ownerItem = findItem(owner);
-  return !ownerItem || insideBox(ownerItem, box);
+  if (owner === container.id) return true;
+  const ownerItem = owner ? findItem(owner) : null;
+  if (ownerItem) return insideBox(ownerItem, box);
+
+  /* 没主、或者原来的容器已经不在了：从所有框着它的容器里挑正主 */
+  let primary = null;
+  let primaryBox = null;
+  if (current) {
+    for (const other of current.items) {
+      if (!isContainer(other)) continue;
+      const otherBox = containerBoxOf(other);
+      if (!otherBox || !insideBox(item, otherBox)) continue;
+      if (!primary || otherBox.w * otherBox.h < primaryBox.w * primaryBox.h) {
+        primary = other;
+        primaryBox = otherBox;
+      }
+    }
+  }
+  if (!primary || primary.id === container.id) return true;
+  /* 正主嵌在我里面：拖外层时连内层的成员一起走 */
+  return insideBox(primary, box);
 }
 
 /* 容器自己认的成员（几何在框里 + 归属不是别的容器）。拖动、复制、删除都用它；

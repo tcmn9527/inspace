@@ -1,6 +1,7 @@
 /* 从 canvas.js 拆出：copy-paste */
 
 import { AUDIO_EXTS, BATCH_GAP, EBOOK_EXTS, GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, IMAGE_EXTS, VIDEO_EXTS, active, addAudioBlock, addDroppedFile, addEbookBlock, addItemElement, addVideoBlock, applyCamera, applyGenDefaultsToItem, askInsertMode, boundsOfItem, clientToWorld, collectPictureImageSrcs, commitEditing, containerBoxOf, current, edgeLabelEditor, editingId, fitImageSize, flushItems, imageCache, insertPoint, insideBox, isContainer, itemBounds, lastPointer, makeGen, makeImage, makeText, modalOpen, newId, normalizeItem, ownedMembers, pasteAudio, pasteImage, placeBlock, remapPictureImageSrcs, replaceSelection, scheduleCameraSave, scheduleItemsSave, select, selectedIds, showError, store, syncSelectedClasses, ui, updateSelection, worldToStage } from "../canvas.js";
+import { rebuildContainerOwners } from "../canvas.js";
 import { clampXToPage } from "./page-width.js";
 
 /* ---------- 复制 / 粘贴块 ----------
@@ -240,6 +241,10 @@ export async function pasteBlocks(payload) {
       }
     }
   }
+  /* 新容器只偏移 24px，和老容器高度重叠。老容器里后来插进去的块没有 containerId，
+     不收敛的话会被新容器当成自己的成员，拖新容器把老块一起拖走。
+     这里按容器顺序先到先得地把所有无主块认回各自的框。 */
+  rebuildContainerOwners();
   replaceSelection(new Set(placed.map((item) => item.id)));
   syncSelectedClasses();
   updateSelection();

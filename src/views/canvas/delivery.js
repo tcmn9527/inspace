@@ -3,6 +3,7 @@
 import { BORDER_MAX_WIDTH, ratio } from "../canvas-items.js";
 import { toggleContainer } from "./containers.js";
 import { clampXToPage } from "./page-width.js";
+import { rebuildContainerOwners } from "../canvas.js";
 import { BORDER_DEFAULT_WIDTH } from "../canvas-items.js";
 import { GEN_DEFAULT_HEIGHT, GEN_DEFAULT_WIDTH, GEN_MIN_HEIGHT, GEN_MIN_WIDTH, GEN_TEXT_MAX, NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, NOTE_MIN_HEIGHT, NOTE_MIN_WIDTH, PAGE_RATIOS, PICTURE_DEFAULT_HEIGHT, PICTURE_DEFAULT_WIDTH, PICTURE_MAX_CMDS, PICTURE_MIN_HEIGHT, PICTURE_MIN_WIDTH, PLAN_DEFAULT_HEIGHT, PLAN_DEFAULT_WIDTH, PLAN_MIN_HEIGHT, PLAN_MIN_WIDTH, PRODUCT_DEFAULT_HEIGHT, PRODUCT_DEFAULT_WIDTH, PRODUCT_MIN_HEIGHT, PRODUCT_MIN_WIDTH, QUOTE_DEFAULT_HEIGHT, QUOTE_DEFAULT_WIDTH, QUOTE_MIN_HEIGHT, QUOTE_MIN_WIDTH, TEXT_DEFAULT_WIDTH, addItemElement, agentFindSpace, agentImportFile, agentOpenSpace, agentPlacePoint, agentRequireItem, agentRequireSpace, agentSummary, applyColor, applyGenDefaultsToItem, applyGenFields, applyProductFields, boundsOfItem, bytesToBase64, clamp, commitEditing, connectorGeometry, current, deleteItems, edgeLabelEditor, editingId, exporter, findItem, fitGenPrompt, flushBlockContents, flushItems, hydrateNoteImages, imageCache, imageSize, itemBounds, itemEls, landBlock, makeBox, makeConnector, makeGen, makeLine, makeNote, makePage, makePicture, makePlan, makeProduct, makeQuote, makeText, makeVideoGen, mergePictureSymbols, moveLayer, newId, normalizeConnectorPoints, normalizeHidden, normalizeItem, normalizeLight, normalizePictureCmds, normalizePictureSymbols, numOr, persistGen, persistNote, persistPicture, pictureWashed, pinConnectorSides, placeBlock, promptDialog, refreshConnectors, refreshGenPanel, refreshPictureChrome, refreshQuotes, refreshTree, refreshVideoPanel, rejectFatalDrop, renderMarkdown, replaceSelection, resolvePictureImages, scheduleItemsSave, select, selectedIds, setFontSize, setTextAlign, stageCenterWorld, store, syncConnectorElement, syncItemElement, syncSelectedClasses, updateSelection } from "../canvas.js";
 
@@ -709,7 +710,9 @@ export async function agentDuplicateBlock(id, patch = {}) {
   const fromId = current.meta.id;
   const sourceId = source.id;
   if (elsewhere) await agentOpenSpace(target.id);
-  const item = normalizeItem({ ...raw, id: newId(), seq: 0, z: null });
+  /* 副本不能继承原块的 containerId：跨画布时那个容器根本不存在，同画布也会
+     造成两个容器抢同一批子块。落点定好之后按新位置重新认主。 */
+  const item = normalizeItem({ ...raw, id: newId(), seq: 0, z: null, containerId: "" });
   if (!item) throw new Error("这块没法复制");
   if (elsewhere) {
     /* 目标画布没有「原块右下一格」这回事：给了落点就照着摆，没给就摆在镜头正中 */
@@ -736,6 +739,7 @@ export async function agentDuplicateBlock(id, patch = {}) {
   const ok = await landBlock(item, fromId, sourceId);
   if (!ok) throw new Error("复制失败：源文件已经不在了");
   const placed = placeBlock(item);
+  rebuildContainerOwners();
   return elsewhere ? { ...agentSummary(placed), space: { id: target.id, name: target.name } } : agentSummary(placed);
 }
 
